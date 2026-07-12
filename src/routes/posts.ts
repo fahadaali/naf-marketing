@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
+import { hasPermission } from '../permissions';
 import { newId, nowIso } from '../util';
 import { generateText } from '../services/claude';
 import { transition, type Action } from '../services/workflow';
@@ -151,6 +152,33 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   await c.env.DB.prepare(`UPDATE content_posts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...binds)
     .run();
+  return c.json({ ok: true });
+});
+
+// حذف منشور — الكاتب يحذف مسوّداته (مسودة/مرفوض)، والمدير العام يحذف أي محتوى.
+// يحذف كل التوابع صراحةً (نسخ/جداول/موافقات/تحليلات) ويفصل ربط الأخبار.
+postRoutes.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  const user = c.get('user');
+  const post = await c.env.DB.prepare('SELECT author_id, status FROM content_posts WHERE id = ?')
+    .bind(id)
+    .first<{ author_id: string; status: string }>();
+  if (!post) return c.json({ error: 'غير موجود' }, 404);
+
+  const isGM = await hasPermission(c.env, user.role_name, 'content.approve_final');
+  const isOwnerDraft = post.author_id === user.id && ['draft', 'rejected'].includes(post.status);
+  if (!isGM && !isOwnerDraft) {
+    return c.json({ error: 'لا يمكنك حذف هذا المحتوى (يمكن للكاتب حذف مسوّداته فقط)' }, 403);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE news_items SET converted_post_id = NULL WHERE converted_post_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM analytics_snapshots WHERE post_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM approvals WHERE post_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM schedules WHERE post_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM post_variants WHERE post_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM content_posts WHERE id = ?').bind(id),
+  ]);
   return c.json({ ok: true });
 });
 

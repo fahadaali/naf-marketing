@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId } from '../util';
-import { refreshAllFeeds } from '../services/rss';
+import { refreshAllFeeds, refreshOneFeed } from '../services/rss';
 import { generateText } from '../services/claude';
 
 export const rssRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -29,7 +29,9 @@ rssRoutes.post('/feeds', requirePermission('settings.manage'), async (c) => {
   } catch {
     return c.json({ error: 'الخلاصة مضافة مسبقاً' }, 400);
   }
-  return c.json({ ok: true, id });
+  // جلب فوري كي تظهر الأخبار مباشرةً، مع إعادة تشخيص أي فشل في الجلب
+  const result = await refreshOneFeed(c.env, id);
+  return c.json({ ok: true, id, result });
 });
 
 rssRoutes.delete('/feeds/:id', requirePermission('settings.manage'), async (c) => {
@@ -39,8 +41,8 @@ rssRoutes.delete('/feeds/:id', requirePermission('settings.manage'), async (c) =
 
 // تحديث فوري (سحب يدوي) — إضافةً إلى Cron الدوري
 rssRoutes.post('/refresh', requirePermission('settings.manage'), async (c) => {
-  const added = await refreshAllFeeds(c.env);
-  return c.json({ ok: true, added });
+  const { added, feeds } = await refreshAllFeeds(c.env);
+  return c.json({ ok: true, added, feeds });
 });
 
 // قائمة الأخبار المجلوبة

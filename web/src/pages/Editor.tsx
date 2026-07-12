@@ -92,6 +92,40 @@ export default function Editor() {
     }
   }
 
+  async function publishNow() {
+    if (!postId) return;
+    const pending = schedules.filter((s) => ['pending', 'failed'].includes(s.status));
+    const earliest = pending
+      .map((s) => new Date(s.scheduled_at).getTime())
+      .sort((a, b) => a - b)[0];
+    const isEarly = earliest && earliest > Date.now();
+    const when = earliest ? formatRiyadh(new Date(earliest).toISOString()) : '';
+    const confirmMsg = isEarly
+      ? `تنبيه: الموعد المجدول لم يحن بعد (${when}).\nهل تريد النشر الآن فوراً على أي حال؟`
+      : 'تأكيد النشر الآن؟';
+    if (!confirm(confirmMsg)) return;
+    setErr(''); setMsg('');
+    try {
+      const d = await api.post('/schedules/publish-now', { post_id: postId });
+      await loadPost(postId);
+      setStatus('published');
+      setMsg(`تم النشر الآن (${d.published} منصة)` + (d.early ? ' — قبل الموعد' : ''));
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  async function deletePost() {
+    if (!postId) return;
+    if (!confirm('حذف هذا المحتوى نهائياً؟ لا يمكن التراجع.')) return;
+    try {
+      await api.del(`/posts/${postId}`);
+      navigate('/posts');
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
   async function uploadMedia(file: File) {
     const form = new FormData();
     form.append('file', file);
@@ -198,8 +232,14 @@ export default function Editor() {
               {['approved', 'scheduled'].includes(status) && can('content.schedule') && (
                 <button className="btn gold" onClick={() => setShowSchedule(true)}>🗓️ جدولة النشر</button>
               )}
+              {status === 'scheduled' && can('content.approve_final') && schedules.some((s) => ['pending', 'failed'].includes(s.status)) && (
+                <button className="btn success" onClick={publishNow}>🚀 نشر الآن</button>
+              )}
               {status === 'published' && can('content.approve_final') && (
                 <button className="btn ghost" onClick={() => doAction('archive')}>🗄️ أرشفة</button>
+              )}
+              {postId && (can('content.approve_final') || (['draft', 'rejected'].includes(status))) && (
+                <button className="btn danger" onClick={deletePost}>🗑️ حذف المحتوى</button>
               )}
             </div>
           </div>
@@ -338,9 +378,10 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
   async function submit() {
     setErr('');
     try {
-      // datetime-local يُدخل بالتوقيت المحلي؛ نحوّله إلى UTC ISO
-      const local = new Date(when);
-      await api.post('/schedules', { post_id: postId, platforms: selected, scheduled_at: local.toISOString() });
+      // الموعد يُدخل بتوقيت الرياض (UTC+3، بلا توقيت صيفي) بصرف النظر عن توقيت جهاز المستخدم.
+      // نثبّت الإزاحة +03:00 ثم نحوّل إلى UTC ISO كي لا ينشر قبل وقته.
+      const iso = new Date(`${when}:00+03:00`).toISOString();
+      await api.post('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
       onDone();
     } catch (e: any) {
       setErr(e.message);
@@ -360,7 +401,7 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
         </div>
       </div>
       <div className="field">
-        <label>الموعد (بتوقيت متصفحك)</label>
+        <label>الموعد (بتوقيت الرياض)</label>
         <input className="input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
       </div>
       {err && <p className="err">{err}</p>}

@@ -17,10 +17,17 @@ export default function News() {
   useEffect(load, []);
 
   async function refresh() {
-    setMsg('');
+    setMsg('جارٍ التحديث…');
     try {
       const d = await api.post('/rss/refresh');
-      setMsg(`تم جلب ${d.added} خبراً جديداً`);
+      const failed = (d.feeds || []).filter((f: any) => f.error);
+      if (failed.length) {
+        setMsg(`أُضيف ${d.added} خبراً. تعذّر جلب ${failed.length} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
+      } else if (d.added === 0) {
+        setMsg('لا توجد أخبار جديدة (كل العناصر مجلوبة مسبقاً).');
+      } else {
+        setMsg(`تم جلب ${d.added} خبراً جديداً`);
+      }
       load();
     } catch (e: any) {
       setMsg(e.message);

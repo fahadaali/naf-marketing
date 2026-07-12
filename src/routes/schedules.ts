@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
-import { runDueSchedules } from '../services/publish';
+import { runDueSchedules, publishPostNow } from '../services/publish';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -11,6 +11,24 @@ scheduleRoutes.use('*', requireAuth);
 // تشغيل يدوي لنشر الجداول المستحقة (إضافةً إلى Cron) — للمدير العام. idempotent.
 scheduleRoutes.post('/run', requirePermission('content.approve_final'), async (c) => {
   const result = await runDueSchedules(c.env);
+  return c.json({ ok: true, ...result });
+});
+
+// النشر الفوري لمنشور معيّن ولو قبل موعده المجدول — للمدير العام. idempotent.
+scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), async (c) => {
+  const { post_id } = await c.req.json<{ post_id: string }>();
+  if (!post_id) return c.json({ error: 'المنشور مطلوب' }, 400);
+  const post = await c.env.DB.prepare('SELECT status FROM content_posts WHERE id = ?')
+    .bind(post_id)
+    .first<{ status: string }>();
+  if (!post) return c.json({ error: 'المنشور غير موجود' }, 404);
+  if (!['scheduled', 'approved'].includes(post.status)) {
+    return c.json({ error: 'لا يمكن النشر الآن إلا لمحتوى معتمد أو مجدول' }, 400);
+  }
+  const result = await publishPostNow(c.env, post_id);
+  if (result.published === 0 && result.failed === 0) {
+    return c.json({ error: 'لا توجد جداول قابلة للنشر لهذا المنشور' }, 400);
+  }
   return c.json({ ok: true, ...result });
 });
 

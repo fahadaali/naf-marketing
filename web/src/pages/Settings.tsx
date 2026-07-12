@@ -153,13 +153,22 @@ function Feeds() {
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
   function load() { api.get('/rss/feeds').then((d) => setFeeds(d.feeds)); }
   useEffect(load, []);
 
   async function add() {
-    setErr('');
-    try { await api.post('/rss/feeds', { url, title }); setUrl(''); setTitle(''); load(); }
-    catch (e: any) { setErr(e.message); }
+    setErr(''); setMsg('');
+    try {
+      const d = await api.post('/rss/feeds', { url, title });
+      setUrl(''); setTitle('');
+      if (d.result?.error) {
+        setErr(`أُضيفت الخلاصة لكن تعذّر جلبها: ${d.result.error}`);
+      } else {
+        setMsg(`أُضيفت الخلاصة وجُلب منها ${d.result?.added ?? 0} خبراً.`);
+      }
+      load();
+    } catch (e: any) { setErr(e.message); }
   }
   async function del(id: string) { await api.del(`/rss/feeds/${id}`); load(); }
 
@@ -172,6 +181,7 @@ function Feeds() {
         <button className="btn" onClick={add}>إضافة</button>
       </div>
       {err && <p className="err">{err}</p>}
+      {msg && <p className="ok">{msg}</p>}
       <table className="table">
         <thead><tr><th>العنوان</th><th>الرابط</th><th>أُضيفت</th><th></th></tr></thead>
         <tbody>
