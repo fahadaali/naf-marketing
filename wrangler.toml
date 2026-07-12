@@ -13,7 +13,7 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "naf_marketing"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "4ab835ee-5c3d-477f-be4b-9def4f49e06a"
 migrations_dir = "migrations"
 
 # تخزين الوسائط R2
