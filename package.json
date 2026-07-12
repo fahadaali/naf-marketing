@@ -1,0 +1,27 @@
+{
+  "name": "naf-marketing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "منصة إدارة التسويق — شركة ناف القانونية (NAF Law Marketing Management Platform)",
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "wrangler dev",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web install && npm --prefix web run build",
+    "db:migrate:local": "wrangler d1 migrations apply naf_marketing --local",
+    "db:migrate:remote": "wrangler d1 migrations apply naf_marketing --remote",
+    "db:seed:local": "wrangler d1 execute naf_marketing --local --file=./migrations/9999_seed.sql",
+    "db:seed:remote": "wrangler d1 execute naf_marketing --remote --file=./migrations/9999_seed.sql",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240605.0",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.60.0"
+  },
+  "dependencies": {
+    "hono": "^4.4.6"
+  }
+}

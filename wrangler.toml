@@ -1,0 +1,36 @@
+name = "naf-marketing"
+main = "src/index.ts"
+compatibility_date = "2024-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# يخدم هذا الـ Worker واجهة React (assets) بالإضافة إلى الـ API عبر Hono
+[assets]
+directory = "./web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# قاعدة بيانات D1
+[[d1_databases]]
+binding = "DB"
+database_name = "naf_marketing"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# تخزين الوسائط R2
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "naf-marketing-media"
+
+# المهام المجدولة: النشر المجدول (كل 5 دقائق) + جلب RSS وسحب التحليلات (كل ساعة)
+[triggers]
+crons = ["*/5 * * * *", "17 * * * *"]
+
+# متغيّرات غير سرية (يمكن تعديلها). المفاتيح السرية عبر: wrangler secret put
+[vars]
+APP_TIMEZONE = "Asia/Riyadh"
+APP_NAME = "منصة ناف للتسويق"
+
+# المفاتيح السرية تُضبط عبر Secrets ولا تُخزَّن هنا:
+#   wrangler secret put CLAUDE_API_KEY
+#   wrangler secret put PROVIDER_API_KEY
+#   wrangler secret put AUTH_SECRET

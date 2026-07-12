@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+web/node_modules/
+
+# build output
+dist/
+web/dist/
+.wrangler/
+
+# local secrets — NEVER commit
+.env
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# local D1 / wrangler state
+.wrangler/state/
+
+# logs & os
+*.log
+.DS_Store
+
+# editor
+.vscode/
+.idea/

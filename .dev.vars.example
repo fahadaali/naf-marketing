@@ -1,0 +1,14 @@
+# انسخ هذا الملف إلى .dev.vars للتطوير المحلي (لا يُرفع إلى Git).
+# في الإنتاج تُستخدم Cloudflare Secrets: wrangler secret put <NAME>
+
+# مفتاح Claude API لتوليد النص (يُقرأ من الخادم فقط، لا يصل المتصفح)
+CLAUDE_API_KEY="sk-ant-xxxxxxxx"
+
+# مفتاح مزوّد النشر الموحّد (Zernio / Late / Ayrshare ...)
+PROVIDER_API_KEY="xxxxxxxx"
+
+# مزوّد النشر المفعّل: mock | zernio | late | ayrshare
+PROVIDER_NAME="mock"
+
+# سرّ توقيع الجلسات (نصّ عشوائي طويل)
+AUTH_SECRET="change-me-to-a-long-random-string"
