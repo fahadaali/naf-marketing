@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import { api, PLATFORM_LABELS, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -30,7 +31,7 @@ export default function Campaigns() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">الحملات</h1>
         <div className="spacer" />
-        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}>+ حملة جديدة</button>}
+        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}><Plus size={16} /> حملة جديدة</button>}
       </div>
 
       <div className="grid cols-3">

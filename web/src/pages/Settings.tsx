@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, ROLE_LABELS, PLATFORM_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -53,7 +54,7 @@ function Users() {
       <div className="row" style={{ marginBottom: 12 }}>
         <h3 style={{ margin: 0 }}>المستخدمون</h3>
         <div className="spacer" />
-        <button className="btn sm" onClick={() => setShow(true)}>+ مستخدم</button>
+        <button className="btn sm" onClick={() => setShow(true)}><Plus size={15} /> مستخدم</button>
       </div>
       <table className="table">
         <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الحالة</th><th></th></tr></thead>
@@ -178,7 +179,7 @@ function Feeds() {
       <div className="row" style={{ marginBottom: 12 }}>
         <input className="input" style={{ flex: 2 }} placeholder="رابط الخلاصة https://..." value={url} onChange={(e) => setUrl(e.target.value)} />
         <input className="input" style={{ flex: 1 }} placeholder="عنوان (اختياري)" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <button className="btn" onClick={add}>إضافة</button>
+        <button className="btn" onClick={add}><Plus size={15} /> إضافة</button>
       </div>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
@@ -190,7 +191,7 @@ function Feeds() {
               <td>{f.title}</td>
               <td className="muted" style={{ fontSize: 12 }}>{f.url}</td>
               <td className="muted">{formatRiyadh(f.created_at)}</td>
-              <td><button className="btn danger sm" onClick={() => del(f.id)}>حذف</button></td>
+              <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={14} /></button></td>
             </tr>
           ))}
           {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا توجد خلاصات</td></tr>}

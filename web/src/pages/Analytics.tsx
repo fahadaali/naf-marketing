@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { api, PLATFORM_LABELS, STATUS_LABELS, STATUS_BADGE } from '../api';
 
 // الداشبورد الموحّد للتحليلات مع فلاتر: النطاق الزمني، المنصة، الحملة.
@@ -47,7 +48,7 @@ export default function Analytics() {
         <h1 className="page-title">التحليلات</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={refresh}>🔄 سحب التحليلات</button>
+        <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> سحب التحليلات</button>
       </div>
 
       {/* الفلاتر */}
@@ -97,8 +98,8 @@ export default function Analytics() {
                 <div className="spacer" />
                 <span className="muted">{(p.impressions || 0).toLocaleString('ar-EG')} انطباع</span>
               </div>
-              <div style={{ height: 8, background: '#eef1f6', borderRadius: 6 }}>
-                <div style={{ width: `${(p.impressions / maxImp) * 100}%`, height: 8, background: 'var(--gold)', borderRadius: 6 }} />
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(p.impressions / maxImp) * 100}%` }} />
               </div>
             </div>
           ))}

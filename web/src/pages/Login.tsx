@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Scale } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
 
@@ -39,7 +40,12 @@ export default function Login() {
   return (
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
-        <h1>منصة ناف للتسويق</h1>
+        <div className="auth-brand">
+          <div className="brand-mark" style={{ width: 52, height: 52, borderRadius: 13 }}>
+            <Scale size={28} />
+          </div>
+          <h1>منصة ناف للتسويق</h1>
+        </div>
         <p className="sub">
           {needsSetup ? 'التهيئة الأولى — إنشاء حساب المدير العام' : 'شركة ناف للاستشارات القانونية'}
         </p>

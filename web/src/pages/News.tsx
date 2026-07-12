@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Sparkles, FilePlus2 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 
@@ -60,7 +61,7 @@ export default function News() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        {can('settings.manage') && <button className="btn ghost" onClick={refresh}>🔄 تحديث الآن</button>}
+        {can('settings.manage') && <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> تحديث الآن</button>}
       </div>
 
       <div className="grid cols-2">
@@ -78,10 +79,12 @@ export default function News() {
                 <span className="badge green">حوّل إلى مسودة</span>
               ) : can('draft.edit') ? (
                 <>
-                  <button className="btn sm" disabled={!!busy} onClick={() => toDraft(n, false)}>تحويل إلى مسودة</button>
+                  <button className="btn ghost sm" disabled={!!busy} onClick={() => toDraft(n, false)}>
+                    <FilePlus2 size={15} /> تحويل إلى مسودة
+                  </button>
                   {can('ai.generate') && (
                     <button className="btn gold sm" disabled={busy === n.id} onClick={() => toDraft(n, true)}>
-                      {busy === n.id ? '…' : '✨ صياغة ثم تحويل'}
+                      <Sparkles size={15} /> {busy === n.id ? '…' : 'صياغة ثم تحويل'}
                     </button>
                   )}
                 </>

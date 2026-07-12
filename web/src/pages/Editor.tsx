@@ -1,5 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Sparkles,
+  Paperclip,
+  Save,
+  Send,
+  Check,
+  X,
+  CalendarClock,
+  Rocket,
+  Archive,
+  Trash2,
+} from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, PLATFORM_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import RichEditor from '../components/RichEditor';
@@ -132,7 +144,7 @@ export default function Editor() {
     const d = await api.upload('/media', form);
     // إدراج مرجع الوسيط في المحتوى
     if (contentType === 'image') setBody(body + `<p><img src="${d.url}" style="max-width:100%"/></p>`);
-    else setBody(body + `<p>📎 وسيط مرفوع: ${d.url}</p>`);
+    else setBody(body + `<p>مرفق: <a href="${d.url}">${d.url}</a></p>`);
     setMsg('تم رفع الوسيط');
   }
 
@@ -163,12 +175,12 @@ export default function Editor() {
           <div className="row" style={{ marginBottom: 10 }}>
             {can('ai.generate') && (
               <button className="btn gold sm" type="button" onClick={() => setShowAI(true)} disabled={readOnly}>
-                ✨ توليد بالذكاء الاصطناعي
+                <Sparkles size={15} /> توليد بالذكاء الاصطناعي
               </button>
             )}
             {can('media.upload') && (
               <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
-                📎 رفع وسيط
+                <Paperclip size={15} /> رفع وسيط
                 <input type="file" hidden onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
               </label>
             )}
@@ -184,7 +196,7 @@ export default function Editor() {
           </div>
 
           {!readOnly && (
-            <button className="btn" onClick={save}>💾 حفظ المسودة</button>
+            <button className="btn" onClick={save}><Save size={16} /> حفظ المسودة</button>
           )}
         </div>
 
@@ -215,31 +227,31 @@ export default function Editor() {
             <h4 style={{ marginTop: 0 }}>الإجراءات</h4>
             <div className="grid" style={{ gap: 8 }}>
               {['draft', 'rejected'].includes(status) && can('content.submit') && postId && (
-                <button className="btn" onClick={() => doAction('submit')}>📤 إرسال للمراجعة</button>
+                <button className="btn" onClick={() => doAction('submit')}><Send size={16} /> إرسال للمراجعة</button>
               )}
               {status === 'pending_marketing' && can('content.review') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}>✅ اعتماد التسويق</button>
-                  <button className="btn danger" onClick={() => setShowReject(true)}>✖ رفض</button>
+                  <button className="btn success" onClick={() => doAction('approve')}><Check size={16} /> اعتماد التسويق</button>
+                  <button className="btn danger" onClick={() => setShowReject(true)}><X size={16} /> رفض</button>
                 </>
               )}
               {status === 'pending_gm' && can('content.approve_final') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}>✅ اعتماد نهائي</button>
-                  <button className="btn danger" onClick={() => setShowReject(true)}>✖ رفض</button>
+                  <button className="btn success" onClick={() => doAction('approve')}><Check size={16} /> اعتماد نهائي</button>
+                  <button className="btn danger" onClick={() => setShowReject(true)}><X size={16} /> رفض</button>
                 </>
               )}
               {['approved', 'scheduled'].includes(status) && can('content.schedule') && (
-                <button className="btn gold" onClick={() => setShowSchedule(true)}>🗓️ جدولة النشر</button>
+                <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={16} /> جدولة النشر</button>
               )}
               {status === 'scheduled' && can('content.approve_final') && schedules.some((s) => ['pending', 'failed'].includes(s.status)) && (
-                <button className="btn success" onClick={publishNow}>🚀 نشر الآن</button>
+                <button className="btn success" onClick={publishNow}><Rocket size={16} /> نشر الآن</button>
               )}
               {status === 'published' && can('content.approve_final') && (
-                <button className="btn ghost" onClick={() => doAction('archive')}>🗄️ أرشفة</button>
+                <button className="btn ghost" onClick={() => doAction('archive')}><Archive size={16} /> أرشفة</button>
               )}
               {postId && (can('content.approve_final') || (['draft', 'rejected'].includes(status))) && (
-                <button className="btn danger" onClick={deletePost}>🗑️ حذف المحتوى</button>
+                <button className="btn danger" onClick={deletePost}><Trash2 size={16} /> حذف المحتوى</button>
               )}
             </div>
           </div>
@@ -348,7 +360,9 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
         </div>
       </div>
       {err && <p className="err">{err}</p>}
-      <button className="btn gold" onClick={run} disabled={busy || !topic}>{busy ? 'جارٍ التوليد…' : '✨ توليد وحقن في المحرر'}</button>
+      <button className="btn gold" onClick={run} disabled={busy || !topic}>
+        <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد وحقن في المحرر'}
+      </button>
     </Modal>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { Trash2, Plus } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 
@@ -39,7 +40,7 @@ export default function PostsList() {
         </div>
         <div className="spacer" />
         {can('draft.edit') && (
-          <button className="btn" onClick={() => navigate('/editor')}>+ محتوى جديد</button>
+          <button className="btn" onClick={() => navigate('/editor')}><Plus size={16} /> محتوى جديد</button>
         )}
       </div>
 
@@ -77,7 +78,7 @@ export default function PostsList() {
                 <td className="muted">{formatRiyadh(p.updated_at)}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   {canDelete(p) && (
-                    <button className="btn danger sm" onClick={() => remove(p.id)}>🗑️</button>
+                    <button className="btn danger sm" onClick={() => remove(p.id)} title="حذف"><Trash2 size={14} /></button>
                   )}
                 </td>
               </tr>
