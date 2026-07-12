@@ -54,21 +54,51 @@ export function parseFeed(xml: string): ParsedItem[] {
   return items;
 }
 
-export async function fetchFeed(url: string): Promise<ParsedItem[]> {
-  const res = await fetch(url, {
-    headers: {
-      'user-agent': 'Mozilla/5.0 (compatible; naf-marketing-rss/1.0)',
-      accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-    },
-    redirect: 'follow',
-  });
-  if (!res.ok) throw new Error(`فشل جلب الخلاصة (HTTP ${res.status})`);
-  const xml = await res.text();
-  const items = parseFeed(xml);
-  if (items.length === 0) {
-    throw new Error('لم يُعثر على عناصر في الخلاصة (تنسيق غير مدعوم أو خلاصة فارغة)');
+// أخطاء مؤقتة يُجدي معها إعادة المحاولة (بطء الخادم المصدر، حجب لحظي، ازدحام)
+const TRANSIENT = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchOnce(url: string, timeoutMs = 15000): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      headers: {
+        'user-agent': 'Mozilla/5.0 (compatible; naf-marketing-rss/1.0)',
+        accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+      },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
   }
-  return items;
+}
+
+export async function fetchFeed(url: string, attempts = 3): Promise<ParsedItem[]> {
+  let lastErr = '';
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(1000 * i); // تراجع تصاعدي: 1s ثم 2s
+    let res: Response;
+    try {
+      res = await fetchOnce(url);
+    } catch (e: any) {
+      lastErr = e?.name === 'AbortError' ? 'انتهت مهلة الاتصال بالخادم المصدر' : `تعذّر الاتصال (${e?.message || e})`;
+      continue; // أخطاء الشبكة قابلة لإعادة المحاولة
+    }
+    if (!res.ok) {
+      lastErr = `فشل جلب الخلاصة (HTTP ${res.status})`;
+      if (TRANSIENT.has(res.status)) continue; // أعد المحاولة للأخطاء المؤقتة
+      throw new Error(lastErr); // خطأ دائم (مثل 404/403) — لا فائدة من الإعادة
+    }
+    const xml = await res.text();
+    const items = parseFeed(xml);
+    if (items.length === 0) {
+      throw new Error('لم يُعثر على عناصر في الخلاصة (تنسيق غير مدعوم أو خلاصة فارغة)');
+    }
+    return items;
+  }
+  throw new Error(`${lastErr} — بعد ${attempts} محاولات`);
 }
 
 export type FeedResult = { url: string; added: number; fetched: number; error: string | null };

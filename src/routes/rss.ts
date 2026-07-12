@@ -47,10 +47,13 @@ rssRoutes.post('/refresh', requirePermission('settings.manage'), async (c) => {
 
 // قائمة الأخبار المجلوبة
 rssRoutes.get('/news', async (c) => {
+  // ترتيب موحّد عبر كل الخلاصات حسب تاريخ النشر الأحدث (لا تجميع حسب الخلاصة):
+  // العناصر ذات تاريخ نشر أولاً (الأحدث فالأقدم)، ثم العناصر بلا تاريخ حسب وقت الجلب.
   const { results } = await c.env.DB.prepare(
     `SELECT n.*, f.title AS feed_title FROM news_items n
      LEFT JOIN rss_feeds f ON f.id = n.feed_id
-     ORDER BY COALESCE(n.published_at, n.created_at) DESC LIMIT 100`,
+     ORDER BY (n.published_at IS NULL) ASC, n.published_at DESC, n.created_at DESC
+     LIMIT 100`,
   ).all();
   return c.json({ news: results });
 });
