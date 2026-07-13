@@ -9,6 +9,8 @@ import {
   authorizeUrl,
   exchangeCode,
 } from '../services/basecamp';
+import { buildReportWorkbook, uploadWeeklyReport } from '../services/report';
+import { syncPostSafe } from '../services/basecampSync';
 
 export const basecampRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -49,13 +51,47 @@ code{background:#f1f1f4;padding:2px 6px;border-radius:6px;word-break:break-all}
 basecampRoutes.use('/status', requireAuth);
 basecampRoutes.use('/files', requireAuth);
 basecampRoutes.use('/generate', requireAuth);
+basecampRoutes.use('/report/*', requireAuth);
+basecampRoutes.use('/resync', requireAuth);
 
 basecampRoutes.get('/status', async (c) => {
   const configured = await isConfigured(c.env);
-  const project = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'basecamp_project_id'").first<{
-    value: string;
-  }>();
-  return c.json({ configured, project_set: !!project?.value });
+  const project = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'basecamp_project_id'").first<{ value: string }>();
+  const mgmt = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'basecamp_mgmt_project_id'").first<{ value: string }>();
+  return c.json({ configured, project_set: !!project?.value, mgmt_set: !!mgmt?.value });
+});
+
+// تنزيل التقرير الأسبوعي كملف Excel (لمعاينته) — للمدير العام
+basecampRoutes.get('/report/download', requirePermission('settings.manage'), async (c) => {
+  const { bytes, filename } = await buildReportWorkbook(c.env);
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    },
+  });
+});
+
+// توليد ورفع التقرير الأسبوعي فوراً إلى بيسكامب — للمدير العام
+basecampRoutes.post('/report/run', requirePermission('settings.manage'), async (c) => {
+  try {
+    const r = await uploadWeeklyReport(c.env);
+    return c.json(r);
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// إعادة مزامنة كل المحتوى مع بطاقات مهام بيسكامب — للمدير العام
+basecampRoutes.post('/resync', requirePermission('settings.manage'), async (c) => {
+  if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
+  const { results } = await c.env.DB.prepare(
+    "SELECT id FROM content_posts WHERE status != 'archived' ORDER BY created_at ASC LIMIT 200",
+  ).all<{ id: string }>();
+  c.executionCtx.waitUntil((async () => {
+    for (const p of results) await syncPostSafe(c.env, p.id);
+  })());
+  return c.json({ ok: true, queued: results.length });
 });
 
 basecampRoutes.get('/files', requirePermission('ai.generate'), async (c) => {

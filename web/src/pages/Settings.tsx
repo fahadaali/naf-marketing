@@ -328,6 +328,7 @@ function Integrations() {
   const [status, setStatus] = useState<any>(null);
   const [accountId, setAccountId] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [mgmtId, setMgmtId] = useState('');
   const [msg, setMsg] = useState('');
 
   function load() {
@@ -335,15 +336,27 @@ function Integrations() {
     api.get('/settings').then((d) => {
       setAccountId(d.settings?.basecamp_account_id || '');
       setProjectId(d.settings?.basecamp_project_id || '');
+      setMgmtId(d.settings?.basecamp_mgmt_project_id || '');
     });
   }
   useEffect(load, []);
 
   async function save() {
     setMsg('');
-    await api.put('/settings', { basecamp_account_id: accountId, basecamp_project_id: projectId });
+    await api.put('/settings', { basecamp_account_id: accountId, basecamp_project_id: projectId, basecamp_mgmt_project_id: mgmtId });
     setMsg('تم الحفظ');
     load();
+  }
+
+  async function resync() {
+    setMsg('جارٍ إعادة المزامنة…');
+    try { const r = await api.post('/basecamp/resync'); setMsg(`تمت جدولة مزامنة ${r.queued} عنصراً`); }
+    catch (e: any) { setMsg(e.message); }
+  }
+  async function runReport() {
+    setMsg('جارٍ رفع التقرير…');
+    try { const r = await api.post('/basecamp/report/run'); setMsg(r.ok ? 'تم رفع التقرير إلى بيسكامب' : `تعذّر: ${r.reason}`); }
+    catch (e: any) { setMsg(e.message); }
   }
 
   return (
@@ -375,12 +388,27 @@ function Integrations() {
           <input className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="مثال: 5912345" />
         </div>
         <div className="field">
-          <label>معرّف مشروع «مركز المعرفة» (Project ID)</label>
+          <label>معرّف مشروع «مركز المعرفة» (للقراءة/التوليد)</label>
           <input className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="مثال: 34567890" />
         </div>
       </div>
+
+      <div className="field">
+        <label>معرّف مشروع «إدارة التسويق» (للمزامنة والتقارير)</label>
+        <input className="input" value={mgmtId} onChange={(e) => setMgmtId(e.target.value)} placeholder="مثال: 34567899" />
+        <p className="muted" style={{ fontSize: 12 }}>
+          يُزامَن كل محتوى كبطاقة مهمة تتحرك عبر مراحل الاعتماد، وتاريخ استحقاقها = تاريخ النشر، وتُسند لأعضاء المشروع.
+          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت ٩:٠٠م في مجلد «تقارير الأداء الأسبوعية (آلي)».
+        </p>
+      </div>
+
       {msg && <p className="ok">{msg}</p>}
-      <button className="btn" onClick={save}>حفظ إعدادات بيسكامب</button>
+      <div className="row">
+        <button className="btn" onClick={save}>حفظ إعدادات بيسكامب</button>
+        <button className="btn ghost" onClick={resync} disabled={!status?.mgmt_set}>إعادة مزامنة المحتوى</button>
+        <button className="btn ghost" onClick={runReport} disabled={!status?.mgmt_set}>رفع التقرير الآن</button>
+        <a className="btn ghost" href="/api/basecamp/report/download">تنزيل التقرير (معاينة)</a>
+      </div>
     </div>
   );
 }

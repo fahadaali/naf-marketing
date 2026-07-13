@@ -5,6 +5,7 @@ import { hasPermission } from '../permissions';
 import { newId, nowIso } from '../util';
 import { generateText } from '../services/claude';
 import { transition, type Action } from '../services/workflow';
+import { syncPostSafe, trashPostTaskSafe } from '../services/basecampSync';
 
 export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -122,6 +123,8 @@ postRoutes.post('/', requirePermission('draft.edit'), async (c) => {
       .bind(id, body.news_item_id)
       .run();
   }
+  // مزامنة بيسكامب في الخلفية (بطاقة مهمة في قائمة المسودات)
+  c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true, id });
 });
 
@@ -177,6 +180,7 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   await c.env.DB.prepare(`UPDATE content_posts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...binds)
     .run();
+  c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true });
 });
 
@@ -204,6 +208,7 @@ postRoutes.delete('/:id', async (c) => {
     c.env.DB.prepare('DELETE FROM post_variants WHERE post_id = ?').bind(id),
     c.env.DB.prepare('DELETE FROM content_posts WHERE id = ?').bind(id),
   ]);
+  c.executionCtx.waitUntil(trashPostTaskSafe(c.env, id));
   return c.json({ ok: true });
 });
 
@@ -232,6 +237,8 @@ postRoutes.post('/:id/action', async (c) => {
 
   const result = await transition(c.env, user, post, action, note);
   if (!result.ok) return c.json({ error: result.error }, result.status as any);
+  // نقل بطاقة المهمة إلى مرحلتها الجديدة في بيسكامب
+  c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true, status: result.to });
 });
 

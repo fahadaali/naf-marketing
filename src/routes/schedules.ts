@@ -3,6 +3,7 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
 import { publishPostNow } from '../services/publish';
+import { syncPostSafe } from '../services/basecampSync';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -23,6 +24,7 @@ scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), 
   if (result.published === 0 && result.failed === 0) {
     return c.json({ error: 'لا توجد جداول قابلة للنشر لهذا المنشور' }, 400);
   }
+  c.executionCtx.waitUntil(syncPostSafe(c.env, post_id));
   return c.json({ ok: true, ...result });
 });
 
@@ -80,6 +82,8 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
     .bind(newId('appr'), post_id, post.status, user.id, `جدولة على: ${platforms.join(', ')}`)
     .run();
 
+  // تحديث بطاقة بيسكامب: النقل إلى «مجدول» وضبط تاريخ الاستحقاق = تاريخ النشر
+  c.executionCtx.waitUntil(syncPostSafe(c.env, post_id));
   return c.json({ ok: true });
 });
 
