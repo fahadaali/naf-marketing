@@ -8,6 +8,7 @@ import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '.
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { DateRangePicker } from '../components/DatePicker';
+import { Popover } from '../components/Popover';
 
 // تاريخ العنصر بصيغة YYYY-MM-DD بتوقيت الرياض (للفلترة الزمنية)
 function riyadhYMD(iso: string): string {
@@ -63,7 +64,6 @@ export default function ContentManagement() {
   const [err, setErr] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
-  const [showExport, setShowExport] = useState(false);
 
   function load() {
     api.get('/posts').then((d) => setPosts(d.posts));
@@ -172,7 +172,6 @@ export default function ContentManagement() {
   }
 
   function doExport(fmt: 'csv' | 'json' | 'md') {
-    setShowExport(false);
     const rows = (sel.size ? selectedPosts() : filtered);
     const stamp = new Date().toISOString().slice(0, 10);
     if (fmt === 'json') {
@@ -258,16 +257,19 @@ export default function ContentManagement() {
           <div className="spacer" />
           <span className="muted" style={{ fontSize: 13 }}>{filtered.length} عنصر</span>
           {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={15} /> استيراد</button>}
-          <div className="menu-wrap">
-            <button className="btn ghost sm" onClick={() => setShowExport((v) => !v)}><Download size={15} /> تصدير <ChevronDown size={14} /></button>
-            {showExport && (
+          <Popover
+            render={({ toggle }) => (
+              <button className="btn ghost sm" onClick={toggle}><Download size={15} /> تصدير <ChevronDown size={14} /></button>
+            )}
+          >
+            {({ close }) => (
               <div className="menu">
-                <button onClick={() => doExport('csv')}>CSV (إكسل)</button>
-                <button onClick={() => doExport('json')}>JSON</button>
-                <button onClick={() => doExport('md')}>Markdown</button>
+                <button onClick={() => { doExport('csv'); close(); }}>CSV (إكسل)</button>
+                <button onClick={() => { doExport('json'); close(); }}>JSON</button>
+                <button onClick={() => { doExport('md'); close(); }}>Markdown</button>
               </div>
             )}
-          </div>
+          </Popover>
           {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={15} /> محتوى جديد</button>}
         </div>
       </div>
