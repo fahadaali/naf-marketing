@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, PLATFORM_LABELS, formatRiyadh } from '../api';
+import { api, formatRiyadh } from '../api';
+import { platformLabel } from '../platforms';
 
 // تقويم محتوى موحّد بتوقيت الرياض (AST) لعرض مواعيد النشر المجدولة.
 export default function Calendar() {
@@ -36,7 +37,7 @@ export default function Calendar() {
               <div className="cal-day">{cell.day}</div>
               {cell.events.map((e: any) => (
                 <div key={e.id} className="cal-event" title={`${e.title} — ${formatRiyadh(e.scheduled_at)}`} onClick={() => navigate(`/editor/${e.post_id}`)}>
-                  {PLATFORM_LABELS[e.platform] || e.platform}: {e.title}
+                  {platformLabel(e.platform)}: {e.title}
                 </div>
               ))}
             </div>

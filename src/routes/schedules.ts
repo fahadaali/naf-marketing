@@ -2,19 +2,13 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
-import { runDueSchedules, publishPostNow } from '../services/publish';
+import { publishPostNow } from '../services/publish';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 scheduleRoutes.use('*', requireAuth);
 
-// تشغيل يدوي لنشر الجداول المستحقة (إضافةً إلى Cron) — للمدير العام. idempotent.
-scheduleRoutes.post('/run', requirePermission('content.approve_final'), async (c) => {
-  const result = await runDueSchedules(c.env);
-  return c.json({ ok: true, ...result });
-});
-
-// النشر الفوري لمنشور معيّن ولو قبل موعده المجدول — للمدير العام. idempotent.
+// النشر الفوري لمنشور معيّن (نشر يدوي) — ولو قبل موعده المجدول أو بعده. للمدير العام. idempotent.
 scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), async (c) => {
   const { post_id } = await c.req.json<{ post_id: string }>();
   if (!post_id) return c.json({ error: 'المنشور مطلوب' }, 400);

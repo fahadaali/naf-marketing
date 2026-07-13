@@ -64,21 +64,6 @@ async function markFullyPublishedPosts(env: Env): Promise<void> {
     .run();
 }
 
-// النشر المجدول المستحق فقط (يُستدعى من Cron والتشغيل اليدوي)
-export async function runDueSchedules(env: Env): Promise<{ published: number; failed: number }> {
-  const now = nowIso();
-  const { results } = await env.DB.prepare(
-    `SELECT s.id, s.post_id, s.platform, p.body, p.title
-     FROM schedules s JOIN content_posts p ON p.id = s.post_id
-     WHERE s.status IN ('pending','failed') AND s.scheduled_at <= ?
-     ORDER BY s.scheduled_at ASC
-     LIMIT 25`,
-  )
-    .bind(now)
-    .all<Job>();
-  return publishJobs(env, results);
-}
-
 // النشر الفوري لكل جداول منشور معيّن — يتجاوز الموعد المحدد (زر «نشر الآن»).
 export async function publishPostNow(
   env: Env,

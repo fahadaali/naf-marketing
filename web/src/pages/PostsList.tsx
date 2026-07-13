@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trash2, Plus } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import { useAuth } from '../auth';
 
 export default function PostsList() {
@@ -71,7 +71,7 @@ export default function PostsList() {
             {posts.map((p) => (
               <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${p.id}`)}>
                 <td>{p.title}</td>
-                <td><span className={`badge ${STATUS_BADGE[p.status]}`}>{STATUS_LABELS[p.status]}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[displayStatus(p)]}`}>{STATUS_LABELS[displayStatus(p)]}</span></td>
                 <td className="muted">{SOURCE[p.source] || p.source}</td>
                 <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
                 <td className="muted">{p.campaign_name || '—'}</td>

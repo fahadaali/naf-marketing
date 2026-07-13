@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { api, ROLE_LABELS, PLATFORM_LABELS, formatRiyadh } from '../api';
+import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
-
-const ALL_PLATFORMS = ['linkedin', 'x', 'instagram', 'snapchat', 'tiktok'];
+import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel } from '../platforms';
 
 export default function Settings() {
   const { can } = useAuth();
@@ -13,6 +12,7 @@ export default function Settings() {
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
     can('settings.manage') && { id: 'feeds', label: 'خلاصات RSS' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
+    can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
   ].filter(Boolean) as { id: string; label: string }[];
 
   const [tab, setTab] = useState(tabs[0]?.id || 'users');
@@ -29,6 +29,7 @@ export default function Settings() {
       {tab === 'permissions' && <Permissions />}
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
+      {tab === 'integrations' && <Integrations />}
     </div>
   );
 }
@@ -204,36 +205,108 @@ function Feeds() {
 /* ===== المنصات والمزوّد ===== */
 function Platforms() {
   const [enabled, setEnabled] = useState<string[]>([]);
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [provider, setProvider] = useState('mock');
   const [msg, setMsg] = useState('');
+  const [customKey, setCustomKey] = useState('');
+  const [customLabel, setCustomLabel] = useState('');
+  const [err, setErr] = useState('');
 
   useEffect(() => {
     api.get('/settings').then((d) => {
       setEnabled(d.settings?.enabled_platforms || []);
+      setLabels(d.settings?.platform_labels || {});
       setProvider(d.settings?.provider_name || 'mock');
     });
   }, []);
 
+  function toggle(key: string) {
+    setEnabled((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key]));
+  }
+
+  function addCustom() {
+    setErr('');
+    const key = customKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للمنصة (مثل: medium)');
+    if (enabled.includes(key) || KNOWN_PLATFORMS.includes(key)) return setErr('المنصة موجودة مسبقاً');
+    setEnabled((s) => [...s, key]);
+    if (customLabel.trim()) setLabels((l) => ({ ...l, [key]: customLabel.trim() }));
+    setCustomKey('');
+    setCustomLabel('');
+  }
+
+  function removeCustom(key: string) {
+    setEnabled((s) => s.filter((x) => x !== key));
+    setLabels((l) => {
+      const n = { ...l };
+      delete n[key];
+      return n;
+    });
+  }
+
   async function save() {
     setMsg('');
-    await api.put('/settings', { enabled_platforms: enabled, provider_name: provider });
+    await api.put('/settings', { enabled_platforms: enabled, platform_labels: labels, provider_name: provider });
     setMsg('تم الحفظ');
   }
+
+  const customEnabled = enabled.filter((k) => !KNOWN_PLATFORMS.includes(k));
 
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>المنصات والمزوّد</h3>
+
       <div className="field">
-        <label>المنصات المفعّلة</label>
-        <div className="row">
-          {ALL_PLATFORMS.map((p) => (
-            <button key={p} type="button" className={`btn sm ${enabled.includes(p) ? '' : 'ghost'}`}
-              onClick={() => setEnabled((s) => s.includes(p) ? s.filter((x) => x !== p) : [...s, p])}>
-              {PLATFORM_LABELS[p]}
-            </button>
-          ))}
+        <label>المنصات المعروفة (فعّل/عطّل)</label>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+          {KNOWN_PLATFORMS.map((p) => {
+            const on = enabled.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => toggle(p)}
+                className="card"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer',
+                  borderColor: on ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                  background: on ? 'hsl(var(--primary-soft))' : 'hsl(var(--card))',
+                }}
+              >
+                <PlatformIcon platform={p} size={26} />
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{PLATFORM_META[p].label}</span>
+                <div className="spacer" />
+                <span className={`badge ${on ? 'green' : 'gray'}`}>{on ? 'مفعّلة' : 'معطّلة'}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {customEnabled.length > 0 && (
+        <div className="field">
+          <label>منصات مخصّصة</label>
+          <div className="row">
+            {customEnabled.map((k) => (
+              <span key={k} className="badge gray" style={{ gap: 8, padding: '6px 10px' }}>
+                <PlatformIcon platform={k} size={18} /> {platformLabel(k, labels)}
+                <Trash2 size={13} style={{ cursor: 'pointer' }} onClick={() => removeCustom(k)} />
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="field">
+        <label>إضافة منصة مخصّصة</label>
+        <div className="row">
+          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني، مثل: medium)" value={customKey} onChange={(e) => setCustomKey(e.target.value)} />
+          <input className="input" style={{ flex: 1 }} placeholder="الاسم بالعربية" value={customLabel} onChange={(e) => setCustomLabel(e.target.value)} />
+          <button className="btn ghost" onClick={addCustom}><Plus size={15} /> إضافة</button>
+        </div>
+        {err && <p className="err" style={{ marginTop: 6 }}>{err}</p>}
+      </div>
+
       <div className="field">
         <label>مزوّد النشر الموحّد</label>
         <select className="select" style={{ maxWidth: 260 }} value={provider} onChange={(e) => setProvider(e.target.value)}>
@@ -246,6 +319,68 @@ function Platforms() {
       </div>
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
+    </div>
+  );
+}
+
+/* ===== التكاملات (بيسكامب — مركز المعرفة) ===== */
+function Integrations() {
+  const [status, setStatus] = useState<any>(null);
+  const [accountId, setAccountId] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [msg, setMsg] = useState('');
+
+  function load() {
+    api.get('/basecamp/status').then(setStatus).catch(() => setStatus({ configured: false }));
+    api.get('/settings').then((d) => {
+      setAccountId(d.settings?.basecamp_account_id || '');
+      setProjectId(d.settings?.basecamp_project_id || '');
+    });
+  }
+  useEffect(load, []);
+
+  async function save() {
+    setMsg('');
+    await api.put('/settings', { basecamp_account_id: accountId, basecamp_project_id: projectId });
+    setMsg('تم الحفظ');
+    load();
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>تكامل بيسكامب — «مركز المعرفة»</h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        اربط مشروع «مركز المعرفة» في بيسكامب لتوليد المحتوى من ملفاته. المفاتيح السرية (client id/secret/refresh token)
+        تُضبط عبر Cloudflare Secrets؛ هنا تضبط معرّف الحساب والمشروع فقط.
+      </p>
+
+      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 16 }}>
+        <div className="row">
+          <span>حالة الاتصال بالمفاتيح السرية:</span>
+          <span className={`badge ${status?.configured ? 'green' : 'red'}`}>
+            {status?.configured ? 'مضبوطة' : 'غير مضبوطة'}
+          </span>
+        </div>
+        {!status?.configured && (
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            اضبط الأسرار: BASECAMP_CLIENT_ID، BASECAMP_CLIENT_SECRET، BASECAMP_REFRESH_TOKEN عبر Wrangler/لوحة Cloudflare.
+            يمكنك الحصول على refresh token عبر فتح <code>/api/basecamp/oauth/start</code> بعد ضبط client id/secret.
+          </p>
+        )}
+      </div>
+
+      <div className="grid cols-2">
+        <div className="field">
+          <label>معرّف حساب بيسكامب (Account ID)</label>
+          <input className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="مثال: 5912345" />
+        </div>
+        <div className="field">
+          <label>معرّف مشروع «مركز المعرفة» (Project ID)</label>
+          <input className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)} placeholder="مثال: 34567890" />
+        </div>
+      </div>
+      {msg && <p className="ok">{msg}</p>}
+      <button className="btn" onClick={save}>حفظ إعدادات بيسكامب</button>
     </div>
   );
 }

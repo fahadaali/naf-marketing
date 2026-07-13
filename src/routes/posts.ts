@@ -34,7 +34,9 @@ postRoutes.get('/', async (c) => {
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   const { results } = await c.env.DB.prepare(
-    `SELECT p.*, u.name AS author_name, cm.name AS campaign_name
+    `SELECT p.*, u.name AS author_name, cm.name AS campaign_name,
+            (SELECT MIN(s.scheduled_at) FROM schedules s
+               WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at
      FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
      LEFT JOIN campaigns cm ON cm.id = p.campaign_id

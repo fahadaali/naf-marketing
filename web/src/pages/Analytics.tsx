@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { api, PLATFORM_LABELS, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { PlatformIcon, platformLabel } from '../platforms';
 
 // الداشبورد الموحّد للتحليلات مع فلاتر: النطاق الزمني، المنصة، الحملة.
 export default function Analytics() {
@@ -66,7 +67,7 @@ export default function Analytics() {
             <label>المنصة</label>
             <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
               <option value="">كل المنصات</option>
-              {platforms.map((p) => <option key={p} value={p}>{PLATFORM_LABELS[p] || p}</option>)}
+              {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
             </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
@@ -94,7 +95,8 @@ export default function Analytics() {
           {(data?.byPlatform || []).map((p: any) => (
             <div key={p.platform} style={{ marginBottom: 10 }}>
               <div className="row" style={{ fontSize: 13 }}>
-                <span>{PLATFORM_LABELS[p.platform] || p.platform}</span>
+                <PlatformIcon platform={p.platform} size={20} />
+                <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
                 <span className="muted">{(p.impressions || 0).toLocaleString('ar-EG')} انطباع</span>
               </div>

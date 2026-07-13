@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import { api, PLATFORM_LABELS, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { PlatformIcon, platformLabel } from '../platforms';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 
@@ -56,9 +57,15 @@ export default function Campaigns() {
       {selected && (
         <Modal title={`حملة: ${selected.name}`} onClose={() => setSelected(null)}>
           <p className="muted">{selected.objective}</p>
-          <p style={{ fontSize: 13 }}>
-            المنصات: {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => PLATFORM_LABELS[p] || p).join('، ') || '—'}
-          </p>
+          <div className="row" style={{ fontSize: 13, marginBottom: 8 }}>
+            <span className="muted">المنصات:</span>
+            {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
+              <span key={p} className="row" style={{ gap: 5 }}>
+                <PlatformIcon platform={p} size={18} /> {platformLabel(p)}
+              </span>
+            ))}
+            {(JSON.parse(selected.target_platforms || '[]') as string[]).length === 0 && <span>—</span>}
+          </div>
           <h4>لوحة Kanban</h4>
           <div className="kanban">
             {KANBAN_COLS.map((col) => (
@@ -117,7 +124,7 @@ function NewCampaign({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           {avail.map((p) => (
             <button key={p} type="button" className={`btn sm ${platforms.includes(p) ? '' : 'ghost'}`}
               onClick={() => setPlatforms((s) => s.includes(p) ? s.filter((x) => x !== p) : [...s, p])}>
-              {PLATFORM_LABELS[p] || p}
+              <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
             </button>
           ))}
         </div>

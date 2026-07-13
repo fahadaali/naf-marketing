@@ -33,6 +33,7 @@ export const STATUS_LABELS: Record<string, string> = {
   pending_gm: 'بانتظار اعتماد المدير العام',
   approved: 'معتمد',
   scheduled: 'مجدول',
+  late: 'متأخر',
   published: 'منشور',
   archived: 'مؤرشف',
   rejected: 'مرفوض',
@@ -44,10 +45,19 @@ export const STATUS_BADGE: Record<string, string> = {
   pending_gm: 'purple',
   approved: 'blue',
   scheduled: 'blue',
+  late: 'red',
   published: 'green',
   archived: 'gray',
   rejected: 'red',
 };
+
+// الحالة المعروضة: المنشور المجدول الذي فات موعده دون نشر يدوي يظهر «متأخر».
+export function displayStatus(post: { status: string; pending_at?: string | null }): string {
+  if (post.status === 'scheduled' && post.pending_at && new Date(post.pending_at).getTime() < Date.now()) {
+    return 'late';
+  }
+  return post.status;
+}
 
 export const PLATFORM_LABELS: Record<string, string> = {
   linkedin: 'لينكدإن',
@@ -55,6 +65,9 @@ export const PLATFORM_LABELS: Record<string, string> = {
   instagram: 'إنستغرام',
   snapchat: 'سناب شات',
   tiktok: 'تيك توك',
+  facebook: 'فيسبوك',
+  youtube: 'يوتيوب',
+  threads: 'ثريدز',
 };
 
 export const ROLE_LABELS: Record<string, string> = {

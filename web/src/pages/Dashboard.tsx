@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import { useAuth } from '../auth';
 
 export default function Dashboard() {
@@ -63,7 +63,7 @@ export default function Dashboard() {
             {posts.slice(0, 8).map((p) => (
               <tr key={p.id}>
                 <td><Link to={`/editor/${p.id}`}>{p.title}</Link></td>
-                <td><span className={`badge ${STATUS_BADGE[p.status]}`}>{STATUS_LABELS[p.status]}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[displayStatus(p)]}`}>{STATUS_LABELS[displayStatus(p)]}</span></td>
                 <td>{p.author_name}</td>
                 <td className="muted">{formatRiyadh(p.updated_at)}</td>
               </tr>

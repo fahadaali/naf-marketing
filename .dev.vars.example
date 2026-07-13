@@ -12,3 +12,11 @@ PROVIDER_NAME="mock"
 
 # سرّ توقيع الجلسات (نصّ عشوائي طويل)
 AUTH_SECRET="change-me-to-a-long-random-string"
+
+# تكامل بيسكامب (مركز المعرفة) — اختياري. أنشئ تطبيق OAuth في بيسكامب:
+#   https://launchpad.37signals.com/integrations
+# ثم افتح /api/basecamp/oauth/start للحصول على refresh token.
+# معرّف الحساب والمشروع يُضبطان من: الإعدادات ← التكاملات (غير سرّية).
+BASECAMP_CLIENT_ID=""
+BASECAMP_CLIENT_SECRET=""
+BASECAMP_REFRESH_TOKEN=""

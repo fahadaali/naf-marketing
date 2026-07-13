@@ -11,11 +11,14 @@ import {
   Rocket,
   Archive,
   Trash2,
+  PenLine,
+  BookOpen,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, PLATFORM_LABELS, formatRiyadh } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import RichEditor from '../components/RichEditor';
 import Modal from '../components/Modal';
+import { PlatformIcon, platformLabel } from '../platforms';
 
 export default function Editor() {
   const { id } = useParams();
@@ -34,10 +37,12 @@ export default function Editor() {
   const [approvals, setApprovals] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
+  const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
   const [showAI, setShowAI] = useState(false);
+  const [showKB, setShowKB] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
 
@@ -55,7 +60,10 @@ export default function Editor() {
 
   useEffect(() => {
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns));
-    api.get('/settings').then((d) => setPlatforms(d.settings?.enabled_platforms || []));
+    api.get('/settings').then((d) => {
+      setPlatforms(d.settings?.enabled_platforms || []);
+      setPlatLabels(d.settings?.platform_labels || {});
+    });
     if (id) loadPost(id);
     // تحويل خبر إلى مسودة: يأتي عبر ?news=<id>&title=&body=
     if (!id && sp.get('news')) {
@@ -148,11 +156,16 @@ export default function Editor() {
     setMsg('تم رفع الوسيط');
   }
 
+  const overdue =
+    status === 'scheduled' &&
+    schedules.some((s) => ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now());
+  const effStatus = overdue ? 'late' : status;
+
   return (
     <div>
       <div className="row" style={{ marginBottom: 12 }}>
         <h1 className="page-title">{postId ? 'تحرير المحتوى' : 'محتوى جديد'}</h1>
-        <span className={`badge ${STATUS_BADGE[status]}`}>{STATUS_LABELS[status]}</span>
+        <span className={`badge ${STATUS_BADGE[effStatus]}`}>{STATUS_LABELS[effStatus]}</span>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
@@ -172,19 +185,30 @@ export default function Editor() {
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} disabled={readOnly} />
           </div>
 
-          <div className="row" style={{ marginBottom: 10 }}>
-            {can('ai.generate') && (
-              <button className="btn gold sm" type="button" onClick={() => setShowAI(true)} disabled={readOnly}>
-                <Sparkles size={15} /> توليد بالذكاء الاصطناعي
-              </button>
-            )}
-            {can('media.upload') && (
-              <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
-                <Paperclip size={15} /> رفع وسيط
-                <input type="file" hidden onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
-              </label>
-            )}
-          </div>
+          {!readOnly && (
+            <div className="field">
+              <label>مصدر المحتوى</label>
+              <div className="row">
+                <span className="badge gray"><PenLine size={13} /> يدوي (اكتب أدناه)</span>
+                {can('ai.generate') && (
+                  <button className="btn gold sm" type="button" onClick={() => setShowAI(true)}>
+                    <Sparkles size={15} /> توليد بالذكاء الاصطناعي
+                  </button>
+                )}
+                {can('ai.generate') && (
+                  <button className="btn ghost sm" type="button" onClick={() => setShowKB(true)}>
+                    <BookOpen size={15} /> مركز المعرفة
+                  </button>
+                )}
+                {can('media.upload') && (
+                  <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
+                    <Paperclip size={15} /> رفع ملف
+                    <input type="file" hidden onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
+                  </label>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="field">
             <label>المحتوى</label>
@@ -260,15 +284,24 @@ export default function Editor() {
           {schedules.length > 0 && (
             <div className="card" style={{ marginBottom: 14 }}>
               <h4 style={{ marginTop: 0 }}>مواعيد النشر</h4>
-              {schedules.map((s) => (
-                <div key={s.id} className="row" style={{ fontSize: 13, marginBottom: 6 }}>
-                  <span className="badge blue">{PLATFORM_LABELS[s.platform] || s.platform}</span>
-                  <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
-                  <span className={`badge ${s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : 'gray'}`}>
-                    {SCHED_STATUS[s.status]}
-                  </span>
-                </div>
-              ))}
+              {schedules.map((s) => {
+                const late = ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now();
+                return (
+                  <div key={s.id} className="row" style={{ fontSize: 13, marginBottom: 8 }}>
+                    <PlatformIcon platform={s.platform} size={20} />
+                    <span>{platformLabel(s.platform, platLabels)}</span>
+                    <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
+                    <div className="spacer" />
+                    <span
+                      className={`badge ${
+                        s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : late ? 'red' : 'gray'
+                      }`}
+                    >
+                      {late && s.status !== 'published' ? 'متأخر' : SCHED_STATUS[s.status]}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -289,6 +322,18 @@ export default function Editor() {
       </div>
 
       {showAI && <AIModal platforms={platforms} onClose={() => setShowAI(false)} onResult={(t) => { setBody(body + `<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowAI(false); }} />}
+      {showKB && (
+        <KBModal
+          platforms={platforms}
+          onClose={() => setShowKB(false)}
+          onResult={(t, title) => {
+            setBody(body + `<p>${t.replace(/\n/g, '<br/>')}</p>`);
+            if (!title && title !== '') return;
+            setTitle((cur) => cur || title);
+            setShowKB(false);
+          }}
+        />
+      )}
       {showReject && (
         <RejectModal
           onClose={() => setShowReject(false)}
@@ -339,7 +384,7 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
         <div className="field">
           <label>المنصة</label>
           <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-            {platforms.map((p) => <option key={p} value={p}>{PLATFORM_LABELS[p] || p}</option>)}
+            {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
           </select>
         </div>
         <div className="field">
@@ -363,6 +408,136 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
       <button className="btn gold" onClick={run} disabled={busy || !topic}>
         <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد وحقن في المحرر'}
       </button>
+    </Modal>
+  );
+}
+
+// مركز المعرفة — اختيار ملف من بيسكامب وتوليد محتوى منه
+function KBModal({
+  platforms,
+  onClose,
+  onResult,
+}: {
+  platforms: string[];
+  onClose: () => void;
+  onResult: (text: string, title: string) => void;
+}) {
+  const [status, setStatus] = useState<any>(null);
+  const [files, setFiles] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any>(null);
+  const [platform, setPlatform] = useState(platforms[0] || 'linkedin');
+  const [tone, setTone] = useState('formal');
+  const [length, setLength] = useState('medium');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await api.get('/basecamp/status');
+        setStatus(s);
+        if (s.configured && s.project_set) {
+          const d = await api.get('/basecamp/files');
+          setFiles(d.files || []);
+        }
+      } catch (e: any) {
+        setErr(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function generate() {
+    if (!selected) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const d = await api.post('/basecamp/generate', {
+        type: selected.type,
+        id: selected.id,
+        platform,
+        tone,
+        length,
+      });
+      onResult(d.text, d.title || selected.title);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="مركز المعرفة — توليد من ملف بيسكامب" onClose={onClose}>
+      {loading && <p className="muted">جارٍ التحميل…</p>}
+
+      {!loading && (!status?.configured || !status?.project_set) && (
+        <div className="card" style={{ background: 'hsl(var(--warning-soft))' }}>
+          <p style={{ margin: 0 }}>
+            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات ← التكاملات</b> لضبط معرّف الحساب والمشروع،
+            واضبط الأسرار عبر Cloudflare. عندها ستظهر ملفات «مركز المعرفة» هنا.
+          </p>
+        </div>
+      )}
+
+      {!loading && status?.configured && status?.project_set && (
+        <>
+          <div className="field">
+            <label>اختر ملفاً من مركز المعرفة</label>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 8 }}>
+              {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا توجد ملفات.</p>}
+              {files.map((f) => (
+                <div
+                  key={`${f.type}-${f.id}`}
+                  onClick={() => setSelected(f)}
+                  style={{
+                    padding: '9px 12px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid hsl(var(--border))',
+                    background: selected?.id === f.id && selected?.type === f.type ? 'hsl(var(--primary-soft))' : 'transparent',
+                  }}
+                >
+                  <div style={{ fontSize: 14 }}>{f.title}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{f.type === 'Document' ? 'مستند' : 'ملف مرفوع'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid cols-3">
+            <div className="field">
+              <label>المنصة</label>
+              <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>النبرة</label>
+              <select className="select" value={tone} onChange={(e) => setTone(e.target.value)}>
+                <option value="formal">رسمي</option>
+                <option value="educational">تعليمي</option>
+                <option value="teaser">تشويقي</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>الطول</label>
+              <select className="select" value={length} onChange={(e) => setLength(e.target.value)}>
+                <option value="short">قصير</option>
+                <option value="medium">متوسط</option>
+                <option value="long">مطوّل</option>
+              </select>
+            </div>
+          </div>
+
+          <button className="btn gold" onClick={generate} disabled={busy || !selected}>
+            <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد من الملف المختار'}
+          </button>
+        </>
+      )}
+
+      {err && <p className="err" style={{ marginTop: 10 }}>{err}</p>}
     </Modal>
   );
 }
@@ -409,7 +584,7 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
         <div className="row">
           {platforms.map((p) => (
             <button key={p} type="button" className={`btn sm ${selected.includes(p) ? '' : 'ghost'}`} onClick={() => toggle(p)}>
-              {PLATFORM_LABELS[p] || p}
+              <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
             </button>
           ))}
         </div>
