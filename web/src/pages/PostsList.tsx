@@ -318,7 +318,13 @@ export default function ContentManagement() {
 function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sortDir, toggleSort, navigate, canDelete, onDelete }: any) {
   const Sort = ({ k, label }: { k: string; label: string }) => (
     <th style={{ cursor: 'pointer' }} onClick={() => toggleSort(k)}>
-      <span className="row" style={{ gap: 4, display: 'inline-flex' }}>{label} <ArrowUpDown size={12} opacity={sortKey === k ? 1 : 0.35} /></span>
+      <span className="row" style={{ gap: 4, display: 'inline-flex' }}>
+        {label}
+        <ArrowUpDown
+          size={12}
+          style={{ opacity: sortKey === k ? 1 : 0.35, transform: sortKey === k && sortDir === 'asc' ? 'rotate(180deg)' : 'none' }}
+        />
+      </span>
     </th>
   );
   return (

@@ -14,7 +14,7 @@ const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('
 function monthLabel(d: Date) {
   return new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric' }).format(d);
 }
-export function fmtAr(s: string) {
+function fmtAr(s: string) {
   const d = parseYMD(s);
   return d ? new Intl.DateTimeFormat('ar', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
 }

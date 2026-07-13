@@ -1,5 +1,3 @@
-import type { Context } from 'hono';
-
 export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
@@ -31,12 +29,4 @@ export type User = {
 
 export type Variables = {
   user: User;
-};
-
-export type AppContext = Context<{ Bindings: Env; Variables: Variables }>;
-
-export const ROLE_LABELS: Record<Role, string> = {
-  writer: 'كاتب محتوى',
-  marketing_manager: 'مدير تسويق',
-  general_manager: 'مدير عام',
 };

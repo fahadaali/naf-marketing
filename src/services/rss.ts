@@ -34,7 +34,7 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
-export function parseFeed(xml: string): ParsedItem[] {
+function parseFeed(xml: string): ParsedItem[] {
   const items: ParsedItem[] = [];
   const blocks = xml.match(/<(item|entry)[\s\S]*?<\/(item|entry)>/gi) || [];
   for (const block of blocks) {
@@ -75,7 +75,7 @@ async function fetchOnce(url: string, timeoutMs = 15000): Promise<Response> {
   }
 }
 
-export async function fetchFeed(url: string, attempts = 3): Promise<ParsedItem[]> {
+async function fetchFeed(url: string, attempts = 3): Promise<ParsedItem[]> {
   let lastErr = '';
   for (let i = 0; i < attempts; i++) {
     if (i > 0) await sleep(1000 * i); // تراجع تصاعدي: 1s ثم 2s

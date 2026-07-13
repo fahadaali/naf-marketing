@@ -59,17 +59,6 @@ export function displayStatus(post: { status: string; pending_at?: string | null
   return post.status;
 }
 
-export const PLATFORM_LABELS: Record<string, string> = {
-  linkedin: 'لينكدإن',
-  x: 'إكس',
-  instagram: 'إنستغرام',
-  snapchat: 'سناب شات',
-  tiktok: 'تيك توك',
-  facebook: 'فيسبوك',
-  youtube: 'يوتيوب',
-  threads: 'ثريدز',
-};
-
 export const ROLE_LABELS: Record<string, string> = {
   writer: 'كاتب محتوى',
   marketing_manager: 'مدير تسويق',

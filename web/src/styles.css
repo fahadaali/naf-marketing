@@ -182,8 +182,6 @@ a:hover { text-decoration: underline; }
 
 .btn.ghost { background: transparent; color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
 .btn.ghost:hover { background: hsl(var(--accent)); }
-.btn.outline { background: transparent; color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
-.btn.outline:hover { background: hsl(var(--accent)); }
 .btn.danger { background: hsl(var(--destructive)); color: #fff; }
 .btn.danger:hover { background: hsl(var(--destructive) / 0.9); }
 .btn.success { background: hsl(var(--success)); color: #fff; }
@@ -237,10 +235,6 @@ a:hover { text-decoration: underline; }
 /* ===== المؤشرات ===== */
 .stat .num { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
 .stat .label { color: hsl(var(--muted-foreground)); font-size: 13px; margin-top: 2px; }
-.stat-icon {
-  width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
-  background: hsl(var(--primary-soft)); color: hsl(var(--primary)); margin-bottom: 12px;
-}
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
@@ -334,7 +328,6 @@ h3, h4 { letter-spacing: -0.01em; }
 .seg button.on { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.1); }
 
 /* ===== قائمة منسدلة ===== */
-.menu-wrap { position: relative; }
 .menu {
   background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: 10px;
   box-shadow: 0 10px 30px hsl(var(--shadow-color) / 0.18); padding: 6px; min-width: 180px;
