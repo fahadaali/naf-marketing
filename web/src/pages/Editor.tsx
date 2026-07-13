@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles,
@@ -13,13 +13,15 @@ import {
   Trash2,
   PenLine,
   BookOpen,
+  ImagePlus,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
-import RichEditor from '../components/RichEditor';
+import RichEditor, { type RichEditorHandle } from '../components/RichEditor';
 import Modal from '../components/Modal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
+import { mediaEmbedHtml } from '../mediaEmbed';
 
 export default function Editor() {
   const { id } = useParams();
@@ -44,8 +46,10 @@ export default function Editor() {
 
   const [showAI, setShowAI] = useState(false);
   const [showKB, setShowKB] = useState(false);
+  const [showMediaGen, setShowMediaGen] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const editorRef = useRef<RichEditorHandle>(null);
 
   async function loadPost(pid: string) {
     const d = await api.get(`/posts/${pid}`);
@@ -148,13 +152,17 @@ export default function Editor() {
   }
 
   async function uploadMedia(file: File) {
-    const form = new FormData();
-    form.append('file', file);
-    const d = await api.upload('/media', form);
-    // إدراج مرجع الوسيط في المحتوى
-    if (contentType === 'image') setBody(body + `<p><img src="${d.url}" style="max-width:100%"/></p>`);
-    else setBody(body + `<p>مرفق: <a href="${d.url}">${d.url}</a></p>`);
-    setMsg('تم رفع الوسيط');
+    setErr(''); setMsg('جارٍ رفع الوسيط…');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const d = await api.upload('/media', form);
+      // إدراج الوسيط عند موضع المؤشر ليبقى مثبّتاً في مكانه
+      editorRef.current?.insertHtml(mediaEmbedHtml(d));
+      setMsg('تم إدراج الوسيط');
+    } catch (e: any) {
+      setErr(e.message);
+    }
   }
 
   const overdue =
@@ -204,10 +212,23 @@ export default function Editor() {
                 {can('media.upload') && (
                   <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
                     <Paperclip size={15} /> رفع ملف
-                    <input type="file" hidden onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
+                    <input
+                      type="file"
+                      hidden
+                      accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+                      onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])}
+                    />
                   </label>
                 )}
+                {can('ai.generate') && (
+                  <button className="btn ghost sm" type="button" onClick={() => setShowMediaGen(true)}>
+                    <ImagePlus size={15} /> توليد من وسيط
+                  </button>
+                )}
               </div>
+              <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
+                ضع المؤشر في المكان المطلوب داخل المحتوى ثم ارفع الملف — يُدرَج الوسيط في موضعه (صور/صوت/فيديو/PDF/وورد/إكسل) مع إمكانية الاستعراض والتنزيل.
+              </p>
             </div>
           )}
 
@@ -216,7 +237,7 @@ export default function Editor() {
             {readOnly ? (
               <div className="rte" dangerouslySetInnerHTML={{ __html: body }} />
             ) : (
-              <RichEditor value={body} onChange={setBody} placeholder="اكتب المحتوى، أو ولّده بالذكاء الاصطناعي..." />
+              <RichEditor ref={editorRef} value={body} onChange={setBody} placeholder="اكتب المحتوى، أو ولّده بالذكاء الاصطناعي..." />
             )}
           </div>
 
@@ -322,17 +343,29 @@ export default function Editor() {
         </div>
       </div>
 
-      {showAI && <AIModal platforms={platforms} onClose={() => setShowAI(false)} onResult={(t) => { setBody(body + `<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowAI(false); }} />}
+      {showAI && (
+        <AIModal
+          platforms={platforms}
+          onClose={() => setShowAI(false)}
+          onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowAI(false); }}
+        />
+      )}
       {showKB && (
         <KBModal
           platforms={platforms}
           onClose={() => setShowKB(false)}
           onResult={(t, title) => {
-            setBody(body + `<p>${t.replace(/\n/g, '<br/>')}</p>`);
-            if (!title && title !== '') return;
-            setTitle((cur) => cur || title);
+            editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`);
+            if (title) setTitle((cur) => cur || title);
             setShowKB(false);
           }}
+        />
+      )}
+      {showMediaGen && (
+        <MediaGenModal
+          platforms={platforms}
+          onClose={() => setShowMediaGen(false)}
+          onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowMediaGen(false); }}
         />
       )}
       {showReject && (
@@ -408,6 +441,82 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
       {err && <p className="err">{err}</p>}
       <button className="btn gold" onClick={run} disabled={busy || !topic}>
         <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد وحقن في المحرر'}
+      </button>
+    </Modal>
+  );
+}
+
+// توليد محتوى من وسيط مرفوع (صورة/PDF عبر رؤية Claude؛ غيرها بالاسم)
+function MediaGenModal({
+  platforms,
+  onClose,
+  onResult,
+}: {
+  platforms: string[];
+  onClose: () => void;
+  onResult: (text: string) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [platform, setPlatform] = useState(platforms[0] || 'linkedin');
+  const [tone, setTone] = useState('formal');
+  const [length, setLength] = useState('medium');
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+
+  async function run() {
+    if (!file) return;
+    setErr('');
+    try {
+      setBusy('جارٍ رفع الوسيط…');
+      const form = new FormData();
+      form.append('file', file);
+      const up = await api.upload('/media', form);
+      setBusy('جارٍ تحليل الوسيط وتوليد المحتوى…');
+      const d = await api.post(`/media/${up.id}/generate`, { platform, tone, length });
+      onResult(d.text);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <Modal title="توليد محتوى من وسيط" onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        ارفع صورة أو ملف PDF ليحلّله Claude ويولّد منه منشوراً. الأنواع الأخرى (صوت/فيديو/وورد/إكسل) يُستفاد من اسمها كموضوع.
+      </p>
+      <label className="btn ghost" style={{ cursor: 'pointer' }}>
+        <ImagePlus size={15} /> {file ? file.name : 'اختيار وسيط'}
+        <input type="file" hidden accept="image/*,application/pdf,audio/*,video/*,.doc,.docx,.xls,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+      </label>
+      <div className="grid cols-3" style={{ marginTop: 14 }}>
+        <div className="field">
+          <label>المنصة</label>
+          <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+            {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>النبرة</label>
+          <select className="select" value={tone} onChange={(e) => setTone(e.target.value)}>
+            <option value="formal">رسمي</option>
+            <option value="educational">تعليمي</option>
+            <option value="teaser">تشويقي</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>الطول</label>
+          <select className="select" value={length} onChange={(e) => setLength(e.target.value)}>
+            <option value="short">قصير</option>
+            <option value="medium">متوسط</option>
+            <option value="long">مطوّل</option>
+          </select>
+        </div>
+      </div>
+      {err && <p className="err">{err}</p>}
+      <button className="btn gold" onClick={run} disabled={!file || !!busy}>
+        <Sparkles size={16} /> {busy || 'توليد وحقن في المحرر'}
       </button>
     </Modal>
   );
