@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
+import { DateRangePicker } from '../components/DatePicker';
 
 // الداشبورد الموحّد للتحليلات مع فلاتر: النطاق الزمني، المنصة، الحملة.
 export default function Analytics() {
@@ -18,8 +19,9 @@ export default function Analytics() {
     const q = new URLSearchParams();
     if (platform) q.set('platform', platform);
     if (campaign) q.set('campaign_id', campaign);
-    if (from) q.set('from', new Date(from).toISOString());
-    if (to) q.set('to', new Date(to).toISOString());
+    // حدود اليوم بتوقيت الرياض (UTC+3)
+    if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
+    if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
     api.get('/analytics/dashboard?' + q.toString()).then(setData).catch((e) => setMsg(e.message));
   }
 
@@ -54,23 +56,19 @@ export default function Analytics() {
 
       {/* الفلاتر */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="grid cols-4">
+        <div className="row" style={{ gap: 16, alignItems: 'flex-end' }}>
           <div className="field" style={{ margin: 0 }}>
-            <label>من</label>
-            <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <label>النطاق الزمني</label>
+            <DateRangePicker from={from} to={to} onChange={(f, t2) => { setFrom(f); setTo(t2); }} />
           </div>
-          <div className="field" style={{ margin: 0 }}>
-            <label>إلى</label>
-            <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="field" style={{ margin: 0 }}>
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
             <label>المنصة</label>
             <select className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
               <option value="">كل المنصات</option>
               {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
             </select>
           </div>
-          <div className="field" style={{ margin: 0 }}>
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
             <label>الحملة</label>
             <select className="select" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
               <option value="">كل الحملات</option>

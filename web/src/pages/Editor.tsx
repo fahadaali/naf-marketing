@@ -19,6 +19,7 @@ import { useAuth } from '../auth';
 import RichEditor from '../components/RichEditor';
 import Modal from '../components/Modal';
 import { PlatformIcon, platformLabel } from '../platforms';
+import { DateTimePicker } from '../components/DatePicker';
 
 export default function Editor() {
   const { id } = useParams();
@@ -591,7 +592,7 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
       </div>
       <div className="field">
         <label>الموعد (بتوقيت الرياض)</label>
-        <input className="input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+        <DateTimePicker value={when} onChange={setWhen} inline />
       </div>
       {err && <p className="err">{err}</p>}
       <button className="btn gold" disabled={!selected.length || !when} onClick={submit}>تأكيد الجدولة</button>

@@ -7,6 +7,16 @@ import {
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
+import { DateRangePicker } from '../components/DatePicker';
+
+// تاريخ العنصر بصيغة YYYY-MM-DD بتوقيت الرياض (للفلترة الزمنية)
+function riyadhYMD(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  } catch {
+    return '';
+  }
+}
 
 const SOURCE: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
 const TYPE: Record<string, string> = { text: 'نص', image: 'صورة', video: 'فيديو' };
@@ -32,13 +42,20 @@ export default function ContentManagement() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [view, setView] = useState<'table' | 'kanban' | 'gantt'>('table');
+  const [view, setView] = useState<'table' | 'kanban' | 'gantt'>(
+    () => (localStorage.getItem('naf-content-view') as any) || 'table',
+  );
+  useEffect(() => {
+    localStorage.setItem('naf-content-view', view);
+  }, [view]);
   const [search, setSearch] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fSource, setFSource] = useState('');
   const [fType, setFType] = useState('');
   const [fCampaign, setFCampaign] = useState('');
   const [fAuthor, setFAuthor] = useState('');
+  const [fFrom, setFFrom] = useState('');
+  const [fTo, setFTo] = useState('');
   const [sortKey, setSortKey] = useState('updated_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -63,6 +80,11 @@ export default function ContentManagement() {
       if (fType && p.content_type !== fType) return false;
       if (fCampaign && p.campaign_id !== fCampaign) return false;
       if (fAuthor && p.author_name !== fAuthor) return false;
+      if (fFrom || fTo) {
+        const d = riyadhYMD(p.updated_at);
+        if (fFrom && d < fFrom) return false;
+        if (fTo && d > fTo) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         if (!(`${p.title} ${stripHtml(p.body)}`.toLowerCase().includes(q))) return false;
@@ -76,7 +98,7 @@ export default function ContentManagement() {
       return sortDir === 'asc' ? c : -c;
     });
     return r;
-  }, [posts, fStatus, fSource, fType, fCampaign, fAuthor, search, sortKey, sortDir]);
+  }, [posts, fStatus, fSource, fType, fCampaign, fAuthor, fFrom, fTo, search, sortKey, sortDir]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -111,6 +133,42 @@ export default function ContentManagement() {
     let ok = 0;
     for (const p of selectedPosts()) { try { await api.patch(`/posts/${p.id}`, { campaign_id: campaignId || null }); ok++; } catch {} }
     setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${ok} عنصراً`); load();
+  }
+
+  // السحب والإفلات في كانبان: يحدّد الإجراء المسموح حسب الانتقال، ويحترم التسلسل والصلاحيات (الخادم يتحقق).
+  function moveAction(from: string, toCol: string): 'submit' | 'approve' | 'reject' | 'archive' | null {
+    if (toCol === 'pending_marketing' && ['draft', 'rejected'].includes(from)) return 'submit';
+    if (toCol === 'pending_gm' && from === 'pending_marketing') return 'approve';
+    if (toCol === 'approved' && from === 'pending_gm') return 'approve';
+    if (toCol === 'rejected' && ['pending_marketing', 'pending_gm'].includes(from)) return 'reject';
+    if (toCol === 'archived' && from === 'published') return 'archive';
+    return null;
+  }
+
+  async function onMove(post: any, toCol: string) {
+    setErr(''); setMsg('');
+    const action = moveAction(post.status, toCol);
+    if (!action) {
+      setErr('انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
+      return;
+    }
+    let note: string | undefined;
+    if (action === 'reject') {
+      const r = prompt('سبب الرفض (إلزامي):');
+      if (!r || !r.trim()) return;
+      note = r.trim();
+    }
+    // تحديث تفاؤلي ثم تأكيد من الخادم
+    const target = action === 'reject' ? 'rejected' : toCol;
+    setPosts((ps) => ps.map((p) => (p.id === post.id ? { ...p, status: target } : p)));
+    try {
+      await api.post(`/posts/${post.id}/action`, { action, note });
+      setMsg('تم نقل المحتوى');
+      load();
+    } catch (e: any) {
+      setErr(e.message);
+      load(); // تراجع
+    }
   }
 
   function doExport(fmt: 'csv' | 'json' | 'md') {
@@ -188,6 +246,7 @@ export default function ContentManagement() {
             <option value="">كل الكُتّاب</option>
             {authors.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
+          <DateRangePicker from={fFrom} to={fTo} onChange={(f, t) => { setFFrom(f); setFTo(t); }} placeholder="كل التواريخ" />
         </div>
 
         <div className="row" style={{ marginTop: 12 }}>
@@ -233,7 +292,7 @@ export default function ContentManagement() {
           onDelete={async (id: string) => { if (confirm('حذف هذا المحتوى نهائياً؟')) { try { await api.del(`/posts/${id}`); load(); } catch (e: any) { setErr(e.message); } } }}
         />
       )}
-      {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} />}
+      {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${n} عنصراً`); load(); }} />}
@@ -310,24 +369,49 @@ const KANBAN_COLS: { key: string; statuses: string[] }[] = [
   { key: 'published', statuses: ['published'] },
   { key: 'archived', statuses: ['archived'] },
 ];
-function KanbanView({ rows, navigate }: any) {
+function KanbanView({ rows, navigate, onMove }: any) {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState<string | null>(null);
   const cols = KANBAN_COLS.map((col) => ({
     ...col,
     items: rows.filter((p: any) => col.statuses.includes(displayStatus(p))),
   })).filter((c) => c.items.length > 0 || ['draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published'].includes(c.key));
+
+  function handleDrop(colKey: string) {
+    const post = rows.find((p: any) => p.id === dragId);
+    setDragId(null);
+    setOverCol(null);
+    if (post) onMove(post, colKey);
+  }
+
   return (
     <div style={{ overflowX: 'auto' }}>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>💡 اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
-          <div key={col.key} className="kanban-col" style={{ width: 260, flexShrink: 0 }}>
+          <div
+            key={col.key}
+            className={`kanban-col ${overCol === col.key && dragId ? 'dragover' : ''}`}
+            style={{ width: 260, flexShrink: 0 }}
+            onDragOver={(e) => { e.preventDefault(); setOverCol(col.key); }}
+            onDragLeave={() => setOverCol((c) => (c === col.key ? null : c))}
+            onDrop={(e) => { e.preventDefault(); handleDrop(col.key); }}
+          >
             <h4 className="row">
               <span className={`badge ${STATUS_BADGE[col.key]}`}>{STATUS_LABELS[col.key]}</span>
               <div className="spacer" /><span className="muted">{col.items.length}</span>
             </h4>
             {col.items.map((p: any) => (
-              <div key={p.id} className="kanban-card" onClick={() => navigate(`/editor/${p.id}`)}>
+              <div
+                key={p.id}
+                className={`kanban-card ${dragId === p.id ? 'dragging' : ''}`}
+                draggable
+                onDragStart={() => setDragId(p.id)}
+                onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                onClick={() => navigate(`/editor/${p.id}`)}
+              >
                 <div style={{ fontWeight: 500, marginBottom: 6 }}>{p.title}</div>
-                <div className="row" style={{ fontSize: 11 }} >
+                <div className="row" style={{ fontSize: 11 }}>
                   <span className="muted">{SOURCE[p.source] || p.source}</span>
                   {p.campaign_name && <span className="badge gray">{p.campaign_name}</span>}
                   <div className="spacer" />

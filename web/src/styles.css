@@ -385,6 +385,50 @@ h3, h4 { letter-spacing: -0.01em; }
 .gantt-tick { position: absolute; top: 0; bottom: 0; border-inline-start: 1px dashed hsl(var(--border)); font-size: 10px; color: hsl(var(--muted-foreground)); padding: 4px 4px 0; }
 .gantt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: hsl(var(--destructive)); z-index: 1; }
 
+/* ===== منتقي التواريخ ===== */
+.dp-trigger {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 9px 12px; border: 1px solid hsl(var(--input)); border-radius: 8px;
+  background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: inherit; font-size: 14px;
+}
+.dp-trigger:hover { border-color: hsl(var(--primary)); }
+.dp-trigger .ph { color: hsl(var(--muted-foreground)); }
+.dp-pop {
+  position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 40;
+  background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: 12px;
+  box-shadow: 0 12px 34px hsl(var(--shadow-color) / 0.2); padding: 12px; display: flex; gap: 12px;
+}
+.dp-inline { display: flex; gap: 12px; }
+.dp-presets { display: flex; flex-direction: column; gap: 4px; border-inline-end: 1px solid hsl(var(--border)); padding-inline-end: 10px; }
+.dp-presets button {
+  background: transparent; border: none; color: hsl(var(--foreground)); font-family: inherit; font-size: 13px;
+  text-align: right; padding: 7px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+.dp-presets button:hover { background: hsl(var(--accent)); }
+.dp-cal { width: 252px; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dp-head b { font-size: 14px; }
+.dp-nav { width: 30px; height: 30px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); cursor: pointer; display: grid; place-items: center; color: hsl(var(--foreground)); }
+.dp-nav:hover { background: hsl(var(--accent)); }
+.dp-week, .dp-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dp-week span { text-align: center; font-size: 11px; color: hsl(var(--muted-foreground)); padding: 4px 0; font-weight: 600; }
+.dp-day {
+  aspect-ratio: 1; border: none; background: transparent; border-radius: 7px; cursor: pointer;
+  font-family: inherit; font-size: 13px; color: hsl(var(--foreground)); display: grid; place-items: center;
+}
+.dp-day:hover { background: hsl(var(--accent)); }
+.dp-day.other { color: hsl(var(--muted-foreground)); opacity: .4; }
+.dp-day.today { box-shadow: inset 0 0 0 1px hsl(var(--primary)); }
+.dp-day.inrange { background: hsl(var(--primary-soft)); border-radius: 0; }
+.dp-day.sel { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+.dp-time { margin-top: 10px; border-top: 1px solid hsl(var(--border)); padding-top: 10px; }
+
+/* ===== drag-drop kanban ===== */
+.kanban-col.dragover { outline: 2px dashed hsl(var(--primary)); outline-offset: -2px; background: hsl(var(--primary-soft)); }
+.kanban-card { transition: box-shadow .1s; }
+.kanban-card.dragging { opacity: .5; }
+.kanban-card[draggable='true'] { cursor: grab; }
+
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: hsl(var(--muted)); border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 8px; background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--purple))); border-radius: 999px; }
