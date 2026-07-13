@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles,
-  Paperclip,
   Save,
   Send,
   Check,
@@ -21,7 +20,8 @@ import RichEditor, { type RichEditorHandle } from '../components/RichEditor';
 import Modal from '../components/Modal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
-import { mediaEmbedHtml } from '../mediaEmbed';
+import { MediaViewer } from '../components/MediaViewer';
+import { mediaFromEl, type MediaInfo } from '../mediaEmbed';
 
 export default function Editor() {
   const { id } = useParams();
@@ -49,6 +49,7 @@ export default function Editor() {
   const [showMediaGen, setShowMediaGen] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [viewer, setViewer] = useState<MediaInfo | null>(null);
   const editorRef = useRef<RichEditorHandle>(null);
 
   async function loadPost(pid: string) {
@@ -151,17 +152,18 @@ export default function Editor() {
     }
   }
 
-  async function uploadMedia(file: File) {
+  // يرفع الملف ويُعيد بياناته؛ المحرر يتولّى إدراجه عند موضع المؤشر.
+  async function uploadFn(file: File) {
     setErr(''); setMsg('جارٍ رفع الوسيط…');
     try {
       const form = new FormData();
       form.append('file', file);
       const d = await api.upload('/media', form);
-      // إدراج الوسيط عند موضع المؤشر ليبقى مثبّتاً في مكانه
-      editorRef.current?.insertHtml(mediaEmbedHtml(d));
       setMsg('تم إدراج الوسيط');
+      return d;
     } catch (e: any) {
       setErr(e.message);
+      return null;
     }
   }
 
@@ -209,17 +211,6 @@ export default function Editor() {
                     <BookOpen size={15} /> مركز المعرفة
                   </button>
                 )}
-                {can('media.upload') && (
-                  <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
-                    <Paperclip size={15} /> رفع ملف
-                    <input
-                      type="file"
-                      hidden
-                      accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
-                      onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])}
-                    />
-                  </label>
-                )}
                 {can('ai.generate') && (
                   <button className="btn ghost sm" type="button" onClick={() => setShowMediaGen(true)}>
                     <ImagePlus size={15} /> توليد من وسيط
@@ -227,7 +218,7 @@ export default function Editor() {
                 )}
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
-                ضع المؤشر في المكان المطلوب داخل المحتوى ثم ارفع الملف — يُدرَج الوسيط في موضعه (صور/صوت/فيديو/PDF/وورد/إكسل) مع إمكانية الاستعراض والتنزيل.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك 📎 في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
               </p>
             </div>
           )}
@@ -235,9 +226,20 @@ export default function Editor() {
           <div className="field">
             <label>المحتوى</label>
             {readOnly ? (
-              <div className="rte" dangerouslySetInnerHTML={{ __html: body }} />
+              <div
+                className="rte"
+                dangerouslySetInnerHTML={{ __html: body }}
+                onClick={(e) => { const m = mediaFromEl(e.target); if (m) setViewer(m); }}
+              />
             ) : (
-              <RichEditor ref={editorRef} value={body} onChange={setBody} placeholder="اكتب المحتوى، أو ولّده بالذكاء الاصطناعي..." />
+              <RichEditor
+                ref={editorRef}
+                value={body}
+                onChange={setBody}
+                placeholder="اكتب المحتوى، أو ولّده بالذكاء الاصطناعي..."
+                onUpload={can('media.upload') ? uploadFn : undefined}
+                onMediaClick={setViewer}
+              />
             )}
           </div>
 
@@ -368,6 +370,7 @@ export default function Editor() {
           onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowMediaGen(false); }}
         />
       )}
+      {viewer && <MediaViewer media={viewer} onClose={() => setViewer(null)} />}
       {showReject && (
         <RejectModal
           onClose={() => setShowReject(false)}

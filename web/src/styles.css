@@ -377,30 +377,49 @@ h3, h4 { letter-spacing: -0.01em; }
 .gantt-tick { position: absolute; top: 0; bottom: 0; border-inline-start: 1px dashed hsl(var(--border)); font-size: 10px; color: hsl(var(--muted-foreground)); padding: 4px 4px 0; }
 .gantt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: hsl(var(--destructive)); z-index: 1; }
 
-/* ===== وسائط داخل المحتوى ===== */
+/* ===== وسائط داخل المحتوى (بطاقة مدمجة متمركزة) ===== */
+.rte-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: hsl(var(--border)); }
 .media-embed {
-  margin: 12px 0; border: 1px solid hsl(var(--border)); border-radius: 10px; overflow: hidden;
-  background: hsl(var(--muted) / 0.3); max-width: 520px;
+  display: block; margin: 16px auto; max-width: 360px; cursor: pointer;
+  border: 1px solid hsl(var(--border)); border-radius: 12px; overflow: hidden;
+  background: hsl(var(--card)); transition: border-color .12s, box-shadow .12s; text-align: center;
+  user-select: none;
 }
-.media-embed img, .media-embed video { display: block; width: 100%; max-height: 460px; object-fit: contain; background: #000; }
-.media-embed.media-audio { background: hsl(var(--card)); padding: 10px; }
-.media-embed audio { width: 100%; }
-.media-pdf { width: 100%; height: 460px; border: none; display: block; }
-.media-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 7px 12px; font-size: 12px; background: hsl(var(--card)); border-top: 1px solid hsl(var(--border));
+.media-embed:hover { border-color: hsl(var(--primary)); box-shadow: 0 4px 14px hsl(var(--shadow-color) / 0.12); }
+.media-thumb { display: block; width: 100%; max-height: 240px; object-fit: cover; background: #0b0b0f; }
+.media-cap {
+  padding: 8px 12px; font-size: 12.5px; font-weight: 500; color: hsl(var(--foreground));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.media-name { color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-dl {
-  flex-shrink: 0; font-weight: 600; color: hsl(var(--primary)); text-decoration: none;
-  border: 1px solid hsl(var(--border)); border-radius: 6px; padding: 3px 10px;
+.media-card { display: flex; align-items: center; gap: 12px; padding: 12px; text-align: right; }
+.media-card .media-cap { padding: 0; }
+.media-ic {
+  flex-shrink: 0; width: 46px; height: 46px; border-radius: 10px; display: grid; place-items: center;
+  color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .02em; background: hsl(var(--primary));
 }
-.media-dl:hover { background: hsl(var(--accent)); text-decoration: none; }
-.media-file { display: flex; align-items: center; gap: 12px; padding: 12px; max-width: 420px; }
-.media-ext {
-  flex-shrink: 0; width: 44px; height: 44px; border-radius: 9px; display: grid; place-items: center;
-  background: hsl(var(--primary)); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .02em;
+.media-card.k-video .media-ic { background: #7c3aed; }
+.media-card.k-audio .media-ic { background: #0891b2; }
+.media-card.k-pdf .media-ic { background: #dc2626; }
+.media-card.k-file .media-ic { background: #475569; }
+.media-meta { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
+.media-sub { font-size: 11px; color: hsl(var(--muted-foreground)); }
+
+/* ===== نافذة استعراض الوسائط ===== */
+.mv-overlay {
+  position: fixed; inset: 0; background: rgba(6, 8, 15, 0.82); backdrop-filter: blur(4px);
+  z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fade .12s ease;
 }
+.mv-box {
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 14px;
+  max-width: 920px; width: 100%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0,0,0,.5); animation: pop .14s ease;
+}
+.mv-head { padding: 13px 18px; border-bottom: 1px solid hsl(var(--border)); font-weight: 600; font-size: 14px; }
+.mv-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #0b0b0f; min-height: 220px; }
+.mv-media { max-width: 100%; max-height: 72vh; display: block; }
+.mv-pdf { width: 100%; height: 72vh; border: none; background: #fff; }
+.mv-file { padding: 48px 24px; color: #cdd3e0; text-align: center; }
+.mv-bar { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid hsl(var(--border)); }
 
 /* ===== منتقي التواريخ ===== */
 .dp-trigger {
