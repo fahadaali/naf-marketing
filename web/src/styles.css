@@ -324,6 +324,67 @@ h3, h4 { letter-spacing: -0.01em; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: scale(.97) translateY(4px); } }
 
+/* ===== مبدّل العرض (segmented) ===== */
+.seg { display: inline-flex; background: hsl(var(--muted)); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button {
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent;
+  color: hsl(var(--muted-foreground)); font-family: inherit; font-size: 13px; font-weight: 600;
+  padding: 6px 12px; border-radius: 7px; cursor: pointer;
+}
+.seg button.on { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.1); }
+
+/* ===== قائمة منسدلة ===== */
+.menu-wrap { position: relative; }
+.menu {
+  position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 30;
+  background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: 10px;
+  box-shadow: 0 10px 30px hsl(var(--shadow-color) / 0.18); padding: 6px; min-width: 180px;
+}
+.menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: right;
+  background: transparent; border: none; color: hsl(var(--foreground)); font-family: inherit;
+  font-size: 14px; padding: 8px 10px; border-radius: 7px; cursor: pointer;
+}
+.menu button:hover { background: hsl(var(--accent)); }
+
+/* ===== checkbox ===== */
+.chk { width: 16px; height: 16px; cursor: pointer; accent-color: hsl(var(--primary)); }
+
+/* ===== شريط الإجراءات المجمّعة ===== */
+.bulkbar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 14px;
+  background: hsl(var(--primary-soft)); border: 1px solid hsl(var(--primary) / 0.3); border-radius: 10px;
+  font-size: 14px;
+}
+
+/* ===== بطاقات إحصاء صغيرة قابلة للنقر ===== */
+.chip-stat {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9px; cursor: pointer;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: 13px; font-weight: 600;
+}
+.chip-stat:hover { border-color: hsl(var(--primary)); }
+.chip-stat.on { background: hsl(var(--primary-soft)); border-color: hsl(var(--primary)); }
+.chip-stat b { font-size: 15px; }
+
+/* ===== مخطط جانت ===== */
+.gantt { border: 1px solid hsl(var(--border)); border-radius: 10px; overflow: auto; }
+.gantt-row { display: flex; align-items: stretch; border-bottom: 1px solid hsl(var(--border)); min-height: 40px; }
+.gantt-row:last-child { border-bottom: none; }
+.gantt-label {
+  width: 220px; flex-shrink: 0; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px;
+  border-inline-end: 1px solid hsl(var(--border)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  position: sticky; inset-inline-start: 0; background: hsl(var(--card)); z-index: 1;
+}
+.gantt-track { position: relative; flex: 1; min-width: 640px; }
+.gantt-bar {
+  position: absolute; top: 8px; height: 22px; border-radius: 6px; display: flex; align-items: center;
+  padding: 0 8px; color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; cursor: pointer;
+  box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.15);
+}
+.gantt-head { display: flex; background: hsl(var(--muted) / 0.5); border-bottom: 1px solid hsl(var(--border)); position: sticky; top: 0; z-index: 2; }
+.gantt-tick { position: absolute; top: 0; bottom: 0; border-inline-start: 1px dashed hsl(var(--border)); font-size: 10px; color: hsl(var(--muted-foreground)); padding: 4px 4px 0; }
+.gantt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: hsl(var(--destructive)); z-index: 1; }
+
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: hsl(var(--muted)); border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 8px; background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--purple))); border-radius: 999px; }

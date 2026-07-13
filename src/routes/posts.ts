@@ -125,6 +125,29 @@ postRoutes.post('/', requirePermission('draft.edit'), async (c) => {
   return c.json({ ok: true, id });
 });
 
+// استيراد جماعي: إنشاء مسودات دفعةً واحدة من ملف مستورد (CSV/JSON محوّلين في الواجهة).
+postRoutes.post('/import', requirePermission('draft.edit'), async (c) => {
+  const user = c.get('user');
+  const { items } = await c.req.json<{ items: any[] }>();
+  if (!Array.isArray(items) || items.length === 0) return c.json({ error: 'لا توجد عناصر للاستيراد' }, 400);
+
+  const types = ['text', 'image', 'video'];
+  const stmts = [];
+  for (const it of items.slice(0, 500)) {
+    const title = String(it.title ?? '').trim() || 'مسودة مستوردة';
+    const bodyVal = String(it.body ?? '');
+    const ct = types.includes(it.content_type) ? it.content_type : 'text';
+    stmts.push(
+      c.env.DB.prepare(
+        `INSERT INTO content_posts (id, title, body, content_type, source, author_id, campaign_id)
+         VALUES (?, ?, ?, ?, 'manual', ?, ?)`,
+      ).bind(newId('post'), title, bodyVal, ct, user.id, it.campaign_id || null),
+    );
+  }
+  if (stmts.length) await c.env.DB.batch(stmts);
+  return c.json({ ok: true, created: stmts.length });
+});
+
 // تحديث مسودة
 postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
