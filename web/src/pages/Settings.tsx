@@ -4,6 +4,7 @@ import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel } from '../platforms';
+import { DEFAULT_TONES, type Tone } from '../tones';
 
 export default function Settings() {
   const { can } = useAuth();
@@ -12,6 +13,7 @@ export default function Settings() {
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
     can('settings.manage') && { id: 'feeds', label: 'خلاصات RSS' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
+    can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
   ].filter(Boolean) as { id: string; label: string }[];
 
@@ -29,6 +31,7 @@ export default function Settings() {
       {tab === 'permissions' && <Permissions />}
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
+      {tab === 'ai' && <AITones />}
       {tab === 'integrations' && <Integrations />}
     </div>
   );
@@ -319,6 +322,87 @@ function Platforms() {
       </div>
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
+    </div>
+  );
+}
+
+/* ===== نبرات الذكاء الاصطناعي (البرومبت لكل نبرة) ===== */
+function AITones() {
+  const [tones, setTones] = useState<Tone[]>([]);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [newKey, setNewKey] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then((d) => {
+      const t = d.settings?.ai_tones;
+      setTones(Array.isArray(t) && t.length ? t : DEFAULT_TONES);
+    });
+  }, []);
+
+  function update(i: number, field: keyof Tone, value: string) {
+    setTones((ts) => ts.map((t, idx) => (idx === i ? { ...t, [field]: value } : t)));
+  }
+  function remove(i: number) {
+    setTones((ts) => ts.filter((_, idx) => idx !== i));
+  }
+  function add() {
+    setErr('');
+    const key = newKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للنبرة (مثل: humorous)');
+    if (tones.some((t) => t.key === key)) return setErr('النبرة موجودة مسبقاً');
+    setTones((ts) => [...ts, { key, label: newLabel.trim() || key, prompt: '' }]);
+    setNewKey(''); setNewLabel('');
+  }
+  async function save() {
+    setMsg(''); setErr('');
+    if (!tones.length) return setErr('أبقِ نبرة واحدة على الأقل');
+    if (tones.some((t) => !t.prompt.trim())) return setErr('اكتب برومبت لكل نبرة');
+    await api.put('/settings', { ai_tones: tones });
+    setMsg('تم حفظ النبرات');
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>نبرات الذكاء الاصطناعي</h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        لكل نبرة برومبت يُرسَل لوكيل الذكاء الاصطناعي عند التوليد. عدّل النص أو أضف/احذف نبرات حسب حاجتك.
+      </p>
+
+      {tones.map((t, i) => (
+        <div className="card" key={i} style={{ marginBottom: 12, background: 'hsl(var(--muted) / 0.35)' }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <div className="field" style={{ margin: 0, width: 220 }}>
+              <label>الاسم المعروض</label>
+              <input className="input" value={t.label} onChange={(e) => update(i, 'label', e.target.value)} />
+            </div>
+            <div className="field" style={{ margin: 0, width: 160 }}>
+              <label>المعرّف</label>
+              <input className="input" value={t.key} disabled />
+            </div>
+            <div className="spacer" />
+            <button className="btn danger sm" onClick={() => remove(i)} title="حذف النبرة"><Trash2 size={14} /></button>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>البرومبت (توجيه النبرة للذكاء الاصطناعي)</label>
+            <textarea className="textarea" style={{ minHeight: 90 }} value={t.prompt} onChange={(e) => update(i, 'prompt', e.target.value)} />
+          </div>
+        </div>
+      ))}
+
+      <div className="field">
+        <label>إضافة نبرة جديدة</label>
+        <div className="row">
+          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+          <input className="input" style={{ flex: 1 }} placeholder="الاسم بالعربية" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+          <button className="btn ghost" onClick={add}><Plus size={15} /> إضافة</button>
+        </div>
+      </div>
+
+      {err && <p className="err">{err}</p>}
+      {msg && <p className="ok">{msg}</p>}
+      <button className="btn" onClick={save}>حفظ النبرات</button>
     </div>
   );
 }

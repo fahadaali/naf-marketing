@@ -6,20 +6,23 @@ const API_URL = 'https://api.anthropic.com/v1/messages';
 
 export type GenerateOptions = {
   platform?: string;
-  tone?: 'formal' | 'educational' | 'teaser';
+  tone?: string; // مفتاح النبرة (قابل للتخصيص من الإعدادات)
   length?: 'short' | 'medium' | 'long';
   adStyle?: string;
   language?: string; // عربي افتراضياً
   topic: string;
-  sourceText?: string; // للصياغة من خبر
+  sourceText?: string; // للصياغة من خبر أو مرجع
   mode?: 'generate' | 'rewrite';
 };
 
-const TONE_AR: Record<string, string> = {
-  formal: 'رسمي ومهني يليق بشركة استشارات قانونية',
-  educational: 'تعليمي يشرح المفاهيم القانونية ببساطة',
-  teaser: 'تشويقي جذّاب يحث على التفاعل',
-};
+export type ToneDef = { key: string; label: string; prompt: string };
+
+// النبرات الافتراضية (تُستخدم إن لم يضبط المدير نبرات مخصّصة في الإعدادات)
+export const DEFAULT_TONES: ToneDef[] = [
+  { key: 'formal', label: 'رسمي', prompt: 'اكتب بأسلوب رسمي خبري محايد يليق ببيان صادر عن شركة استشارات قانونية، بصياغة قريبة من الخبر أو الإعلان الرسمي، دون ترويج مباشر للخدمات.' },
+  { key: 'marketing', label: 'تسويقي', prompt: 'اكتب بأسلوب تسويقي جذّاب يربط الموضوع بخدمات شركة ناف للاستشارات القانونية، ويبرز كيف تساعد ناف العميل في هذا الجانب، ويحثّ على التواصل معها.' },
+  { key: 'knowledge', label: 'معرفي', prompt: 'انقل معرفة قانونية متخصصة من المصدر: إن كان المصدر طويلاً فاختر جزئية دقيقة ومفيدة واعرضها كمعلومة قانونية متخصصة؛ وإن كان قصيراً فلخّص المعرفة الواردة فيه واكتبها بوضوح وإيجاز.' },
+];
 
 const LENGTH_AR: Record<string, string> = {
   short: 'قصير (حتى ٥٠ كلمة)',
@@ -27,33 +30,44 @@ const LENGTH_AR: Record<string, string> = {
   long: 'مطوّل (١٥٠–٢٥٠ كلمة)',
 };
 
-function buildPrompt(o: GenerateOptions): string {
+async function tonePrompt(env: Env, key?: string): Promise<string> {
+  let tones = DEFAULT_TONES;
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'ai_tones'").first<{ value: string }>();
+    if (row?.value) {
+      const parsed = JSON.parse(row.value);
+      if (Array.isArray(parsed) && parsed.length) tones = parsed;
+    }
+  } catch { /* استخدم الافتراضي */ }
+  const t = tones.find((x) => x.key === key) || tones[0];
+  return t?.prompt || DEFAULT_TONES[0].prompt;
+}
+
+function buildPrompt(o: GenerateOptions, toneInstruction: string): string {
   const lang = o.language || 'العربية';
-  const tone = TONE_AR[o.tone || 'formal'];
   const length = LENGTH_AR[o.length || 'medium'];
   const platform = o.platform || 'وسائل التواصل الاجتماعي';
+  const settings = `المنصة المستهدفة: ${platform}. الطول: ${length}. اللغة: ${lang}.`;
 
   if (o.mode === 'rewrite' && o.sourceText) {
     return [
-      `أعد صياغة وتلخيص الخبر التالي كمنشور تسويقي لشركة «ناف» للاستشارات القانونية في الرياض.`,
+      `أنت كاتب محتوى لشركة «ناف» للاستشارات القانونية في الرياض. المطلوب إنشاء منشور من المصدر التالي.`,
       `النص المصدر:\n"""${o.sourceText}"""`,
-      `المنصة المستهدفة: ${platform}. النبرة: ${tone}. الطول: ${length}. اللغة: ${lang}.`,
+      `توجيه النبرة: ${toneInstruction}`,
+      settings,
       o.adStyle ? `أسلوب الإعلان: ${o.adStyle}.` : '',
       `اكتب المنشور النهائي فقط دون مقدمات أو شرح.`,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    ].filter(Boolean).join('\n\n');
   }
 
   return [
-    `اكتب منشوراً تسويقياً لشركة «ناف» للاستشارات القانونية في الرياض.`,
+    `أنت كاتب محتوى لشركة «ناف» للاستشارات القانونية في الرياض.`,
     `الموضوع: ${o.topic}.`,
-    `المنصة المستهدفة: ${platform}. النبرة: ${tone}. الطول: ${length}. اللغة: ${lang}.`,
+    `توجيه النبرة: ${toneInstruction}`,
+    settings,
     o.adStyle ? `أسلوب الإعلان: ${o.adStyle}.` : '',
     `اكتب المنشور النهائي فقط دون مقدمات أو شرح، بصياغة احترافية ملائمة للقطاع القانوني.`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  ].filter(Boolean).join('\n\n');
 }
 
 export async function generateText(env: Env, options: GenerateOptions): Promise<string> {
@@ -64,6 +78,7 @@ export async function generateText(env: Env, options: GenerateOptions): Promise<
     }\n\nهذا نص تجريبي يُستبدل بمخرجات Claude عند ضبط CLAUDE_API_KEY.`;
   }
 
+  const instruction = await tonePrompt(env, options.tone);
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -74,7 +89,7 @@ export async function generateText(env: Env, options: GenerateOptions): Promise<
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: buildPrompt(options) }],
+      messages: [{ role: 'user', content: buildPrompt(options, instruction) }],
     }),
   });
 
@@ -103,10 +118,12 @@ export async function generateFromMedia(
     return `[مسودة تجريبية من وسيط — لم يُضبط مفتاح Claude]\n\nالملف: ${filename}\n\nيُستبدل هذا النص بتحليل Claude للوسيط عند ضبط المفتاح.`;
   }
 
+  const toneText = await tonePrompt(env, options.tone);
   const instruction = [
-    `اكتب منشوراً تسويقياً لشركة «ناف» للاستشارات القانونية في الرياض مستنداً إلى ${isPdf ? 'المستند' : 'الصورة'} المرفق.`,
-    `المنصة: ${options.platform || 'وسائل التواصل'}. النبرة: ${TONE_AR[options.tone || 'formal']}. الطول: ${LENGTH_AR[options.length || 'medium']}. اللغة: العربية.`,
-    `استخرج الأفكار الرئيسية من ${isPdf ? 'المستند' : 'الصورة'} وحوّلها إلى منشور احترافي. اكتب المنشور النهائي فقط.`,
+    `أنت كاتب محتوى لشركة «ناف» للاستشارات القانونية في الرياض. أنشئ منشوراً مستنداً إلى ${isPdf ? 'المستند' : 'الصورة'} المرفق.`,
+    `توجيه النبرة: ${toneText}`,
+    `المنصة: ${options.platform || 'وسائل التواصل'}. الطول: ${LENGTH_AR[options.length || 'medium']}. اللغة: العربية.`,
+    `استند إلى محتوى ${isPdf ? 'المستند' : 'الصورة'} فعلاً. اكتب المنشور النهائي فقط.`,
   ].join('\n\n');
 
   const mediaBlock = isImage

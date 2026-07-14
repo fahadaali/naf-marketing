@@ -40,7 +40,7 @@ export default function News() {
     try {
       let body = `<p>${(item.summary || '').replace(/\n/g, '<br/>')}</p><p><a href="${item.link}">${item.link}</a></p>`;
       if (rewrite) {
-        const d = await api.post(`/rss/news/${item.id}/rewrite`, { tone: 'formal', length: 'medium' });
+        const d = await api.post(`/rss/news/${item.id}/rewrite`, { length: 'medium' });
         body = `<p>${d.text.replace(/\n/g, '<br/>')}</p>`;
       }
       const params = new URLSearchParams({ news: item.id, title: item.title || 'خبر', body });

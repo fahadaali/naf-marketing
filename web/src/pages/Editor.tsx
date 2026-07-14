@@ -22,6 +22,7 @@ import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, type MediaInfo } from '../mediaEmbed';
+import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 
 export default function Editor() {
   const { id } = useParams();
@@ -41,6 +42,7 @@ export default function Editor() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
+  const [tones, setTones] = useState<Tone[]>(DEFAULT_TONES);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -69,6 +71,7 @@ export default function Editor() {
     api.get('/settings').then((d) => {
       setPlatforms(d.settings?.enabled_platforms || []);
       setPlatLabels(d.settings?.platform_labels || {});
+      setTones(tonesFrom(d.settings));
     });
     if (id) loadPost(id);
     // تحويل خبر إلى مسودة: يأتي عبر ?news=<id>&title=&body=
@@ -348,6 +351,7 @@ export default function Editor() {
       {showAI && (
         <AIModal
           platforms={platforms}
+          tones={tones}
           onClose={() => setShowAI(false)}
           onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowAI(false); }}
         />
@@ -355,6 +359,7 @@ export default function Editor() {
       {showKB && (
         <KBModal
           platforms={platforms}
+          tones={tones}
           onClose={() => setShowKB(false)}
           onResult={(t, title) => {
             editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`);
@@ -366,6 +371,7 @@ export default function Editor() {
       {showMediaGen && (
         <MediaGenModal
           platforms={platforms}
+          tones={tones}
           onClose={() => setShowMediaGen(false)}
           onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowMediaGen(false); }}
         />
@@ -391,10 +397,10 @@ export default function Editor() {
 
 const SCHED_STATUS: Record<string, string> = { pending: 'معلّق', processing: 'قيد النشر', published: 'منشور', failed: 'فشل' };
 
-function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClose: () => void; onResult: (t: string) => void }) {
+function AIModal({ platforms, tones, onClose, onResult }: { platforms: string[]; tones: Tone[]; onClose: () => void; onResult: (t: string) => void }) {
   const [topic, setTopic] = useState('');
   const [platform, setPlatform] = useState(platforms[0] || 'linkedin');
-  const [tone, setTone] = useState('formal');
+  const [tone, setTone] = useState(tones[0]?.key || 'formal');
   const [length, setLength] = useState('medium');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -427,9 +433,7 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
         <div className="field">
           <label>النبرة</label>
           <select className="select" value={tone} onChange={(e) => setTone(e.target.value)}>
-            <option value="formal">رسمي</option>
-            <option value="educational">تعليمي</option>
-            <option value="teaser">تشويقي</option>
+            {tones.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
         </div>
         <div className="field">
@@ -452,16 +456,18 @@ function AIModal({ platforms, onClose, onResult }: { platforms: string[]; onClos
 // توليد محتوى من وسيط مرفوع (صورة/PDF عبر رؤية Claude؛ غيرها بالاسم)
 function MediaGenModal({
   platforms,
+  tones,
   onClose,
   onResult,
 }: {
   platforms: string[];
+  tones: Tone[];
   onClose: () => void;
   onResult: (text: string) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [platform, setPlatform] = useState(platforms[0] || 'linkedin');
-  const [tone, setTone] = useState('formal');
+  const [tone, setTone] = useState(tones[0]?.key || 'formal');
   const [length, setLength] = useState('medium');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -503,9 +509,7 @@ function MediaGenModal({
         <div className="field">
           <label>النبرة</label>
           <select className="select" value={tone} onChange={(e) => setTone(e.target.value)}>
-            <option value="formal">رسمي</option>
-            <option value="educational">تعليمي</option>
-            <option value="teaser">تشويقي</option>
+            {tones.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
         </div>
         <div className="field">
@@ -528,10 +532,12 @@ function MediaGenModal({
 // مركز المعرفة — اختيار ملف من بيسكامب وتوليد محتوى منه
 function KBModal({
   platforms,
+  tones,
   onClose,
   onResult,
 }: {
   platforms: string[];
+  tones: Tone[];
   onClose: () => void;
   onResult: (text: string, title: string) => void;
 }) {
@@ -539,7 +545,7 @@ function KBModal({
   const [files, setFiles] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [platform, setPlatform] = useState(platforms[0] || 'linkedin');
-  const [tone, setTone] = useState('formal');
+  const [tone, setTone] = useState(tones[0]?.key || 'formal');
   const [length, setLength] = useState('medium');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -629,9 +635,7 @@ function KBModal({
             <div className="field">
               <label>النبرة</label>
               <select className="select" value={tone} onChange={(e) => setTone(e.target.value)}>
-                <option value="formal">رسمي</option>
-                <option value="educational">تعليمي</option>
-                <option value="teaser">تشويقي</option>
+                {tones.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
             </div>
             <div className="field">
