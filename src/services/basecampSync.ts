@@ -1,12 +1,12 @@
 import type { Env } from '../types';
 import {
-  isConfigured, setting, getMgmtProjectId, getTodosetId, ensureTodoList,
-  getProjectPeopleIds, createTodo, updateTodo, trashRecording, createAttachment,
+  isConfigured, setting, getMgmtProjectId, getCardTableId, getColumns, createColumn,
+  getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment,
 } from './basecamp';
 
-// مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة مهمة تتحرك عبر مراحل الاعتماد.
+// مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
 
-// المرحلة (حالة المنشور) → اسم قائمة المهام في بيسكامب
+// المرحلة (حالة المنشور) → اسم عمود جدول البطاقات في بيسكامب
 const STAGE_LIST: Record<string, string> = {
   draft: 'المسودات',
   pending_marketing: 'بانتظار اعتماد قسم التسويق',
@@ -94,14 +94,18 @@ async function computeDue(env: Env, postId: string): Promise<string | null> {
   return row?.mn ? riyadhDate(row.mn) : null;
 }
 
-async function ensureStageList(env: Env, projectId: string, stage: string): Promise<string> {
-  const cache = JSON.parse((await setting(env, 'basecamp_stage_lists')) || '{}');
+// عمود المرحلة: يُطابق بالاسم عمود جدول البطاقات الذي جهّزه المدير، أو يُنشئه إن غاب.
+async function ensureStageColumn(env: Env, projectId: string, stage: string): Promise<string> {
+  const cache = JSON.parse((await setting(env, 'basecamp_stage_cols')) || '{}');
   if (cache[stage]) return cache[stage];
-  const todoset = await getTodosetId(env, projectId);
-  const id = await ensureTodoList(env, projectId, todoset, STAGE_LIST[stage] || stage);
+  const cardTableId = await getCardTableId(env, projectId);
+  const cols = await getColumns(env, projectId, cardTableId);
+  const wanted = STAGE_LIST[stage] || stage;
+  const found = cols.find((c) => c.title.trim() === wanted.trim());
+  const id = found ? found.id : await createColumn(env, projectId, cardTableId, wanted);
   cache[stage] = id;
   await env.DB.prepare(
-    "INSERT INTO settings (key, value) VALUES ('basecamp_stage_lists', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    "INSERT INTO settings (key, value) VALUES ('basecamp_stage_cols', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
   ).bind(JSON.stringify(cache)).run();
   return id;
 }
@@ -115,34 +119,46 @@ export async function syncPost(env: Env, postId: string): Promise<void> {
     .bind(postId).first<{ id: string; title: string; body: string; status: string }>();
   if (!post || !STAGE_LIST[post.status]) return;
 
-  const listId = await ensureStageList(env, projectId, post.status);
-  const description = await buildDescription(env, post.body);
+  const columnId = await ensureStageColumn(env, projectId, post.status);
+  const content = await buildDescription(env, post.body);
   const due_on = await computeDue(env, postId);
   const assignee_ids = await getProjectPeopleIds(env, projectId);
-  const input = { content: post.title || 'منشور بدون عنوان', description, due_on, assignee_ids };
+  const input = { title: post.title || 'منشور بدون عنوان', content, due_on, assignee_ids };
 
+  // (نعيد استخدام أعمدة الجدول: todo_id = معرّف البطاقة، list_id = معرّف العمود)
   const map = await env.DB.prepare('SELECT todo_id, stage FROM basecamp_tasks WHERE post_id = ?')
     .bind(postId).first<{ todo_id: string; stage: string }>();
 
   if (!map) {
-    const todoId = await createTodo(env, projectId, listId, input);
+    const cardId = await createCard(env, projectId, columnId, input);
     await env.DB.prepare(
       "INSERT INTO basecamp_tasks (post_id, todo_id, list_id, stage, updated_at) VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
-    ).bind(postId, todoId, listId, post.status).run();
+    ).bind(postId, cardId, columnId, post.status).run();
     return;
   }
 
-  if (map.stage === post.status) {
-    await updateTodo(env, projectId, map.todo_id, input);
-    return;
+  // تغيّرت المرحلة: انقل البطاقة إلى العمود الجديد (يحافظ على البطاقة وسجلها)
+  if (map.stage !== post.status) {
+    await moveCard(env, projectId, map.todo_id, columnId);
+    await env.DB.prepare(
+      "UPDATE basecamp_tasks SET list_id = ?, stage = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?",
+    ).bind(columnId, post.status, postId).run();
   }
+  // حدّث محتوى البطاقة وتاريخها ومسؤوليها
+  await updateCard(env, projectId, map.todo_id, input);
+}
 
-  // تغيّرت المرحلة: أنشئ بطاقة في القائمة الجديدة واحذف القديمة (لا تدعم واجهة بيسكامب النقل بين القوائم)
-  const newTodoId = await createTodo(env, projectId, listId, input);
-  try { await trashRecording(env, projectId, map.todo_id); } catch { /* */ }
-  await env.DB.prepare(
-    "UPDATE basecamp_tasks SET todo_id = ?, list_id = ?, stage = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?",
-  ).bind(newTodoId, listId, post.status, postId).run();
+// إعادة مزامنة شاملة: تنظّف الربط القديم (بما فيه بطاقات/مهام سابقة) وتُعيد إنشاء البطاقات.
+export async function resyncAll(env: Env): Promise<void> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return;
+  const olds = (await env.DB.prepare('SELECT todo_id FROM basecamp_tasks').all<{ todo_id: string }>()).results;
+  for (const o of olds) { try { await trashRecording(env, projectId, o.todo_id); } catch { /* */ } }
+  await env.DB.prepare('DELETE FROM basecamp_tasks').run();
+  const posts = (await env.DB.prepare(
+    "SELECT id FROM content_posts WHERE status != 'archived' ORDER BY created_at ASC LIMIT 300",
+  ).all<{ id: string }>()).results;
+  for (const p of posts) await syncPostSafe(env, p.id);
 }
 
 export async function trashPostTask(env: Env, postId: string): Promise<void> {

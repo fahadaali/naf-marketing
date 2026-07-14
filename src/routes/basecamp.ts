@@ -10,7 +10,7 @@ import {
   exchangeCode,
 } from '../services/basecamp';
 import { buildReportWorkbook, uploadWeeklyReport } from '../services/report';
-import { syncPostSafe } from '../services/basecampSync';
+import { resyncAll } from '../services/basecampSync';
 
 export const basecampRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -82,16 +82,12 @@ basecampRoutes.post('/report/run', requirePermission('settings.manage'), async (
   }
 });
 
-// إعادة مزامنة كل المحتوى مع بطاقات مهام بيسكامب — للمدير العام
+// إعادة مزامنة كل المحتوى مع بطاقات بيسكامب — للمدير العام (تنظّف الربط القديم وتعيد الإنشاء كبطاقات)
 basecampRoutes.post('/resync', requirePermission('settings.manage'), async (c) => {
   if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
-  const { results } = await c.env.DB.prepare(
-    "SELECT id FROM content_posts WHERE status != 'archived' ORDER BY created_at ASC LIMIT 200",
-  ).all<{ id: string }>();
-  c.executionCtx.waitUntil((async () => {
-    for (const p of results) await syncPostSafe(c.env, p.id);
-  })());
-  return c.json({ ok: true, queued: results.length });
+  const cnt = (await c.env.DB.prepare("SELECT COUNT(*) c FROM content_posts WHERE status != 'archived'").first<{ c: number }>())?.c || 0;
+  c.executionCtx.waitUntil(resyncAll(c.env));
+  return c.json({ ok: true, queued: cnt });
 });
 
 basecampRoutes.get('/files', requirePermission('ai.generate'), async (c) => {

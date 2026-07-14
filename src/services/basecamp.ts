@@ -151,36 +151,43 @@ export async function getProjectPeopleIds(env: Env, projectId: string): Promise<
   }
 }
 
-// ==== قوائم المهام (stages) ====
-export async function getTodosetId(env: Env, projectId: string): Promise<string> {
-  const tool = await getDockTool(env, projectId, 'todoset');
-  if (!tool?.id) throw new Error('لا يوجد جدول مهام (todoset) في المشروع');
+// ==== جدول البطاقات (Card Table) وأعمدته (المراحل) ====
+export async function getCardTableId(env: Env, projectId: string): Promise<string> {
+  const tool = await getDockTool(env, projectId, 'kanban_board');
+  if (!tool?.id) throw new Error('لا يوجد جدول بطاقات (Card Table) في المشروع — فعّله من أدوات المشروع');
   return String(tool.id);
 }
 
-// يجد قائمة المهام بالاسم أو ينشئها (لتفادي التكرار)
-export async function ensureTodoList(env: Env, projectId: string, todosetId: string, name: string): Promise<string> {
-  const lists = await bcJson<any[]>(env, `/buckets/${projectId}/todosets/${todosetId}/todolists.json`).catch(() => []);
-  const found = (lists || []).find((l) => (l.name || '').trim() === name.trim());
-  if (found) return String(found.id);
-  const created = await bcJson<any>(env, `/buckets/${projectId}/todosets/${todosetId}/todolists.json`, {
-    method: 'POST', body: JSON.stringify({ name }),
+// أعمدة جدول البطاقات (المراحل)
+export async function getColumns(env: Env, projectId: string, cardTableId: string): Promise<{ id: string; title: string }[]> {
+  const ct = await bcJson<any>(env, `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+  return (ct.lists || []).map((l: any) => ({ id: String(l.id), title: l.title || '' }));
+}
+export async function createColumn(env: Env, projectId: string, cardTableId: string, title: string): Promise<string> {
+  const col = await bcJson<any>(env, `/buckets/${projectId}/card_tables/${cardTableId}/columns.json`, {
+    method: 'POST', body: JSON.stringify({ title }),
   });
-  return String(created.id);
+  return String(col.id);
 }
 
-// ==== المهام ====
-export type TodoInput = { content: string; description?: string; due_on?: string | null; assignee_ids?: number[] };
+// ==== البطاقات ====
+export type CardInput = { title: string; content?: string; due_on?: string | null; assignee_ids?: number[] };
 
-export async function createTodo(env: Env, projectId: string, listId: string, input: TodoInput): Promise<string> {
-  const data = await bcJson<any>(env, `/buckets/${projectId}/todolists/${listId}/todos.json`, {
-    method: 'POST',
-    body: JSON.stringify({ ...input, notify: false }),
+export async function createCard(env: Env, projectId: string, columnId: string, input: CardInput): Promise<string> {
+  const card = await bcJson<any>(env, `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`, {
+    method: 'POST', body: JSON.stringify({ ...input, notify: false }),
   });
-  return String(data.id);
+  return String(card.id);
 }
-export async function updateTodo(env: Env, projectId: string, todoId: string, input: TodoInput): Promise<void> {
-  await bcJson(env, `/buckets/${projectId}/todos/${todoId}.json`, { method: 'PUT', body: JSON.stringify(input) });
+export async function updateCard(env: Env, projectId: string, cardId: string, input: CardInput): Promise<void> {
+  await bcJson(env, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: 'PUT', body: JSON.stringify(input) });
+}
+// نقل البطاقة إلى عمود آخر (مدعوم في واجهة Card Table)
+export async function moveCard(env: Env, projectId: string, cardId: string, columnId: string): Promise<void> {
+  const res = await bcFetch(env, `/buckets/${projectId}/card_tables/cards/${cardId}/moves.json`, {
+    method: 'POST', body: JSON.stringify({ column_id: columnId }),
+  });
+  if (!res.ok) throw new Error(`تعذّر نقل البطاقة (${res.status})`);
 }
 export async function trashRecording(env: Env, projectId: string, recordingId: string): Promise<void> {
   await bcFetch(env, `/buckets/${projectId}/recordings/${recordingId}/status/trashed.json`, { method: 'PUT' });
