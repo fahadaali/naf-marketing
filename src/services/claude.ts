@@ -30,6 +30,28 @@ const LENGTH_AR: Record<string, string> = {
   long: 'مطوّل (١٥٠–٢٥٠ كلمة)',
 };
 
+// توجيهات افتراضية لكل منصة (قابلة للتخصيص من الإعدادات: platform_prompts)
+export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
+  linkedin: 'محتوى مهني رصين يناسب لينكدإن والقطاع القانوني، بفقرات قصيرة ولغة موثوقة.',
+  x: 'منشور موجز جداً يناسب منصة إكس (لا يتجاوز ٢٨٠ حرفاً)، مباشر وجذّاب، ويمكن إضافة وسم واحد أو اثنين.',
+  instagram: 'أسلوب جذّاب بصرياً بسطور قصيرة وإيموجي مناسب باعتدال، مع وسوم (hashtags) ملائمة في النهاية.',
+  snapchat: 'رسالة قصيرة عفوية ومباشرة تناسب سناب شات.',
+  tiktok: 'نص قصير حيوي يناسب تيك توك مع دعوة واضحة للتفاعل.',
+  facebook: 'منشور ودّي متوسط الطول يناسب فيسبوك.',
+  youtube: 'وصف مناسب ليوتيوب مع نقاط رئيسية موجزة.',
+  threads: 'منشور محادثاتي قصير يناسب ثريدز.',
+};
+
+async function platformPrompt(env: Env, key?: string): Promise<string> {
+  if (!key) return '';
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'platform_prompts'").first<{ value: string }>();
+    const map = row?.value ? JSON.parse(row.value) : {};
+    if (map && typeof map[key] === 'string') return map[key];
+  } catch { /* استخدم الافتراضي */ }
+  return DEFAULT_PLATFORM_PROMPTS[key] || '';
+}
+
 async function tonePrompt(env: Env, key?: string): Promise<string> {
   let tones = DEFAULT_TONES;
   try {
@@ -43,11 +65,12 @@ async function tonePrompt(env: Env, key?: string): Promise<string> {
   return t?.prompt || DEFAULT_TONES[0].prompt;
 }
 
-function buildPrompt(o: GenerateOptions, toneInstruction: string): string {
+function buildPrompt(o: GenerateOptions, toneInstruction: string, platformInstruction = ''): string {
   const lang = o.language || 'العربية';
   const length = LENGTH_AR[o.length || 'medium'];
   const platform = o.platform || 'وسائل التواصل الاجتماعي';
   const settings = `المنصة المستهدفة: ${platform}. الطول: ${length}. اللغة: ${lang}.`;
+  const platLine = platformInstruction ? `توجيه المنصة: ${platformInstruction}` : '';
 
   if (o.mode === 'rewrite' && o.sourceText) {
     return [
@@ -55,6 +78,7 @@ function buildPrompt(o: GenerateOptions, toneInstruction: string): string {
       `النص المصدر:\n"""${o.sourceText}"""`,
       `توجيه النبرة: ${toneInstruction}`,
       settings,
+      platLine,
       o.adStyle ? `أسلوب الإعلان: ${o.adStyle}.` : '',
       `اكتب المنشور النهائي فقط دون مقدمات أو شرح.`,
     ].filter(Boolean).join('\n\n');
@@ -65,6 +89,7 @@ function buildPrompt(o: GenerateOptions, toneInstruction: string): string {
     `الموضوع: ${o.topic}.`,
     `توجيه النبرة: ${toneInstruction}`,
     settings,
+    platLine,
     o.adStyle ? `أسلوب الإعلان: ${o.adStyle}.` : '',
     `اكتب المنشور النهائي فقط دون مقدمات أو شرح، بصياغة احترافية ملائمة للقطاع القانوني.`,
   ].filter(Boolean).join('\n\n');
@@ -79,6 +104,7 @@ export async function generateText(env: Env, options: GenerateOptions): Promise<
   }
 
   const instruction = await tonePrompt(env, options.tone);
+  const platInstruction = await platformPrompt(env, options.platform);
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -89,7 +115,7 @@ export async function generateText(env: Env, options: GenerateOptions): Promise<
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: buildPrompt(options, instruction) }],
+      messages: [{ role: 'user', content: buildPrompt(options, instruction, platInstruction) }],
     }),
   });
 
@@ -119,12 +145,14 @@ export async function generateFromMedia(
   }
 
   const toneText = await tonePrompt(env, options.tone);
+  const platText = await platformPrompt(env, options.platform);
   const instruction = [
     `أنت كاتب محتوى لشركة «ناف» للاستشارات القانونية في الرياض. أنشئ منشوراً مستنداً إلى ${isPdf ? 'المستند' : 'الصورة'} المرفق.`,
     `توجيه النبرة: ${toneText}`,
     `المنصة: ${options.platform || 'وسائل التواصل'}. الطول: ${LENGTH_AR[options.length || 'medium']}. اللغة: العربية.`,
+    platText ? `توجيه المنصة: ${platText}` : '',
     `استند إلى محتوى ${isPdf ? 'المستند' : 'الصورة'} فعلاً. اكتب المنشور النهائي فقط.`,
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
 
   const mediaBlock = isImage
     ? { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } }

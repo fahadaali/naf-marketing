@@ -3,7 +3,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
-import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel } from '../platforms';
+import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel, DEFAULT_PLATFORM_PROMPTS } from '../platforms';
 import { DEFAULT_TONES, type Tone } from '../tones';
 
 export default function Settings() {
@@ -31,7 +31,7 @@ export default function Settings() {
       {tab === 'permissions' && <Permissions />}
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
-      {tab === 'ai' && <AITones />}
+      {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /></>}
       {tab === 'integrations' && <Integrations />}
     </div>
   );
@@ -403,6 +403,57 @@ function AITones() {
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ النبرات</button>
+    </div>
+  );
+}
+
+/* ===== توجيهات المنصات للتوليد ===== */
+function PlatformPrompts() {
+  const [enabled, setEnabled] = useState<string[]>([]);
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then((d) => {
+      const en: string[] = d.settings?.enabled_platforms || [];
+      const saved: Record<string, string> = d.settings?.platform_prompts || {};
+      setEnabled(en);
+      setLabels(d.settings?.platform_labels || {});
+      const init: Record<string, string> = {};
+      for (const k of en) init[k] = saved[k] ?? DEFAULT_PLATFORM_PROMPTS[k] ?? '';
+      setPrompts(init);
+    });
+  }, []);
+
+  async function save() {
+    setMsg('');
+    await api.put('/settings', { platform_prompts: prompts });
+    setMsg('تم حفظ توجيهات المنصات');
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>توجيهات المنصات للتوليد</h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        توجيه خاص لكل منصة يُرسَل لوكيل الذكاء الاصطناعي مع النبرة عند التوليد (مثل حد الأحرف للإكس أو الوسوم لإنستغرام).
+      </p>
+      {enabled.length === 0 && <p className="muted">فعّل منصات من تبويب «المنصات والمزوّد» أولاً.</p>}
+      {enabled.map((k) => (
+        <div className="field" key={k}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <PlatformIcon platform={k} size={20} /> {platformLabel(k, labels)}
+          </label>
+          <textarea
+            className="textarea"
+            style={{ minHeight: 70 }}
+            value={prompts[k] || ''}
+            onChange={(e) => setPrompts((p) => ({ ...p, [k]: e.target.value }))}
+          />
+        </div>
+      ))}
+      {msg && <p className="ok">{msg}</p>}
+      {enabled.length > 0 && <button className="btn" onClick={save}>حفظ توجيهات المنصات</button>}
     </div>
   );
 }

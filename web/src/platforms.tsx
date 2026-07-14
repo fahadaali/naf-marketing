@@ -40,6 +40,18 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
 // المنصات المعروفة القابلة للإضافة من الإعدادات
 export const KNOWN_PLATFORMS = Object.keys(PLATFORM_META);
 
+// توجيهات افتراضية لكل منصة عند التوليد بالذكاء الاصطناعي (تُطابق الخادم)
+export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
+  linkedin: 'محتوى مهني رصين يناسب لينكدإن والقطاع القانوني، بفقرات قصيرة ولغة موثوقة.',
+  x: 'منشور موجز جداً يناسب منصة إكس (لا يتجاوز ٢٨٠ حرفاً)، مباشر وجذّاب، ويمكن إضافة وسم واحد أو اثنين.',
+  instagram: 'أسلوب جذّاب بصرياً بسطور قصيرة وإيموجي مناسب باعتدال، مع وسوم (hashtags) ملائمة في النهاية.',
+  snapchat: 'رسالة قصيرة عفوية ومباشرة تناسب سناب شات.',
+  tiktok: 'نص قصير حيوي يناسب تيك توك مع دعوة واضحة للتفاعل.',
+  facebook: 'منشور ودّي متوسط الطول يناسب فيسبوك.',
+  youtube: 'وصف مناسب ليوتيوب مع نقاط رئيسية موجزة.',
+  threads: 'منشور محادثاتي قصير يناسب ثريدز.',
+};
+
 export function platformLabel(key: string, custom?: Record<string, string>): string {
   return custom?.[key] || PLATFORM_META[key]?.label || key;
 }
