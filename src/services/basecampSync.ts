@@ -1,7 +1,8 @@
 import type { Env } from '../types';
+import { newId } from '../util';
 import {
   isConfigured, setting, getMgmtProjectId, getCardTableId, getColumns, createColumn,
-  getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment,
+  getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment, getComments,
 } from './basecamp';
 
 // مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
@@ -170,6 +171,36 @@ export async function trashPostTask(env: Env, postId: string): Promise<void> {
     try { await trashRecording(env, projectId, map.todo_id); } catch { /* */ }
     await env.DB.prepare('DELETE FROM basecamp_tasks WHERE post_id = ?').bind(postId).run();
   }
+}
+
+// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى ويحفظها كملاحظات على المنشور (بدون تكرار)
+export async function syncCardComments(env: Env): Promise<void> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return;
+  const tasks = (await env.DB.prepare('SELECT post_id, todo_id FROM basecamp_tasks').all<{ post_id: string; todo_id: string }>()).results;
+  for (const t of tasks) {
+    let comments;
+    try {
+      comments = await getComments(env, projectId, t.todo_id);
+    } catch {
+      continue;
+    }
+    for (const cm of comments) {
+      if (!cm.content) continue;
+      await env.DB.prepare(
+        `INSERT INTO post_notes (id, post_id, source, external_id, author_name, body, created_at)
+         VALUES (?, ?, 'basecamp', ?, ?, ?, ?)
+         ON CONFLICT(source, external_id) DO NOTHING`,
+      )
+        .bind(newId('note'), t.post_id, String(cm.id), cm.creator_name, cm.content, cm.created_at || new Date().toISOString())
+        .run();
+    }
+  }
+}
+export async function syncCardCommentsSafe(env: Env): Promise<void> {
+  try {
+    if (await isConfigured(env)) await syncCardComments(env);
+  } catch { /* */ }
 }
 
 // غلاف آمن للتشغيل في الخلفية (لا يعطّل عملية المستخدم مهما حدث)

@@ -11,6 +11,7 @@ import {
 } from '../auth';
 import { hashPassword, verifyPassword, newId } from '../util';
 import { permissionMap } from '../permissions';
+import { logAudit } from '../services/audit';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -34,31 +35,37 @@ authRoutes.post('/setup', async (c) => {
     .run();
   const token = await createSession(c.env, id);
   c.header('set-cookie', sessionCookie(token));
+  c.executionCtx.waitUntil(logAudit(c.env, { id, name }, 'setup', 'user', id));
   return c.json({ ok: true });
 });
 
 authRoutes.post('/login', async (c) => {
   const { email, password } = await c.req.json<{ email: string; password: string }>();
+  const normalizedEmail = (email || '').toLowerCase();
   const user = await c.env.DB.prepare(
-    'SELECT id, password_hash, is_active FROM users WHERE email = ?',
+    'SELECT id, name, password_hash, is_active FROM users WHERE email = ?',
   )
-    .bind((email || '').toLowerCase())
-    .first<{ id: string; password_hash: string; is_active: number }>();
+    .bind(normalizedEmail)
+    .first<{ id: string; name: string; password_hash: string; is_active: number }>();
 
   if (!user || !(await verifyPassword(password || '', user.password_hash))) {
+    c.executionCtx.waitUntil(logAudit(c.env, { id: null, name: normalizedEmail }, 'login_failed', 'user'));
     return c.json({ error: 'البريد أو كلمة المرور غير صحيحة' }, 401);
   }
   if (!user.is_active) return c.json({ error: 'الحساب معطّل' }, 403);
 
   const token = await createSession(c.env, user.id);
   c.header('set-cookie', sessionCookie(token));
+  c.executionCtx.waitUntil(logAudit(c.env, { id: user.id, name: user.name }, 'login', 'user', user.id));
   return c.json({ ok: true });
 });
 
 authRoutes.post('/logout', async (c) => {
+  const user = await getUserFromRequest(c.env, c.req.raw);
   const token = getSessionToken(c.req.raw);
   if (token) await destroySession(c.env, token);
   c.header('set-cookie', clearSessionCookie());
+  if (user) c.executionCtx.waitUntil(logAudit(c.env, { id: user.id, name: user.name }, 'logout', 'user', user.id));
   return c.json({ ok: true });
 });
 

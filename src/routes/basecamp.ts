@@ -9,8 +9,9 @@ import {
   authorizeUrl,
   exchangeCode,
 } from '../services/basecamp';
-import { buildReportWorkbook, uploadWeeklyReport } from '../services/report';
+import { buildReportWorkbook, uploadWeeklyReport, uploadMonthlyReport, sheetsToCsv, type ReportPeriod } from '../services/report';
 import { resyncAll } from '../services/basecampSync';
+import { logAudit } from '../services/audit';
 
 export const basecampRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -61,9 +62,22 @@ basecampRoutes.get('/status', async (c) => {
   return c.json({ configured, project_set: !!project?.value, mgmt_set: !!mgmt?.value });
 });
 
-// تنزيل التقرير الأسبوعي كملف Excel (لمعاينته) — للمدير العام
+// تنزيل التقرير (أسبوعي/شهري) بصيغة Excel أو CSV (لمعاينته) — للمدير العام
+// ?period=week|month&format=xlsx|csv
 basecampRoutes.get('/report/download', requirePermission('settings.manage'), async (c) => {
-  const { bytes, filename } = await buildReportWorkbook(c.env);
+  const period: ReportPeriod = c.req.query('period') === 'month' ? 'month' : 'week';
+  const format = c.req.query('format') === 'csv' ? 'csv' : 'xlsx';
+  const { bytes, filename, sheets } = await buildReportWorkbook(c.env, period);
+
+  if (format === 'csv') {
+    const csv = sheetsToCsv(sheets);
+    return new Response(csv, {
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename.replace(/\.xlsx$/, '.csv'))}`,
+      },
+    });
+  }
   return new Response(bytes, {
     headers: {
       'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -72,10 +86,13 @@ basecampRoutes.get('/report/download', requirePermission('settings.manage'), asy
   });
 });
 
-// توليد ورفع التقرير الأسبوعي فوراً إلى بيسكامب — للمدير العام
+// توليد ورفع التقرير فوراً إلى بيسكامب (أسبوعي أو شهري) — للمدير العام
 basecampRoutes.post('/report/run', requirePermission('settings.manage'), async (c) => {
+  const period: ReportPeriod = c.req.query('period') === 'month' ? 'month' : 'week';
   try {
-    const r = await uploadWeeklyReport(c.env);
+    const r = period === 'month' ? await uploadMonthlyReport(c.env) : await uploadWeeklyReport(c.env);
+    const actor = c.get('user');
+    c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'report_run', 'report', undefined, period));
     return c.json(r);
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 502);
@@ -87,6 +104,8 @@ basecampRoutes.post('/resync', requirePermission('settings.manage'), async (c) =
   if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
   const cnt = (await c.env.DB.prepare("SELECT COUNT(*) c FROM content_posts WHERE status != 'archived'").first<{ c: number }>())?.c || 0;
   c.executionCtx.waitUntil(resyncAll(c.env));
+  const actor = c.get('user');
+  c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'basecamp_resync', 'basecamp', undefined, `${cnt} منشور`));
   return c.json({ ok: true, queued: cnt });
 });
 
