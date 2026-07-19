@@ -15,6 +15,7 @@ export default function Settings() {
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
     can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
+    can('settings.manage') && { id: 'notifications', label: 'الإشعارات' },
   ].filter(Boolean) as { id: string; label: string }[];
 
   const [tab, setTab] = useState(tabs[0]?.id || 'users');
@@ -33,6 +34,7 @@ export default function Settings() {
       {tab === 'platforms' && <Platforms />}
       {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /><div style={{ height: 16 }} /><AIMediaProviders /></>}
       {tab === 'integrations' && <Integrations />}
+      {tab === 'notifications' && <NotificationSettings />}
     </div>
   );
 }
@@ -504,6 +506,54 @@ function AIMediaProviders() {
       </p>
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ إعدادات التوليد</button>
+    </div>
+  );
+}
+
+/* ===== إعدادات الإشعارات البريدية ===== */
+function NotificationSettings() {
+  const [provider, setProvider] = useState('mock');
+  const [from, setFrom] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then((d) => {
+      setProvider(d.settings?.email_provider || 'mock');
+      setFrom(d.settings?.email_from || '');
+    });
+  }, []);
+
+  async function save() {
+    setMsg('');
+    await api.put('/settings', { email_provider: provider, email_from: from });
+    setMsg('تم الحفظ');
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>الإشعارات</h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        الإشعارات داخل التطبيق (جرس الإشعارات) مفعّلة دائماً — تصل تلقائياً عند وصول محتوى لدورك في الاعتماد،
+        عند رفض محتواك، أو عند فشل نشر مجدول. الإشعار البريدي اختياري ويحتاج مزوّداً.
+      </p>
+      <div className="grid cols-2">
+        <div className="field">
+          <label>مزوّد البريد</label>
+          <select className="select" value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <option value="mock">بلا بريد (داخل التطبيق فقط)</option>
+            <option value="resend">Resend</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>عنوان المرسل (From)</label>
+          <input className="input" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="notifications@naflaw.sa" />
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>
+        مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
+      </p>
+      {msg && <p className="ok">{msg}</p>}
+      <button className="btn" onClick={save}>حفظ إعدادات الإشعارات</button>
     </div>
   );
 }

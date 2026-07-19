@@ -26,3 +26,6 @@ IMAGE_PROVIDER_API_KEY=""
 
 # توليد الفيديو بالذكاء الاصطناعي — اختياري. مزوّد Runway ML إن اخترته من الإعدادات
 VIDEO_PROVIDER_API_KEY=""
+
+# إشعارات بريدية — اختياري. مزوّد Resend إن اخترته من الإعدادات
+EMAIL_PROVIDER_API_KEY=""

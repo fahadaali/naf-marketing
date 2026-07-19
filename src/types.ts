@@ -17,6 +17,8 @@ export type Env = {
   // توليد الوسائط بالذكاء الاصطناعي
   IMAGE_PROVIDER_API_KEY?: string;
   VIDEO_PROVIDER_API_KEY?: string;
+  // إشعارات بريدية
+  EMAIL_PROVIDER_API_KEY?: string;
 };
 
 export type Role = 'writer' | 'marketing_manager' | 'general_manager';

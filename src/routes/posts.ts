@@ -6,6 +6,8 @@ import { newId, nowIso } from '../util';
 import { generateText } from '../services/claude';
 import { transition, type Action } from '../services/workflow';
 import { syncPostSafe, trashPostTaskSafe } from '../services/basecampSync';
+import { notifyStageReached } from '../services/notify';
+import { snapshotVersion } from '../services/versions';
 
 export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -177,8 +179,55 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   fields.push('updated_at = ?');
   binds.push(nowIso(), id);
 
+  // لقطة نسخة قبل التعديل عند تغيّر المحتوى الفعلي (عنوان/نص/نوع)
+  if (b.title !== undefined || b.body !== undefined || b.content_type !== undefined) {
+    await snapshotVersion(c.env, id, user.id);
+  }
+
   await c.env.DB.prepare(`UPDATE content_posts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...binds)
+    .run();
+  c.executionCtx.waitUntil(syncPostSafe(c.env, id));
+  return c.json({ ok: true });
+});
+
+// سجل نسخ المنشور
+postRoutes.get('/:id/versions', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT v.id, v.title, v.content_type, v.created_at, u.name AS editor_name
+     FROM content_versions v LEFT JOIN users u ON u.id = v.edited_by
+     WHERE v.post_id = ? ORDER BY v.created_at DESC`,
+  )
+    .bind(c.req.param('id'))
+    .all();
+  return c.json({ versions: results });
+});
+
+// استرجاع نسخة سابقة (يأخذ لقطة من الحالة الحالية أولاً كي لا تُفقد)
+postRoutes.post('/:id/versions/:versionId/restore', requirePermission('draft.edit'), async (c) => {
+  const id = c.req.param('id');
+  const user = c.get('user');
+  const post = await c.env.DB.prepare('SELECT author_id, status FROM content_posts WHERE id = ?')
+    .bind(id)
+    .first<{ author_id: string; status: string }>();
+  if (!post) return c.json({ error: 'غير موجود' }, 404);
+  const canReviewOthers = user.role_name !== 'writer';
+  if (post.author_id !== user.id && !canReviewOthers) {
+    return c.json({ error: 'لا يمكنك تعديل محتوى غيرك' }, 403);
+  }
+
+  const version = await c.env.DB.prepare(
+    'SELECT title, body, content_type FROM content_versions WHERE id = ? AND post_id = ?',
+  )
+    .bind(c.req.param('versionId'), id)
+    .first<{ title: string; body: string; content_type: string }>();
+  if (!version) return c.json({ error: 'النسخة غير موجودة' }, 404);
+
+  await snapshotVersion(c.env, id, user.id);
+  await c.env.DB.prepare(
+    'UPDATE content_posts SET title = ?, body = ?, content_type = ?, updated_at = ? WHERE id = ?',
+  )
+    .bind(version.title, version.body, version.content_type, nowIso(), id)
     .run();
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true });
@@ -237,8 +286,9 @@ postRoutes.post('/:id/action', async (c) => {
 
   const result = await transition(c.env, user, post, action, note);
   if (!result.ok) return c.json({ error: result.error }, result.status as any);
-  // نقل بطاقة المهمة إلى مرحلتها الجديدة في بيسكامب
+  // نقل بطاقة المهمة إلى مرحلتها الجديدة في بيسكامب + إشعار من وصل الدور إليه
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
+  c.executionCtx.waitUntil(notifyStageReached(c.env, id, result.to));
   return c.json({ ok: true, status: result.to });
 });
 

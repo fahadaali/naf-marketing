@@ -17,6 +17,8 @@ import {
   Image as ImageIcon,
   Video,
   Loader2,
+  LayoutTemplate,
+  History,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
@@ -44,6 +46,7 @@ export default function Editor() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
   const [tones, setTones] = useState<Tone[]>(DEFAULT_TONES);
@@ -56,6 +59,8 @@ export default function Editor() {
   const [showAIMedia, setShowAIMedia] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [viewer, setViewer] = useState<MediaInfo | null>(null);
   const editorRef = useRef<RichEditorHandle>(null);
 
@@ -69,6 +74,7 @@ export default function Editor() {
     setRejectReason(d.post.reject_reason || '');
     setApprovals(d.approvals);
     setSchedules(d.schedules);
+    api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
   }
 
   useEffect(() => {
@@ -229,6 +235,9 @@ export default function Editor() {
                     <Wand2 size={15} /> توليد صورة/فيديو بالذكاء الاصطناعي
                   </button>
                 )}
+                <button className="btn ghost sm" type="button" onClick={() => setShowTemplates(true)}>
+                  <LayoutTemplate size={15} /> القوالب
+                </button>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
                 لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك 📎 في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
@@ -342,6 +351,20 @@ export default function Editor() {
             </div>
           )}
 
+          {/* سجل النسخ */}
+          {versions.length > 0 && (
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div className="row">
+                <h4 style={{ marginTop: 0, marginBottom: 0 }}>سجل النسخ</h4>
+                <div className="spacer" />
+                <span className="muted" style={{ fontSize: 12 }}>{versions.length} نسخة</span>
+              </div>
+              <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
+                <History size={14} /> عرض واسترجاع
+              </button>
+            </div>
+          )}
+
           {/* سجل الموافقات */}
           {approvals.length > 0 && (
             <div className="card">
@@ -393,6 +416,25 @@ export default function Editor() {
         />
       )}
       {viewer && <MediaViewer media={viewer} onClose={() => setViewer(null)} />}
+      {showVersions && postId && (
+        <VersionsModal
+          versions={versions}
+          onClose={() => setShowVersions(false)}
+          onRestore={async (vId) => {
+            await api.post(`/posts/${postId}/versions/${vId}/restore`);
+            setShowVersions(false);
+            await loadPost(postId);
+            setMsg('تم استرجاع النسخة');
+          }}
+        />
+      )}
+      {showTemplates && (
+        <TemplatesModal
+          currentBody={body}
+          onClose={() => setShowTemplates(false)}
+          onInsert={(tplBody) => { editorRef.current?.insertHtml(tplBody); setShowTemplates(false); }}
+        />
+      )}
       {showReject && (
         <RejectModal
           onClose={() => setShowReject(false)}
@@ -754,6 +796,113 @@ function KBModal({
       )}
 
       {err && <p className="err" style={{ marginTop: 10 }}>{err}</p>}
+    </Modal>
+  );
+}
+
+// سجل نسخ المحتوى — استعراض واسترجاع نسخة سابقة
+function VersionsModal({
+  versions,
+  onClose,
+  onRestore,
+}: {
+  versions: any[];
+  onClose: () => void;
+  onRestore: (versionId: string) => void;
+}) {
+  return (
+    <Modal title="سجل النسخ" onClose={onClose}>
+      <div style={{ maxHeight: 400, overflow: 'auto' }}>
+        {versions.map((v) => (
+          <div key={v.id} className="card" style={{ marginBottom: 10 }}>
+            <div className="row">
+              <div>
+                <div style={{ fontWeight: 600 }}>{v.title}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{v.editor_name} — {formatRiyadh(v.created_at)}</div>
+              </div>
+              <div className="spacer" />
+              <button
+                className="btn ghost sm"
+                onClick={() => { if (confirm('استرجاع هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
+              >
+                <History size={14} /> استرجاع
+              </button>
+            </div>
+          </div>
+        ))}
+        {versions.length === 0 && <p className="muted">لا توجد نسخ سابقة بعد</p>}
+      </div>
+    </Modal>
+  );
+}
+
+// قوالب/مقتطفات المحتوى — اختيار قالب للإدراج، أو حفظ المحتوى الحالي كقالب جديد
+function TemplatesModal({
+  currentBody,
+  onClose,
+  onInsert,
+}: {
+  currentBody: string;
+  onClose: () => void;
+  onInsert: (body: string) => void;
+}) {
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  function load() {
+    api.get('/templates').then((d) => setTemplates(d.templates));
+  }
+  useEffect(load, []);
+
+  async function saveCurrent() {
+    setErr(''); setMsg('');
+    if (!name.trim()) return setErr('أدخل اسماً للقالب');
+    if (!currentBody.trim()) return setErr('لا يوجد محتوى لحفظه كقالب');
+    try {
+      await api.post('/templates', { name: name.trim(), body: currentBody });
+      setName(''); setMsg('تم حفظ القالب'); load();
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('حذف هذا القالب؟')) return;
+    await api.del(`/templates/${id}`);
+    load();
+  }
+
+  return (
+    <Modal title="القوالب والمقتطفات" onClose={onClose}>
+      <div className="field">
+        <label>حفظ المحتوى الحالي كقالب جديد</label>
+        <div className="row">
+          <input className="input" style={{ flex: 1 }} placeholder="اسم القالب" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="btn ghost sm" onClick={saveCurrent}>حفظ</button>
+        </div>
+        {err && <p className="err">{err}</p>}
+        {msg && <p className="ok">{msg}</p>}
+      </div>
+
+      <div className="field">
+        <label>القوالب المتاحة</label>
+        <div style={{ maxHeight: 300, overflow: 'auto' }}>
+          {templates.map((t) => (
+            <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid hsl(var(--border))' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{t.creator_name}</div>
+              </div>
+              <div className="spacer" />
+              <button className="btn sm" onClick={() => onInsert(t.body)}>إدراج</button>
+              <button className="btn danger sm" onClick={() => remove(t.id)}><Trash2 size={13} /></button>
+            </div>
+          ))}
+          {templates.length === 0 && <p className="muted">لا توجد قوالب محفوظة بعد</p>}
+        </div>
+      </div>
     </Modal>
   );
 }
