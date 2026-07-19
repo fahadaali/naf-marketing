@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateRangePicker } from '../components/DatePicker';
 
 // الداشبورد الموحّد للتحليلات مع فلاتر: النطاق الزمني، المنصة، الحملة.
 export default function Analytics() {
+  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
+  const [perf, setPerf] = useState<any>(null);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [platform, setPlatform] = useState('');
   const [campaign, setCampaign] = useState('');
   const [from, setFrom] = useState('');
@@ -28,6 +32,8 @@ export default function Analytics() {
   useEffect(() => {
     api.get('/settings').then((d) => setPlatforms(d.settings?.enabled_platforms || []));
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns));
+    api.get('/analytics/performance').then(setPerf).catch(() => {});
+    api.get('/analytics/alerts').then((d) => setAlerts(d.stale || [])).catch(() => {});
   }, []);
   useEffect(load, [platform, campaign, from, to]);
 
@@ -44,6 +50,8 @@ export default function Analytics() {
 
   const t = data?.totals || {};
   const maxImp = Math.max(1, ...(data?.byPlatform || []).map((p: any) => p.impressions || 0));
+  const maxCampImp = Math.max(1, ...(data?.campaigns || []).map((c: any) => c.impressions || 0));
+  const maxCreated = Math.max(1, ...(perf?.writers || []).map((w: any) => w.created_count || 0));
 
   return (
     <div>
@@ -136,13 +144,69 @@ export default function Analytics() {
         {/* أداء الحملات */}
         <div className="card">
           <h4 style={{ marginTop: 0 }}>أداء الحملات</h4>
+          {(data?.campaigns || []).map((c: any) => (
+            <div key={c.id} style={{ marginBottom: 10 }}>
+              <div className="row" style={{ fontSize: 13 }}>
+                <span>{c.name}</span>
+                <div className="spacer" />
+                <span className="muted">{(c.impressions || 0).toLocaleString('ar-EG')} انطباع · {(c.engagement || 0).toLocaleString('ar-EG')} تفاعل</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(c.impressions / maxCampImp) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          {(data?.campaigns || []).length === 0 && <p className="muted">لا توجد بيانات حملات بعد.</p>}
+        </div>
+      </div>
+
+      {/* تنبيهات المحتوى المتأخر */}
+      {alerts.length > 0 && (
+        <div className="card" style={{ marginTop: 16, borderColor: 'hsl(var(--warning, 38 92% 50%))' }}>
+          <h4 style={{ marginTop: 0 }} className="row"><AlertTriangle size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
           <table className="table">
-            <thead><tr><th>الحملة</th><th>انطباعات</th><th>تفاعل</th></tr></thead>
+            <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
             <tbody>
-              {(data?.campaigns || []).map((c: any) => (
-                <tr key={c.id}><td>{c.name}</td><td>{c.impressions}</td><td>{c.engagement}</td></tr>
+              {alerts.map((a) => (
+                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${a.id}`)}>
+                  <td>{a.title}</td>
+                  <td><span className={`badge ${STATUS_BADGE[a.status] || 'gray'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
+                  <td>{a.days_stuck}</td>
+                </tr>
               ))}
-              {(data?.campaigns || []).length === 0 && <tr><td colSpan={3} className="muted">—</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* أداء الفريق */}
+      <div className="grid cols-2" style={{ marginTop: 16 }}>
+        <div className="card">
+          <h4 style={{ marginTop: 0 }}>إنتاجية الكتّاب</h4>
+          {(perf?.writers || []).map((w: any) => (
+            <div key={w.id} style={{ marginBottom: 10 }}>
+              <div className="row" style={{ fontSize: 13 }}>
+                <span>{w.name}</span>
+                <div className="spacer" />
+                <span className="muted">{w.created_count} محتوى · {w.published_count} منشور · {w.rejected_count} مرفوض</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(w.created_count / maxCreated) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          {(perf?.writers || []).length === 0 && <p className="muted">لا توجد بيانات بعد.</p>}
+        </div>
+
+        <div className="card">
+          <h4 style={{ marginTop: 0 }}>سرعة اعتماد المراجعين/المديرين</h4>
+          <table className="table">
+            <thead><tr><th>المستخدم</th><th>عدد الإجراءات</th><th>متوسط الوقت (ساعة)</th></tr></thead>
+            <tbody>
+              {(perf?.approvers || []).map((ap: any) => (
+                <tr key={ap.id}><td>{ap.name}</td><td>{ap.actions_count}</td><td>{ap.avg_hours ?? '—'}</td></tr>
+              ))}
+              {(perf?.approvers || []).length === 0 && <tr><td colSpan={3} className="muted">—</td></tr>}
             </tbody>
           </table>
         </div>
