@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
+import { logAudit } from '../services/audit';
 
 export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -38,5 +39,9 @@ settingsRoutes.put('/', requirePermission('settings.manage'), async (c) => {
       .bind(key, stored)
       .run();
   }
+  const actor = c.get('user');
+  c.executionCtx.waitUntil(
+    logAudit(c.env, { id: actor.id, name: actor.name }, 'settings_update', 'settings', undefined, Object.keys(body).join('، ')),
+  );
   return c.json({ ok: true });
 });

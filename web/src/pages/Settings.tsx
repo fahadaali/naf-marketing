@@ -580,6 +580,8 @@ function Integrations() {
   const [projectId, setProjectId] = useState('');
   const [mgmtId, setMgmtId] = useState('');
   const [msg, setMsg] = useState('');
+  const [reportPeriod, setReportPeriod] = useState<'week' | 'month'>('week');
+  const [reportFormat, setReportFormat] = useState<'xlsx' | 'csv'>('xlsx');
 
   function load() {
     api.get('/basecamp/status').then(setStatus).catch(() => setStatus({ configured: false }));
@@ -605,7 +607,7 @@ function Integrations() {
   }
   async function runReport() {
     setMsg('جارٍ رفع التقرير…');
-    try { const r = await api.post('/basecamp/report/run'); setMsg(r.ok ? 'تم رفع التقرير إلى بيسكامب' : `تعذّر: ${r.reason}`); }
+    try { const r = await api.post(`/basecamp/report/run?period=${reportPeriod}`); setMsg(r.ok ? 'تم رفع التقرير إلى بيسكامب' : `تعذّر: ${r.reason}`); }
     catch (e: any) { setMsg(e.message); }
   }
 
@@ -651,16 +653,34 @@ function Integrations() {
           الأعمدة حسب مرحلة الاعتماد، وتاريخ استحقاقها = تاريخ النشر، وتُسند لأعضاء المشروع.
           أسماء الأعمدة المتوقّعة (تُنشأ تلقائياً إن غابت): المسودات، بانتظار اعتماد قسم التسويق، بانتظار اعتماد المدير العام،
           معتمد، مجدول للنشر، منشور، مرفوض، مؤرشف.
-          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت ٩:٠٠م في مجلد «تقارير الأداء الأسبوعية (آلي)».
+          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت ٩:٠٠م في مجلد «تقارير الأداء الأسبوعية (آلي)»،
+          وتقرير شهري في اليوم الأول من كل شهر في مجلد «تقارير الأداء الشهرية (آلي)».
+          تعليقات بطاقات بيسكامب تُستورد تلقائياً كملاحظات على المحتوى المقابل (يظهر ذلك في صفحة تحرير المحتوى).
         </p>
       </div>
 
       {msg && <p className="ok">{msg}</p>}
-      <div className="row">
+      <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn" onClick={save}>حفظ إعدادات بيسكامب</button>
         <button className="btn ghost" onClick={resync} disabled={!status?.mgmt_set}>إعادة مزامنة المحتوى</button>
-        <button className="btn ghost" onClick={runReport} disabled={!status?.mgmt_set}>رفع التقرير الآن</button>
-        <a className="btn ghost" href="/api/basecamp/report/download">تنزيل التقرير (معاينة)</a>
+      </div>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+        <div className="field" style={{ margin: 0, minWidth: 120 }}>
+          <label>فترة التقرير</label>
+          <select className="select" value={reportPeriod} onChange={(e) => setReportPeriod(e.target.value as any)}>
+            <option value="week">أسبوعي</option>
+            <option value="month">شهري</option>
+          </select>
+        </div>
+        <div className="field" style={{ margin: 0, minWidth: 120 }}>
+          <label>صيغة التنزيل</label>
+          <select className="select" value={reportFormat} onChange={(e) => setReportFormat(e.target.value as any)}>
+            <option value="xlsx">Excel</option>
+            <option value="csv">CSV</option>
+          </select>
+        </div>
+        <button className="btn ghost" onClick={runReport} disabled={!status?.mgmt_set}>رفع التقرير الآن إلى بيسكامب</button>
+        <a className="btn ghost" href={`/api/basecamp/report/download?period=${reportPeriod}&format=${reportFormat}`}>تنزيل التقرير (معاينة)</a>
       </div>
     </div>
   );

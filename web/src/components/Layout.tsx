@@ -16,6 +16,7 @@ import {
   Moon,
   Scale,
   Search,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
@@ -72,6 +73,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
     { to: '/analytics', label: 'التحليلات', icon: <BarChart3 size={sz} />, show: can('analytics.view') },
     { to: '/comments', label: 'التعليقات والرسائل', icon: <MessageCircle size={sz} />, show: can('comments.manage') },
+    { to: '/audit', label: 'سجل التدقيق', icon: <ShieldCheck size={sz} />, show: can('audit.view') },
     {
       to: '/settings',
       label: 'الإعدادات والمستخدمون',

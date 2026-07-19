@@ -45,6 +45,7 @@ export default function Editor() {
   const [rejectReason, setRejectReason] = useState('');
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
+  const [notes, setNotes] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
@@ -73,6 +74,7 @@ export default function Editor() {
     setStatus(d.post.status);
     setRejectReason(d.post.reject_reason || '');
     setApprovals(d.approvals);
+    setNotes(d.notes || []);
     setSchedules(d.schedules);
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
   }
@@ -367,13 +369,27 @@ export default function Editor() {
 
           {/* سجل الموافقات */}
           {approvals.length > 0 && (
-            <div className="card">
+            <div className="card" style={{ marginBottom: notes.length ? 14 : 0 }}>
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
                 <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
                   <div>{a.actor_name} → <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ملاحظات مستوردة من تعليقات بطاقة بيسكامب (ربط عكسي) */}
+          {notes.length > 0 && (
+            <div className="card">
+              <h4 style={{ marginTop: 0 }}>ملاحظات بيسكامب</h4>
+              {notes.map((n) => (
+                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
+                  <div><strong>{n.author_name || 'بيسكامب'}</strong></div>
+                  <div className="muted">{n.body}</div>
+                  <div className="muted">{formatRiyadh(n.created_at)}</div>
                 </div>
               ))}
             </div>

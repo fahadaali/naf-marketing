@@ -4,6 +4,9 @@ import { isConfigured, getMgmtProjectId, createAttachment, getRootVaultId, ensur
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const REPORT_FOLDER = 'تقارير الأداء الأسبوعية (آلي)';
+const MONTHLY_REPORT_FOLDER = 'تقارير الأداء الشهرية (آلي)';
+
+export type ReportPeriod = 'week' | 'month';
 
 const STATUS_AR: Record<string, string> = {
   draft: 'مسودة', pending_marketing: 'بانتظار مراجعة التسويق', pending_gm: 'بانتظار اعتماد المدير العام',
@@ -18,30 +21,32 @@ function riyadh(iso: string | null): string {
   } catch { return iso; }
 }
 
-// يبني مصنّف Excel تفصيلياً بالأعمال والتحليلات
-export async function buildReportWorkbook(env: Env): Promise<{ bytes: Uint8Array; filename: string }> {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+// يبني مصنّف Excel تفصيلياً بالأعمال والتحليلات لفترة أسبوعية أو شهرية
+export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week'): Promise<{ bytes: Uint8Array; filename: string; sheets: Sheet[] }> {
+  const days = period === 'month' ? 30 : 7;
+  const periodLabel = period === 'month' ? 'الشهري' : 'الأسبوعي';
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
   const q = (sql: string, ...binds: any[]) => env.DB.prepare(sql).bind(...binds).all<any>();
   const one = (sql: string, ...binds: any[]) => env.DB.prepare(sql).bind(...binds).first<any>();
 
-  // ملخص الأعمال (هذا الأسبوع + الحالة العامة)
-  const createdWeek = (await one('SELECT COUNT(*) c FROM content_posts WHERE created_at >= ?', weekAgo))?.c || 0;
-  const apprWeek = (await one('SELECT COUNT(*) c FROM approvals WHERE created_at >= ?', weekAgo))?.c || 0;
-  const publishedWeek = (await one("SELECT COUNT(DISTINCT post_id) c FROM approvals WHERE to_status='published' AND created_at >= ?", weekAgo))?.c || 0;
-  const rejectedWeek = (await one("SELECT COUNT(*) c FROM approvals WHERE to_status='rejected' AND created_at >= ?", weekAgo))?.c || 0;
-  const scheduledWeek = (await one("SELECT COUNT(*) c FROM schedules WHERE created_at >= ?", weekAgo))?.c || 0;
+  // ملخص الأعمال (الفترة + الحالة العامة)
+  const createdPeriod = (await one('SELECT COUNT(*) c FROM content_posts WHERE created_at >= ?', since))?.c || 0;
+  const apprPeriod = (await one('SELECT COUNT(*) c FROM approvals WHERE created_at >= ?', since))?.c || 0;
+  const publishedPeriod = (await one("SELECT COUNT(DISTINCT post_id) c FROM approvals WHERE to_status='published' AND created_at >= ?", since))?.c || 0;
+  const rejectedPeriod = (await one("SELECT COUNT(*) c FROM approvals WHERE to_status='rejected' AND created_at >= ?", since))?.c || 0;
+  const scheduledPeriod = (await one("SELECT COUNT(*) c FROM schedules WHERE created_at >= ?", since))?.c || 0;
   const byStatus = (await q('SELECT status, COUNT(*) c FROM content_posts GROUP BY status')).results;
 
   const summary: (string | number)[][] = [
-    ['تقرير الأداء الأسبوعي — منصة ناف للتسويق'],
+    [`تقرير الأداء ${periodLabel} — منصة ناف للتسويق`],
     ['تاريخ التوليد', riyadh(new Date().toISOString())],
     [],
-    ['ملخص أعمال الأسبوع'],
-    ['محتوى أُنشئ', createdWeek],
-    ['إجراءات اعتماد', apprWeek],
-    ['منشورات نُشرت', publishedWeek],
-    ['مرفوضات', rejectedWeek],
-    ['عمليات جدولة', scheduledWeek],
+    [`ملخص أعمال الفترة (آخر ${days} يوماً)`],
+    ['محتوى أُنشئ', createdPeriod],
+    ['إجراءات اعتماد', apprPeriod],
+    ['منشورات نُشرت', publishedPeriod],
+    ['مرفوضات', rejectedPeriod],
+    ['عمليات جدولة', scheduledPeriod],
     [],
     ['توزيع المحتوى حسب الحالة (إجمالي)'],
     ['الحالة', 'العدد'],
@@ -59,11 +64,11 @@ export async function buildReportWorkbook(env: Env): Promise<{ bytes: Uint8Array
     ...posts.map((p: any) => [p.title, STATUS_AR[p.status] || p.status, SOURCE_AR[p.source] || p.source, p.content_type, p.author || '', p.campaign || '', riyadh(p.created_at), riyadh(p.updated_at)]),
   ];
 
-  // سجل الاعتمادات هذا الأسبوع
+  // سجل الاعتمادات خلال الفترة
   const appr = (await q(
     `SELECT p.title, a.from_status, a.to_status, u.name actor, a.note, a.created_at
      FROM approvals a LEFT JOIN content_posts p ON p.id=a.post_id LEFT JOIN users u ON u.id=a.actor_id
-     WHERE a.created_at >= ? ORDER BY a.created_at DESC`, weekAgo,
+     WHERE a.created_at >= ? ORDER BY a.created_at DESC`, since,
   )).results;
   const approvals: (string | number)[][] = [
     ['المنشور', 'من', 'إلى', 'المنفّذ', 'ملاحظة', 'الوقت'],
@@ -97,19 +102,45 @@ export async function buildReportWorkbook(env: Env): Promise<{ bytes: Uint8Array
   ];
 
   const stamp = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date());
-  return { bytes: buildXlsx(sheets), filename: `تقرير-الأداء-${stamp}.xlsx` };
+  const prefix = period === 'month' ? 'تقرير-شهري' : 'تقرير-الأداء';
+  return { bytes: buildXlsx(sheets), filename: `${prefix}-${stamp}.xlsx`, sheets };
 }
 
-// يبني التقرير ويرفعه إلى ملفات المشروع في مجلد التقارير
-export async function uploadWeeklyReport(env: Env): Promise<{ ok: boolean; reason?: string }> {
+function csvEscape(v: string | number): string {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// يحوّل نفس بيانات التقرير إلى CSV (كل الأوراق متتالية بعناوين فاصلة) — صيغة تصدير إضافية
+export function sheetsToCsv(sheets: Sheet[]): string {
+  const lines: string[] = [];
+  for (const sheet of sheets) {
+    lines.push(`## ${sheet.name}`);
+    for (const row of sheet.rows) lines.push(row.map(csvEscape).join(','));
+    lines.push('');
+  }
+  return '﻿' + lines.join('\n');
+}
+
+// يبني التقرير ويرفعه إلى ملفات المشروع في مجلد التقارير (أسبوعي أو شهري)
+async function uploadReport(env: Env, period: ReportPeriod): Promise<{ ok: boolean; reason?: string }> {
   if (!(await isConfigured(env))) return { ok: false, reason: 'تكامل بيسكامب غير مضبوط' };
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return { ok: false, reason: 'لم يُضبط معرّف مشروع إدارة التسويق' };
 
-  const { bytes, filename } = await buildReportWorkbook(env);
+  const { bytes, filename } = await buildReportWorkbook(env, period);
   const sgid = await createAttachment(env, filename, XLSX_MIME, bytes);
   const rootVault = await getRootVaultId(env, projectId);
-  const folder = await ensureSubVault(env, projectId, rootVault, REPORT_FOLDER);
-  await createUpload(env, projectId, folder, sgid, `تقرير أداء أسبوعي — ${filename}`);
+  const folderName = period === 'month' ? MONTHLY_REPORT_FOLDER : REPORT_FOLDER;
+  const folder = await ensureSubVault(env, projectId, rootVault, folderName);
+  const label = period === 'month' ? 'تقرير أداء شهري' : 'تقرير أداء أسبوعي';
+  await createUpload(env, projectId, folder, sgid, `${label} — ${filename}`);
   return { ok: true };
+}
+
+export async function uploadWeeklyReport(env: Env): Promise<{ ok: boolean; reason?: string }> {
+  return uploadReport(env, 'week');
+}
+export async function uploadMonthlyReport(env: Env): Promise<{ ok: boolean; reason?: string }> {
+  return uploadReport(env, 'month');
 }

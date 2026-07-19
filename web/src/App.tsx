@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Comments from './pages/Comments';
 import Search from './pages/Search';
+import Audit from './pages/Audit';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
       <Route path="/comments" element={<Protected><Comments /></Protected>} />
       <Route path="/search" element={<Protected><Search /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
+      <Route path="/audit" element={<Protected><Audit /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

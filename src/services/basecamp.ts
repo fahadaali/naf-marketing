@@ -193,6 +193,18 @@ export async function trashRecording(env: Env, projectId: string, recordingId: s
   await bcFetch(env, `/buckets/${projectId}/recordings/${recordingId}/status/trashed.json`, { method: 'PUT' });
 }
 
+// تعليقات على بطاقة/تسجيل (تُستخدم لربط عكسي: تعليقات بيسكامب → ملاحظات في تدفّق الاعتماد)
+export type BcComment = { id: number; content: string; created_at: string; creator_name: string };
+export async function getComments(env: Env, projectId: string, recordingId: string): Promise<BcComment[]> {
+  const items = await bcJson<any[]>(env, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
+  return (items || []).map((it) => ({
+    id: it.id,
+    content: stripHtml(it.content || ''),
+    created_at: it.created_at || '',
+    creator_name: it.creator?.name || 'بيسكامب',
+  }));
+}
+
 // ==== المرفقات (attachments) ====
 export async function createAttachment(env: Env, name: string, contentType: string, bytes: BufferSource): Promise<string> {
   const base = await apiBase(env);

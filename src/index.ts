@@ -15,6 +15,7 @@ import { commentRoutes } from './routes/comments';
 import { notificationRoutes } from './routes/notifications';
 import { templateRoutes } from './routes/templates';
 import { searchRoutes } from './routes/search';
+import { auditRoutes } from './routes/audit';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -35,6 +36,7 @@ api.route('/comments', commentRoutes);
 api.route('/notifications', notificationRoutes);
 api.route('/templates', templateRoutes);
 api.route('/search', searchRoutes);
+api.route('/audit', auditRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 

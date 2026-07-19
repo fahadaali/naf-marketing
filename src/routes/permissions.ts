@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { allPermissions, PERMISSION_LABELS } from '../permissions';
+import { logAudit } from '../services/audit';
 
 export const permissionRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -30,5 +31,9 @@ permissionRoutes.patch('/', requirePermission('permissions.manage'), async (c) =
   )
     .bind(role_name, permission_key, allowed ? 1 : 0)
     .run();
+  const actor = c.get('user');
+  c.executionCtx.waitUntil(
+    logAudit(c.env, { id: actor.id, name: actor.name }, 'permission_change', 'role', role_name, `${permission_key} = ${allowed ? 'مسموح' : 'ممنوع'}`),
+  );
   return c.json({ ok: true });
 });
