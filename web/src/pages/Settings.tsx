@@ -31,7 +31,7 @@ export default function Settings() {
       {tab === 'permissions' && <Permissions />}
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
-      {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /></>}
+      {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /><div style={{ height: 16 }} /><AIMediaProviders /></>}
       {tab === 'integrations' && <Integrations />}
     </div>
   );
@@ -454,6 +454,56 @@ function PlatformPrompts() {
       ))}
       {msg && <p className="ok">{msg}</p>}
       {enabled.length > 0 && <button className="btn" onClick={save}>حفظ توجيهات المنصات</button>}
+    </div>
+  );
+}
+
+/* ===== توليد الوسائط بالذكاء الاصطناعي (صور/فيديو) ===== */
+function AIMediaProviders() {
+  const [imageProvider, setImageProvider] = useState('mock');
+  const [videoProvider, setVideoProvider] = useState('mock');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then((d) => {
+      setImageProvider(d.settings?.image_provider || 'mock');
+      setVideoProvider(d.settings?.video_provider || 'mock');
+    });
+  }, []);
+
+  async function save() {
+    setMsg('');
+    await api.put('/settings', { image_provider: imageProvider, video_provider: videoProvider });
+    setMsg('تم الحفظ');
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>توليد الصور والفيديو بالذكاء الاصطناعي</h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        اختر مزوّد التوليد؛ مفاتيحه تُضبط عبر Cloudflare Secrets (<code>IMAGE_PROVIDER_API_KEY</code>، <code>VIDEO_PROVIDER_API_KEY</code>) ولا تُدار من هنا.
+      </p>
+      <div className="grid cols-2">
+        <div className="field">
+          <label>مزوّد الصور</label>
+          <select className="select" value={imageProvider} onChange={(e) => setImageProvider(e.target.value)}>
+            <option value="mock">Mock (تجريبي — صورة تدرّج لوني)</option>
+            <option value="openai">OpenAI (Images API)</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>مزوّد الفيديو</label>
+          <select className="select" value={videoProvider} onChange={(e) => setVideoProvider(e.target.value)}>
+            <option value="mock">Mock (تجريبي — للتحقق من الربط فقط)</option>
+            <option value="runway">Runway ML</option>
+          </select>
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>
+        مزوّد الفيديو التجريبي (Mock) يُثبت أن الربط جاهز لكنه لا يُنتج فيديو حقيقياً — اختر Runway (أو مزوّداً آخر لاحقاً) وأضف مفتاحه لتفعيل التوليد الفعلي.
+      </p>
+      {msg && <p className="ok">{msg}</p>}
+      <button className="btn" onClick={save}>حفظ إعدادات التوليد</button>
     </div>
   );
 }

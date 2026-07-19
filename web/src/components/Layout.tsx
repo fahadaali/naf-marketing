@@ -9,6 +9,7 @@ import {
   ListChecks,
   Newspaper,
   BarChart3,
+  MessageCircle,
   Settings,
   LogOut,
   Sun,
@@ -48,6 +49,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { to: '/queue', label: 'طابور الاعتماد', icon: <ListChecks size={sz} />, show: can('content.review') },
     { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
     { to: '/analytics', label: 'التحليلات', icon: <BarChart3 size={sz} />, show: can('analytics.view') },
+    { to: '/comments', label: 'التعليقات والرسائل', icon: <MessageCircle size={sz} />, show: can('comments.manage') },
     {
       to: '/settings',
       label: 'الإعدادات والمستخدمون',

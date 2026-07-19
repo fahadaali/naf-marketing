@@ -13,6 +13,10 @@ import {
   PenLine,
   BookOpen,
   ImagePlus,
+  Wand2,
+  Image as ImageIcon,
+  Video,
+  Loader2,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
@@ -21,7 +25,7 @@ import Modal from '../components/Modal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
-import { mediaFromEl, type MediaInfo } from '../mediaEmbed';
+import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 
 export default function Editor() {
@@ -49,6 +53,7 @@ export default function Editor() {
   const [showAI, setShowAI] = useState(false);
   const [showKB, setShowKB] = useState(false);
   const [showMediaGen, setShowMediaGen] = useState(false);
+  const [showAIMedia, setShowAIMedia] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [viewer, setViewer] = useState<MediaInfo | null>(null);
@@ -219,6 +224,11 @@ export default function Editor() {
                     <ImagePlus size={15} /> توليد من وسيط
                   </button>
                 )}
+                {can('ai.generate') && (
+                  <button className="btn ghost sm" type="button" onClick={() => setShowAIMedia(true)}>
+                    <Wand2 size={15} /> توليد صورة/فيديو بالذكاء الاصطناعي
+                  </button>
+                )}
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
                 لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك 📎 في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
@@ -376,6 +386,12 @@ export default function Editor() {
           onResult={(t) => { editorRef.current?.insertHtml(`<p>${t.replace(/\n/g, '<br/>')}</p>`); setShowMediaGen(false); }}
         />
       )}
+      {showAIMedia && (
+        <AIMediaModal
+          onClose={() => setShowAIMedia(false)}
+          onResult={(m) => { editorRef.current?.insertHtml(mediaEmbedHtml(m)); setShowAIMedia(false); }}
+        />
+      )}
       {viewer && <MediaViewer media={viewer} onClose={() => setViewer(null)} />}
       {showReject && (
         <RejectModal
@@ -524,6 +540,89 @@ function MediaGenModal({
       {err && <p className="err">{err}</p>}
       <button className="btn gold" onClick={run} disabled={!file || !!busy}>
         <Sparkles size={16} /> {busy || 'توليد وحقن في المحرر'}
+      </button>
+    </Modal>
+  );
+}
+
+// توليد صورة أو فيديو بالذكاء الاصطناعي من وصف نصّي (prompt) وإدراجه في المحرر
+function AIMediaModal({
+  onClose,
+  onResult,
+}: {
+  onClose: () => void;
+  onResult: (m: { id: string; url: string; filename?: string; mime_type?: string }) => void;
+}) {
+  const [kind, setKind] = useState<'image' | 'video'>('image');
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+  const [err, setErr] = useState('');
+
+  async function pollVideo(jobId: string) {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const d = await api.get(`/media/generate/video/${jobId}`);
+      if (d.status === 'completed' && d.media) {
+        onResult(d.media);
+        return;
+      }
+      if (d.status === 'failed') {
+        setErr(d.error || 'فشل توليد الفيديو');
+        setBusy(false);
+        return;
+      }
+      setStatus('جارٍ المعالجة… قد يستغرق دقائق');
+    }
+    setErr('استغرق التوليد وقتاً طويلاً — حاول لاحقاً');
+    setBusy(false);
+  }
+
+  async function run() {
+    if (!prompt.trim()) return;
+    setErr(''); setBusy(true); setStatus('جارٍ التوليد…');
+    try {
+      if (kind === 'image') {
+        const d = await api.post('/media/generate/image', { prompt: prompt.trim() });
+        onResult(d);
+      } else {
+        const d = await api.post('/media/generate/video', { prompt: prompt.trim() });
+        setStatus('بدأت المهمة… جارٍ الاستقصاء عن النتيجة');
+        await pollVideo(d.jobId);
+      }
+    } catch (e: any) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="توليد صورة أو فيديو بالذكاء الاصطناعي" onClose={onClose}>
+      <div className="row" style={{ marginBottom: 14 }}>
+        <button type="button" className={`btn sm ${kind === 'image' ? '' : 'ghost'}`} onClick={() => setKind('image')}>
+          <ImageIcon size={15} /> صورة
+        </button>
+        <button type="button" className={`btn sm ${kind === 'video' ? '' : 'ghost'}`} onClick={() => setKind('video')}>
+          <Video size={15} /> فيديو
+        </button>
+      </div>
+      <div className="field">
+        <label>وصف {kind === 'image' ? 'الصورة' : 'الفيديو'} (Prompt)</label>
+        <textarea
+          className="textarea"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={kind === 'image' ? 'مثال: مكتب محاماة عصري بإضاءة دافئة' : 'مثال: لقطة قصيرة لمبنى مكاتب عصري عند الغروب'}
+        />
+      </div>
+      {err && <p className="err">{err}</p>}
+      {busy && !err && (
+        <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Loader2 size={15} className="spin" /> {status}
+        </p>
+      )}
+      <button className="btn gold" onClick={run} disabled={busy || !prompt.trim()}>
+        <Wand2 size={16} /> {busy ? 'جارٍ التوليد…' : `توليد ${kind === 'image' ? 'الصورة' : 'الفيديو'} وإدراجه`}
       </button>
     </Modal>
   );

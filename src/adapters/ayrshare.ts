@@ -1,4 +1,4 @@
-import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult } from './provider';
+import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem } from './provider';
 
 // مثال تنفيذ لمزوّد حقيقي (Ayrshare) — يوضّح كيف يُبنى أي مزوّد خلف نفس الواجهة.
 // ملاحظة: أسماء المنصات قد تحتاج مواءمة حسب المزوّد؛ عُدّلها عند التفعيل الفعلي.
@@ -58,5 +58,36 @@ export class AyrshareProvider implements PublishingProvider {
       headers: this.headers(),
       body: JSON.stringify({ id: providerPostId }),
     });
+  }
+
+  // تعليقات Ayrshare — وفق واجهتهم الموثّقة (best-effort)
+  async getComments(providerPostId: string): Promise<CommentItem[]> {
+    const res = await fetch(`${this.baseUrl}/comments`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ id: providerPostId }),
+    });
+    const data = (await res.json()) as any;
+    if (!res.ok) throw new Error(`فشل جلب التعليقات: ${data?.message || res.status}`);
+    const list: any[] = data?.comments || data?.data || [];
+    return list.map((c) => ({
+      id: String(c.id || c.commentId),
+      kind: 'comment' as const,
+      authorName: c.name || c.username || c.from || 'مستخدم',
+      body: c.comment || c.text || c.message || '',
+      createdAt: c.created || c.timestamp || new Date().toISOString(),
+    }));
+  }
+
+  async replyComment(providerPostId: string, commentId: string, text: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/comments/reply`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ id: providerPostId, commentId, comment: text }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as any;
+      throw new Error(`فشل الرد على التعليق: ${data?.message || res.status}`);
+    }
   }
 }
