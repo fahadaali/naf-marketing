@@ -15,9 +15,11 @@ import {
   Sun,
   Moon,
   Scale,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
+import NotificationBell from './NotificationBell';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
 
@@ -32,6 +34,26 @@ function useTheme() {
     } catch {}
   }, [theme]);
   return { theme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')) };
+}
+
+function TopSearch() {
+  const navigate = useNavigate();
+  const [q, setQ] = useState('');
+  return (
+    <form
+      style={{ position: 'relative', width: 280 }}
+      onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}
+    >
+      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'hsl(var(--muted-foreground))' }} />
+      <input
+        className="input"
+        style={{ paddingInlineStart: 32, height: 34 }}
+        placeholder="بحث في المحتوى والأخبار…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+    </form>
+  );
 }
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -92,8 +114,9 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       <div className="main">
         <header className="topbar">
-          <div />
+          <TopSearch />
           <div className="user-chip">
+            <NotificationBell />
             <button
               className="icon-btn"
               onClick={toggle}

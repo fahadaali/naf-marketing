@@ -151,6 +151,16 @@ a:hover { text-decoration: underline; }
 }
 .icon-btn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
 
+/* ===== الإشعارات ===== */
+.notif-dot {
+  position: absolute; top: -3px; left: -3px; min-width: 16px; height: 16px; padding: 0 3px;
+  background: hsl(var(--destructive)); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1;
+}
+.notif-menu { width: 320px; padding: 8px; }
+.notif-item { padding: 9px 8px; border-radius: 8px; cursor: pointer; margin-bottom: 2px; }
+.notif-item:hover { background: hsl(var(--accent)); }
+
 .content { padding: 28px; flex: 1; overflow: auto; max-width: 1400px; width: 100%; margin: 0 auto; }
 
 /* ===== البطاقات ===== */

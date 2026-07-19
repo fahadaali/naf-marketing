@@ -12,6 +12,9 @@ import { rssRoutes } from './routes/rss';
 import { analyticsRoutes } from './routes/analytics';
 import { basecampRoutes } from './routes/basecamp';
 import { commentRoutes } from './routes/comments';
+import { notificationRoutes } from './routes/notifications';
+import { templateRoutes } from './routes/templates';
+import { searchRoutes } from './routes/search';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -29,6 +32,9 @@ api.route('/rss', rssRoutes);
 api.route('/analytics', analyticsRoutes);
 api.route('/basecamp', basecampRoutes);
 api.route('/comments', commentRoutes);
+api.route('/notifications', notificationRoutes);
+api.route('/templates', templateRoutes);
+api.route('/search', searchRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 

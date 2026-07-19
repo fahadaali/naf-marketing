@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { getProvider } from '../adapters';
 import { nowIso } from '../util';
+import { notifyPublishFailed } from './notify';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -41,10 +42,12 @@ async function publishJobs(env: Env, jobs: Job[]): Promise<{ published: number; 
         .run();
       published++;
     } catch (err: any) {
+      const errMsg = String(err?.message || err);
       await env.DB.prepare("UPDATE schedules SET status = 'failed', error = ? WHERE id = ?")
-        .bind(String(err?.message || err), job.id)
+        .bind(errMsg, job.id)
         .run();
       failed++;
+      try { await notifyPublishFailed(env, job.post_id, job.platform, errMsg); } catch { /* لا تعطّل النشر */ }
     }
   }
 
