@@ -5,7 +5,7 @@ import { getEmailProvider } from './email';
 type NotifyInput = { type: string; title: string; body?: string; link?: string };
 
 // ينشئ إشعاراً داخل التطبيق لكل مستخدم، ويحاول إرسال بريد (best-effort، لا يعطّل عند الفشل)
-async function notifyUsers(env: Env, userIds: string[], input: NotifyInput): Promise<void> {
+export async function notifyUsers(env: Env, userIds: string[], input: NotifyInput): Promise<void> {
   if (!userIds.length) return;
   const stmts = userIds.map((uid) =>
     env.DB.prepare(
@@ -28,7 +28,7 @@ async function notifyUsers(env: Env, userIds: string[], input: NotifyInput): Pro
   } catch { /* لا تعطّل الإشعار داخل التطبيق عند فشل البريد */ }
 }
 
-async function usersWithPermission(env: Env, permissionKey: string): Promise<string[]> {
+export async function usersWithPermission(env: Env, permissionKey: string): Promise<string[]> {
   const { results } = await env.DB.prepare(
     `SELECT u.id FROM users u
      JOIN roles_permissions rp ON rp.role_name = u.role_name AND rp.permission_key = ?

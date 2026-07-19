@@ -3,6 +3,7 @@ import { refreshAllFeeds } from './services/rss';
 import { pullAnalytics } from './services/analytics';
 import { uploadWeeklyReport } from './services/report';
 import { syncComments } from './services/commentsSync';
+import { checkStaleContent } from './services/alerts';
 
 // معالج المهام المجدولة. cron المُعرّفة في wrangler.toml:
 //   "17 * * * *" → جلب RSS + سحب التحليلات + التعليقات (كل ساعة)
@@ -15,5 +16,5 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
     } catch { /* تُتجاهل — لا تعطّل بقية المهام */ }
     return;
   }
-  await Promise.allSettled([refreshAllFeeds(env), pullAnalytics(env), syncComments(env)]);
+  await Promise.allSettled([refreshAllFeeds(env), pullAnalytics(env), syncComments(env), checkStaleContent(env)]);
 }

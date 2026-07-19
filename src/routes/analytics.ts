@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { pullAnalytics } from '../services/analytics';
+import { listStaleContent } from '../services/alerts';
 
 export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -91,6 +92,49 @@ analyticsRoutes.get('/dashboard', async (c) => {
     pipeline: pipeline.results,
     campaigns: campaigns.results,
   });
+});
+
+// لوحة أداء الفريق: إنتاجية الكتّاب وسرعة اعتماد المراجعين/المديرين
+analyticsRoutes.get('/performance', async (c) => {
+  const writers = await c.env.DB.prepare(
+    `SELECT u.id, u.name,
+            COUNT(p.id) AS created_count,
+            SUM(CASE WHEN p.status = 'published' THEN 1 ELSE 0 END) AS published_count,
+            SUM(CASE WHEN p.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
+     FROM users u
+     LEFT JOIN content_posts p ON p.author_id = u.id
+     GROUP BY u.id
+     HAVING created_count > 0
+     ORDER BY created_count DESC`,
+  ).all();
+
+  // سرعة الاعتماد لكل مراجع: متوسط الفترة بالساعات بين إجراء الاعتماد والإجراء السابق عليه لنفس المنشور
+  // (أو تاريخ إنشاء المنشور إن كان أول إجراء)
+  const approvers = await c.env.DB.prepare(
+    `WITH ranked AS (
+       SELECT a.id, a.post_id, a.actor_id, a.to_status, a.created_at,
+              (SELECT MAX(a2.created_at) FROM approvals a2
+               WHERE a2.post_id = a.post_id AND a2.created_at < a.created_at) AS prev_at,
+              p.created_at AS post_created_at
+       FROM approvals a
+       JOIN content_posts p ON p.id = a.post_id
+     )
+     SELECT u.id, u.name,
+            COUNT(r.id) AS actions_count,
+            ROUND(AVG((julianday(r.created_at) - julianday(COALESCE(r.prev_at, r.post_created_at))) * 24), 2) AS avg_hours
+     FROM ranked r
+     JOIN users u ON u.id = r.actor_id
+     GROUP BY u.id
+     ORDER BY actions_count DESC`,
+  ).all();
+
+  return c.json({ writers: writers.results, approvers: approvers.results });
+});
+
+// المحتوى المتأخر في مراحل المراجعة/الاعتماد الحالية
+analyticsRoutes.get('/alerts', async (c) => {
+  const stale = await listStaleContent(c.env);
+  return c.json({ stale });
 });
 
 // سحب فوري (إضافةً إلى Cron)

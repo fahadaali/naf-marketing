@@ -514,18 +514,20 @@ function AIMediaProviders() {
 function NotificationSettings() {
   const [provider, setProvider] = useState('mock');
   const [from, setFrom] = useState('');
+  const [staleDays, setStaleDays] = useState('3');
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
     api.get('/settings').then((d) => {
       setProvider(d.settings?.email_provider || 'mock');
       setFrom(d.settings?.email_from || '');
+      setStaleDays(d.settings?.stale_alert_days || '3');
     });
   }, []);
 
   async function save() {
     setMsg('');
-    await api.put('/settings', { email_provider: provider, email_from: from });
+    await api.put('/settings', { email_provider: provider, email_from: from, stale_alert_days: staleDays });
     setMsg('تم الحفظ');
   }
 
@@ -551,6 +553,19 @@ function NotificationSettings() {
       </div>
       <p className="muted" style={{ fontSize: 12 }}>
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
+      </p>
+      <div className="field" style={{ maxWidth: 240 }}>
+        <label>تنبيه المحتوى المتأخر بعد (أيام)</label>
+        <input
+          className="input"
+          type="number"
+          min={1}
+          value={staleDays}
+          onChange={(e) => setStaleDays(e.target.value)}
+        />
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>
+        إن بقي محتوى في مرحلة المراجعة أو الاعتماد النهائي دون حركة لهذه المدة، يُرسل تنبيه تلقائي للمسؤولين عن تلك المرحلة.
       </p>
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ إعدادات الإشعارات</button>
