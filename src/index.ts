@@ -11,6 +11,7 @@ import { mediaRoutes } from './routes/media';
 import { rssRoutes } from './routes/rss';
 import { analyticsRoutes } from './routes/analytics';
 import { basecampRoutes } from './routes/basecamp';
+import { commentRoutes } from './routes/comments';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -27,6 +28,7 @@ api.route('/media', mediaRoutes);
 api.route('/rss', rssRoutes);
 api.route('/analytics', analyticsRoutes);
 api.route('/basecamp', basecampRoutes);
+api.route('/comments', commentRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 

@@ -14,6 +14,9 @@ export type Env = {
   BASECAMP_CLIENT_ID?: string;
   BASECAMP_CLIENT_SECRET?: string;
   BASECAMP_REFRESH_TOKEN?: string;
+  // توليد الوسائط بالذكاء الاصطناعي
+  IMAGE_PROVIDER_API_KEY?: string;
+  VIDEO_PROVIDER_API_KEY?: string;
 };
 
 export type Role = 'writer' | 'marketing_manager' | 'general_manager';

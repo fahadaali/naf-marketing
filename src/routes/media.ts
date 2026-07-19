@@ -3,10 +3,42 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId } from '../util';
 import { generateFromMedia } from '../services/claude';
+import { generateImageAsset, startVideoJob, pollVideoJob } from '../services/mediaGen';
 
 export const mediaRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 mediaRoutes.use('*', requireAuth);
+
+// توليد صورة بالذكاء الاصطناعي (متزامن) — يعيد بيانات وسيط جاهزة للإدراج مباشرة
+mediaRoutes.post('/generate/image', requirePermission('ai.generate'), async (c) => {
+  const { prompt } = await c.req.json<{ prompt: string }>();
+  if (!prompt?.trim()) return c.json({ error: 'أدخل وصفاً للصورة' }, 400);
+  try {
+    const asset = await generateImageAsset(c.env, prompt.trim(), c.get('user').id);
+    return c.json({ ok: true, ...asset });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// بدء توليد فيديو (غير متزامن) — يعيد معرّف مهمة يُستقصى دورياً
+mediaRoutes.post('/generate/video', requirePermission('ai.generate'), async (c) => {
+  const { prompt } = await c.req.json<{ prompt: string }>();
+  if (!prompt?.trim()) return c.json({ error: 'أدخل وصفاً للفيديو' }, 400);
+  const jobId = await startVideoJob(c.env, prompt.trim(), c.get('user').id);
+  return c.json({ ok: true, jobId });
+});
+
+// استقصاء حالة مهمة فيديو
+mediaRoutes.get('/generate/video/:jobId', requirePermission('ai.generate'), async (c) => {
+  const job = await pollVideoJob(c.env, c.req.param('jobId'));
+  if (!job) return c.json({ error: 'المهمة غير موجودة' }, 404);
+  return c.json({
+    status: job.status,
+    error: job.error,
+    media: job.media_asset_id ? { id: job.media_asset_id, url: `/api/media/${job.media_asset_id}` } : null,
+  });
+});
 
 // رفع وسيط إلى R2 (multipart/form-data، الحقل: file)
 mediaRoutes.post('/', requirePermission('media.upload'), async (c) => {

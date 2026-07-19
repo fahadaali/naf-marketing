@@ -20,3 +20,9 @@ AUTH_SECRET="change-me-to-a-long-random-string"
 BASECAMP_CLIENT_ID=""
 BASECAMP_CLIENT_SECRET=""
 BASECAMP_REFRESH_TOKEN=""
+
+# توليد الصور بالذكاء الاصطناعي — اختياري. مزوّد OpenAI (Images API) إن اخترته من الإعدادات
+IMAGE_PROVIDER_API_KEY=""
+
+# توليد الفيديو بالذكاء الاصطناعي — اختياري. مزوّد Runway ML إن اخترته من الإعدادات
+VIDEO_PROVIDER_API_KEY=""
