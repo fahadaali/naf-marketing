@@ -19,6 +19,7 @@ import {
   Loader2,
   LayoutTemplate,
   History,
+  RefreshCw,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
@@ -46,6 +47,8 @@ export default function Editor() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
+  const [basecampSynced, setBasecampSynced] = useState(false);
+  const [syncingNotes, setSyncingNotes] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
@@ -75,8 +78,22 @@ export default function Editor() {
     setRejectReason(d.post.reject_reason || '');
     setApprovals(d.approvals);
     setNotes(d.notes || []);
+    setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
+  }
+
+  // مزامنة يدوية فورية لتعليقات بيسكامب لهذا المنشور، ثم تحديث قائمة الملاحظات فقط.
+  async function syncNotes() {
+    const pid = postId || id;
+    if (!pid) return;
+    setSyncingNotes(true);
+    try {
+      await api.post('/basecamp/sync-comments', { post_id: pid });
+      const d = await api.get(`/posts/${pid}`);
+      setNotes(d.notes || []);
+    } catch { /* تُتجاهل — قد لا يكون بيسكامب مضبوطاً */ }
+    finally { setSyncingNotes(false); }
   }
 
   useEffect(() => {
@@ -381,10 +398,21 @@ export default function Editor() {
             </div>
           )}
 
-          {/* ملاحظات مستوردة من تعليقات بطاقة بيسكامب (ربط عكسي) */}
-          {notes.length > 0 && (
+          {/* ملاحظات مستوردة من تعليقات بطاقة بيسكامب (ربط عكسي) — تظهر لأي منشور مرتبط ببطاقة */}
+          {(basecampSynced || notes.length > 0) && (
             <div className="card">
-              <h4 style={{ marginTop: 0 }}>ملاحظات بيسكامب</h4>
+              <div className="row" style={{ marginBottom: 6 }}>
+                <h4 style={{ margin: 0 }}>ملاحظات بيسكامب</h4>
+                <div className="spacer" />
+                <button
+                  className="icon-btn"
+                  onClick={syncNotes}
+                  disabled={syncingNotes}
+                  title="تحديث التعليقات من بيسكامب الآن"
+                >
+                  <RefreshCw size={15} className={syncingNotes ? 'spin' : ''} />
+                </button>
+              </div>
               {notes.map((n) => (
                 <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
                   <div><strong>{n.author_name || 'بيسكامب'}</strong></div>
@@ -392,6 +420,7 @@ export default function Editor() {
                   <div className="muted">{formatRiyadh(n.created_at)}</div>
                 </div>
               ))}
+              {notes.length === 0 && <p className="muted" style={{ fontSize: 12, margin: 0 }}>لا توجد تعليقات بعد. اضغط التحديث لجلب أحدث تعليقات بيسكامب.</p>}
             </div>
           )}
         </div>

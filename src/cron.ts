@@ -8,11 +8,16 @@ import { syncCardCommentsSafe } from './services/basecampSync';
 import { uploadMonthlyReport } from './services/report';
 
 // معالج المهام المجدولة. cron المُعرّفة في wrangler.toml:
-//   "17 * * * *" → جلب RSS + سحب التحليلات + التعليقات (كل ساعة) + تعليقات بطاقات بيسكامب + تنبيهات التأخر
+//   "*/2 * * * *" → مزامنة تعليقات بطاقات بيسكامب (شبه فوري، كل دقيقتين)
+//   "17 * * * *" → جلب RSS + سحب التحليلات + تعليقات المنصات + تنبيهات التأخر (كل ساعة)
 //   "0 18 * * 6" → التقرير الأسبوعي (السبت ٩:٠٠م بتوقيت الرياض = ١٨:٠٠ UTC) يُرفع إلى بيسكامب
 //   "0 18 1 * *" → التقرير الشهري (اليوم الأول من الشهر ٩:٠٠م بتوقيت الرياض) يُرفع إلى بيسكامب
 // النشر يدوي عبر زر «نشر الآن». المهام idempotent.
 export async function handleScheduled(event: ScheduledController, env: Env): Promise<void> {
+  if (event.cron === '*/2 * * * *') {
+    await syncCardCommentsSafe(env);
+    return;
+  }
   if (event.cron === '0 18 * * 6') {
     try {
       await uploadWeeklyReport(env);
@@ -30,6 +35,5 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
     pullAnalytics(env),
     syncComments(env),
     checkStaleContent(env),
-    syncCardCommentsSafe(env),
   ]);
 }

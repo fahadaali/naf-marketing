@@ -84,6 +84,7 @@ postRoutes.get('/:id', async (c) => {
     .all();
   const schedules = await c.env.DB.prepare('SELECT * FROM schedules WHERE post_id = ?').bind(id).all();
   const notes = await c.env.DB.prepare('SELECT * FROM post_notes WHERE post_id = ? ORDER BY created_at ASC').bind(id).all();
+  const bcTask = await c.env.DB.prepare('SELECT 1 AS x FROM basecamp_tasks WHERE post_id = ?').bind(id).first();
 
   return c.json({
     post,
@@ -91,6 +92,7 @@ postRoutes.get('/:id', async (c) => {
     approvals: approvals.results,
     schedules: schedules.results,
     notes: notes.results,
+    basecamp_synced: !!bcTask,
   });
 });
 
