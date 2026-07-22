@@ -10,7 +10,7 @@ import {
   exchangeCode,
 } from '../services/basecamp';
 import { buildReportWorkbook, uploadWeeklyReport, uploadMonthlyReport, sheetsToCsv, type ReportPeriod } from '../services/report';
-import { resyncAll } from '../services/basecampSync';
+import { resyncAll, syncCardComments, syncCardCommentsForPost } from '../services/basecampSync';
 import { logAudit } from '../services/audit';
 
 export const basecampRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -54,6 +54,7 @@ basecampRoutes.use('/files', requireAuth);
 basecampRoutes.use('/generate', requireAuth);
 basecampRoutes.use('/report/*', requireAuth);
 basecampRoutes.use('/resync', requireAuth);
+basecampRoutes.use('/sync-comments', requireAuth);
 
 basecampRoutes.get('/status', async (c) => {
   const configured = await isConfigured(c.env);
@@ -107,6 +108,22 @@ basecampRoutes.post('/resync', requirePermission('settings.manage'), async (c) =
   const actor = c.get('user');
   c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'basecamp_resync', 'basecamp', undefined, `${cnt} منشور`));
   return c.json({ ok: true, queued: cnt });
+});
+
+// مزامنة يدوية فورية لتعليقات بيسكامب — لمنشور محدّد (post_id) أو للكل عند غيابه
+basecampRoutes.post('/sync-comments', async (c) => {
+  if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
+  const body = await c.req.json<{ post_id?: string }>().catch(() => ({} as { post_id?: string }));
+  try {
+    if (body.post_id) {
+      const count = await syncCardCommentsForPost(c.env, body.post_id);
+      return c.json({ ok: true, count });
+    }
+    await syncCardComments(c.env);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
 });
 
 basecampRoutes.get('/files', requirePermission('ai.generate'), async (c) => {

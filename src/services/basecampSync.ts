@@ -191,39 +191,58 @@ async function notifyPostComment(env: Env, postId: string, author: string, body:
   });
 }
 
-// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى ويحفظها كملاحظات على المنشور (بدون تكرار)،
-// ويُرسل إشعاراً داخل المنصة عند كل تعليق جديد فعلياً.
+// يزامن تعليقات بطاقة واحدة → ملاحظات على المنشور (بدون تكرار)، ويُشعر عند كل تعليق جديد فعلياً.
+// يُرجِع عدد التعليقات الجديدة المُضافة.
+async function syncCommentsForCard(env: Env, projectId: string, postId: string, cardId: string): Promise<number> {
+  let comments;
+  try {
+    comments = await getComments(env, projectId, cardId);
+  } catch {
+    return 0;
+  }
+  let added = 0;
+  for (const cm of comments) {
+    if (!cm.content) continue;
+    const res = await env.DB.prepare(
+      `INSERT INTO post_notes (id, post_id, source, external_id, author_name, body, created_at)
+       VALUES (?, ?, 'basecamp', ?, ?, ?, ?)
+       ON CONFLICT(source, external_id) DO NOTHING`,
+    )
+      .bind(newId('note'), postId, String(cm.id), cm.creator_name, cm.content, cm.created_at || new Date().toISOString())
+      .run();
+    // changes > 0 يعني أنه أُدرج فعلاً (تعليق جديد وليس مكرراً) → أرسل إشعاراً
+    if ((res.meta?.changes ?? 0) > 0) {
+      added++;
+      try { await notifyPostComment(env, postId, cm.creator_name, cm.content); } catch { /* لا تعطّل المزامنة */ }
+    }
+  }
+  return added;
+}
+
+// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى (مزامنة دورية شاملة)
 export async function syncCardComments(env: Env): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
   const tasks = (await env.DB.prepare('SELECT post_id, todo_id FROM basecamp_tasks').all<{ post_id: string; todo_id: string }>()).results;
   for (const t of tasks) {
-    let comments;
-    try {
-      comments = await getComments(env, projectId, t.todo_id);
-    } catch {
-      continue;
-    }
-    for (const cm of comments) {
-      if (!cm.content) continue;
-      const res = await env.DB.prepare(
-        `INSERT INTO post_notes (id, post_id, source, external_id, author_name, body, created_at)
-         VALUES (?, ?, 'basecamp', ?, ?, ?, ?)
-         ON CONFLICT(source, external_id) DO NOTHING`,
-      )
-        .bind(newId('note'), t.post_id, String(cm.id), cm.creator_name, cm.content, cm.created_at || new Date().toISOString())
-        .run();
-      // changes > 0 يعني أنه أُدرج فعلاً (تعليق جديد وليس مكرراً) → أرسل إشعاراً
-      if ((res.meta?.changes ?? 0) > 0) {
-        try { await notifyPostComment(env, t.post_id, cm.creator_name, cm.content); } catch { /* لا تعطّل المزامنة */ }
-      }
-    }
+    await syncCommentsForCard(env, projectId, t.post_id, t.todo_id);
   }
 }
 export async function syncCardCommentsSafe(env: Env): Promise<void> {
   try {
     if (await isConfigured(env)) await syncCardComments(env);
   } catch { /* */ }
+}
+
+// مزامنة يدوية فورية لتعليقات منشور واحد — تُرجِع عدد التعليقات الجديدة (0 إن لم تكن مرتبطة ببطاقة).
+export async function syncCardCommentsForPost(env: Env, postId: string): Promise<number> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return 0;
+  const task = await env.DB.prepare('SELECT todo_id FROM basecamp_tasks WHERE post_id = ?')
+    .bind(postId)
+    .first<{ todo_id: string }>();
+  if (!task) return 0;
+  return syncCommentsForCard(env, projectId, postId, task.todo_id);
 }
 
 // غلاف آمن للتشغيل في الخلفية (لا يعطّل عملية المستخدم مهما حدث)
