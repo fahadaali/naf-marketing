@@ -4,6 +4,7 @@ import {
   isConfigured, setting, getMgmtProjectId, getCardTableId, getColumns, createColumn,
   getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment, getComments,
 } from './basecamp';
+import { notifyUsers, usersWithPermission } from './notify';
 
 // مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
 
@@ -173,7 +174,25 @@ export async function trashPostTask(env: Env, postId: string): Promise<void> {
   }
 }
 
-// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى ويحفظها كملاحظات على المنشور (بدون تكرار)
+// إشعار كاتب المحتوى والمراجعين عند وصول تعليق جديد من بيسكامب
+async function notifyPostComment(env: Env, postId: string, author: string, body: string): Promise<void> {
+  const post = await env.DB.prepare('SELECT title, author_id FROM content_posts WHERE id = ?')
+    .bind(postId)
+    .first<{ title: string; author_id: string }>();
+  if (!post) return;
+  const reviewers = await usersWithPermission(env, 'content.review');
+  const ids = Array.from(new Set([post.author_id, ...reviewers].filter(Boolean)));
+  const excerpt = body.length > 140 ? `${body.slice(0, 140)}…` : body;
+  await notifyUsers(env, ids, {
+    type: 'basecamp_comment',
+    title: 'تعليق جديد من بيسكامب',
+    body: `${author} علّق على «${post.title}»: ${excerpt}`,
+    link: `/editor/${postId}`,
+  });
+}
+
+// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى ويحفظها كملاحظات على المنشور (بدون تكرار)،
+// ويُرسل إشعاراً داخل المنصة عند كل تعليق جديد فعلياً.
 export async function syncCardComments(env: Env): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
@@ -187,13 +206,17 @@ export async function syncCardComments(env: Env): Promise<void> {
     }
     for (const cm of comments) {
       if (!cm.content) continue;
-      await env.DB.prepare(
+      const res = await env.DB.prepare(
         `INSERT INTO post_notes (id, post_id, source, external_id, author_name, body, created_at)
          VALUES (?, ?, 'basecamp', ?, ?, ?, ?)
          ON CONFLICT(source, external_id) DO NOTHING`,
       )
         .bind(newId('note'), t.post_id, String(cm.id), cm.creator_name, cm.content, cm.created_at || new Date().toISOString())
         .run();
+      // changes > 0 يعني أنه أُدرج فعلاً (تعليق جديد وليس مكرراً) → أرسل إشعاراً
+      if ((res.meta?.changes ?? 0) > 0) {
+        try { await notifyPostComment(env, t.post_id, cm.creator_name, cm.content); } catch { /* لا تعطّل المزامنة */ }
+      }
     }
   }
 }
