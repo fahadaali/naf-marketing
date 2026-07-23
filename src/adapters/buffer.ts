@@ -61,8 +61,9 @@ export class BufferProvider implements PublishingProvider {
     const modeClause = input.scheduleAt
       ? `mode: customScheduled, dueAt: ${JSON.stringify(input.scheduleAt)}`
       : 'mode: shareNow';
+    // AssetInput.image نوعه ImageAssetInput (كائن فيه url) — لا نصّ
     const assetsClause = input.mediaUrls?.length
-      ? `, assets: [{ image: ${JSON.stringify(input.mediaUrls[0])} }]`
+      ? `, assets: [{ image: { url: ${JSON.stringify(input.mediaUrls[0])} } }]`
       : '';
 
     let lastId = '';
@@ -90,20 +91,22 @@ export class BufferProvider implements PublishingProvider {
     } }`;
     const data = await bufferGraphql<any>(this.token, q);
     const metrics: any[] = data?.post?.metrics || [];
+    // نطابق على PostMetricType (enum دقيق) لا على الاسم البشري
+    const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows']);
     let reach = 0;
     let impressions = 0;
+    let views = 0;
     let engagement = 0;
     for (const m of metrics) {
-      const name = String(m.name || m.type || '').toLowerCase();
+      const key = String(m.type || m.name || '').toLowerCase();
       const value = Number(m.value || 0);
       if (!Number.isFinite(value)) continue;
-      if (name.includes('reach')) reach += value;
-      else if (name.includes('impression')) impressions += value;
-      else if (/like|comment|share|repost|retweet|reaction|save|click|engag|favorite|reply/.test(name)) {
-        engagement += value;
-      }
+      if (key === 'reach') reach += value;
+      else if (key === 'impressions') impressions += value;
+      else if (key === 'views') views += value;
+      else if (ENGAGE.has(key)) engagement += value;
     }
-    if (!impressions && reach) impressions = reach;
+    if (!impressions) impressions = views || reach; // بعض الشبكات تعطي views بدل impressions
     return { reach, impressions, engagement };
   }
 
