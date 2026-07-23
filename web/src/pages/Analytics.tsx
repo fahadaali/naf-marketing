@@ -13,6 +13,7 @@ export default function Analytics() {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [platform, setPlatform] = useState('');
   const [campaign, setCampaign] = useState('');
+  const [source, setSource] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [platforms, setPlatforms] = useState<string[]>([]);
@@ -23,6 +24,7 @@ export default function Analytics() {
     const q = new URLSearchParams();
     if (platform) q.set('platform', platform);
     if (campaign) q.set('campaign_id', campaign);
+    if (source) q.set('source', source);
     // حدود اليوم بتوقيت الرياض (UTC+3)
     if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
     if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
@@ -35,7 +37,7 @@ export default function Analytics() {
     api.get('/analytics/performance').then(setPerf).catch(() => {});
     api.get('/analytics/alerts').then((d) => setAlerts(d.stale || [])).catch(() => {});
   }, []);
-  useEffect(load, [platform, campaign, from, to]);
+  useEffect(load, [platform, campaign, source, from, to]);
 
   async function refresh() {
     setMsg('جارٍ السحب…');
@@ -83,6 +85,13 @@ export default function Analytics() {
               {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+          <div className="field" style={{ margin: 0, minWidth: 160 }}>
+            <label>المصدر</label>
+            <select className="select" value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="">كل المنشورات</option>
+              <option value="platform">عبر المنصة فقط</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -118,12 +127,17 @@ export default function Analytics() {
         <div className="card">
           <h4 style={{ marginTop: 0 }}>أفضل المنشورات</h4>
           <table className="table">
-            <thead><tr><th>المنشور</th><th>تفاعل</th><th>انطباعات</th></tr></thead>
+            <thead><tr><th>المنشور</th><th>المصدر</th><th>تفاعل</th><th>انطباعات</th></tr></thead>
             <tbody>
-              {(data?.topPosts || []).map((p: any) => (
-                <tr key={p.post_id}><td>{p.title}</td><td>{p.engagement}</td><td>{p.impressions}</td></tr>
+              {(data?.topPosts || []).map((p: any, i: number) => (
+                <tr key={i}>
+                  <td>{p.title}</td>
+                  <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'Buffer'}</span></td>
+                  <td>{p.engagement}</td>
+                  <td>{p.impressions}</td>
+                </tr>
               ))}
-              {(data?.topPosts || []).length === 0 && <tr><td colSpan={3} className="muted">—</td></tr>}
+              {(data?.topPosts || []).length === 0 && <tr><td colSpan={4} className="muted">—</td></tr>}
             </tbody>
           </table>
         </div>
