@@ -16,11 +16,19 @@ function toIso(v: unknown): string {
 }
 
 export class BufferProvider implements PublishingProvider {
-  constructor(private accessToken: string, private profiles: Record<string, string>) {}
+  private token: string;
+  constructor(accessToken: string, private profiles: Record<string, string>) {
+    // قصّ أي مسافات/أسطر زائدة قد تتسلّل عند إدخال السرّ (سبب شائع لخطأ 401)
+    this.token = (accessToken || '').trim();
+  }
 
+  // نرسل الرمز عبر ترويسة Bearer (الأكثر توافقاً) إضافةً إلى معامل الرابط — لتغطية كلا الأسلوبين.
+  private authHeaders(extra?: Record<string, string>): Record<string, string> {
+    return { authorization: `Bearer ${this.token}`, ...(extra || {}) };
+  }
   private url(path: string): string {
     const sep = path.includes('?') ? '&' : '?';
-    return `${BUFFER_BASE}${path}${sep}access_token=${encodeURIComponent(this.accessToken)}`;
+    return `${BUFFER_BASE}${path}${sep}access_token=${encodeURIComponent(this.token)}`;
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
@@ -40,7 +48,7 @@ export class BufferProvider implements PublishingProvider {
 
     const res = await fetch(this.url('/updates/create.json'), {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: this.authHeaders({ 'content-type': 'application/x-www-form-urlencoded' }),
       body: form.toString(),
     });
     const data = (await res.json()) as any;
@@ -55,7 +63,7 @@ export class BufferProvider implements PublishingProvider {
   }
 
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
-    const res = await fetch(this.url(`/updates/${providerPostId}.json`));
+    const res = await fetch(this.url(`/updates/${providerPostId}.json`), { headers: this.authHeaders() });
     const data = (await res.json()) as any;
     if (!res.ok) throw new Error(`فشل سحب تحليلات Buffer: ${data?.message || res.status}`);
     const s = data?.statistics || {};
@@ -72,12 +80,12 @@ export class BufferProvider implements PublishingProvider {
   }
 
   async deletePost(providerPostId: string): Promise<void> {
-    await fetch(this.url(`/updates/${providerPostId}/destroy.json`), { method: 'POST' });
+    await fetch(this.url(`/updates/${providerPostId}/destroy.json`), { method: 'POST', headers: this.authHeaders() });
   }
 
   // تعليقات/تفاعلات المنشور من Buffer (event=comment)
   async getComments(providerPostId: string): Promise<CommentItem[]> {
-    const res = await fetch(this.url(`/updates/${providerPostId}/interactions.json&event=comment`));
+    const res = await fetch(this.url(`/updates/${providerPostId}/interactions.json?event=comment`), { headers: this.authHeaders() });
     const data = (await res.json()) as any;
     if (!res.ok) throw new Error(`فشل جلب تعليقات Buffer: ${data?.message || res.status}`);
     const list: any[] = data?.interactions || data?.comments || [];

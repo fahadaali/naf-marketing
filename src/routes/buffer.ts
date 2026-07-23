@@ -8,7 +8,7 @@ bufferRoutes.use('*', requireAuth);
 
 // حالة تكامل Buffer: هل رمز الوصول مضبوط، وكم حساباً مربوطاً
 bufferRoutes.get('/status', requirePermission('settings.manage'), async (c) => {
-  const configured = !!c.env.PROVIDER_API_KEY;
+  const configured = !!(c.env.PROVIDER_API_KEY || '').trim();
   const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
   let mapped = 0;
   try { mapped = Object.values(row?.value ? JSON.parse(row.value) : {}).filter(Boolean).length; } catch { /* */ }
@@ -17,13 +17,20 @@ bufferRoutes.get('/status', requirePermission('settings.manage'), async (c) => {
 
 // جلب حسابات Buffer (profiles) لربطها بمنصات المنصة
 bufferRoutes.get('/profiles', requirePermission('settings.manage'), async (c) => {
-  const key = c.env.PROVIDER_API_KEY;
+  // قصّ أي مسافات/أسطر زائدة قد تتسلّل عند إدخال السرّ (سبب شائع لخطأ 401)
+  const key = (c.env.PROVIDER_API_KEY || '').trim();
   if (!key) return c.json({ error: 'PROVIDER_API_KEY (رمز وصول Buffer) غير مضبوط عبر Cloudflare Secrets' }, 400);
   try {
-    const res = await fetch(`https://api.bufferapp.com/1/profiles.json?access_token=${encodeURIComponent(key)}`);
+    // نرسل الرمز عبر ترويسة Bearer ومعامل الرابط معاً لتغطية كلا أسلوبي مصادقة Buffer
+    const res = await fetch(`https://api.bufferapp.com/1/profiles.json?access_token=${encodeURIComponent(key)}`, {
+      headers: { authorization: `Bearer ${key}` },
+    });
     const text = await res.text();
     let data: any = null;
     try { data = JSON.parse(text); } catch { /* رد غير JSON */ }
+    if (res.status === 401 || res.status === 403) {
+      return c.json({ error: `رمز وصول Buffer مرفوض (${res.status}) — تأكد من صحة الرمز وأنه غير منتهٍ، ثم أعِد ضبط PROVIDER_API_KEY.` }, 502);
+    }
     if (!res.ok || data == null) {
       return c.json({ error: `تعذّر الاتصال بـ Buffer (${res.status})${data?.message ? `: ${data.message}` : ''}` }, 502);
     }
