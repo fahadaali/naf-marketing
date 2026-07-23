@@ -75,22 +75,18 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
     ...appr.map((a: any) => [a.title || '', STATUS_AR[a.from_status] || a.from_status || '', STATUS_AR[a.to_status] || a.to_status, a.actor || '', a.note || '', riyadh(a.created_at)]),
   ];
 
-  // تحليلات المنصات (أحدث لقطة لكل منشور/منصة، مجمّعة حسب المنصة)
-  const platBase = `WITH latest AS (
-      SELECT a.* FROM analytics_snapshots a
-      JOIN (SELECT post_id, platform, MAX(captured_at) mx FROM analytics_snapshots GROUP BY post_id, platform) m
-        ON m.post_id=a.post_id AND m.platform=a.platform AND m.mx=a.captured_at)`;
-  const byPlat = (await q(`${platBase} SELECT platform, SUM(reach) reach, SUM(impressions) impressions, SUM(engagement) engagement FROM latest GROUP BY platform ORDER BY impressions DESC`)).results;
+  // تحليلات المنصات (نموذج upsert: سطر حديث واحد لكل منشور، مجمّعة حسب المنصة)
+  const byPlat = (await q('SELECT platform, SUM(reach) reach, SUM(impressions) impressions, SUM(engagement) engagement FROM analytics_snapshots GROUP BY platform ORDER BY impressions DESC')).results;
   const platforms: (string | number)[][] = [
     ['المنصة', 'الوصول', 'الانطباعات', 'التفاعل'],
     ...byPlat.map((p: any) => [p.platform, p.reach || 0, p.impressions || 0, p.engagement || 0]),
   ];
 
   // تحليلات المنشورات
-  const byPost = (await q(`${platBase} SELECT p.title, l.platform, l.reach, l.impressions, l.engagement, l.captured_at FROM latest l LEFT JOIN content_posts p ON p.id=l.post_id ORDER BY l.impressions DESC`)).results;
+  const byPost = (await q("SELECT COALESCE(title,'—') title, platform, reach, impressions, engagement, captured_at, via_platform FROM analytics_snapshots ORDER BY impressions DESC")).results;
   const postAnalytics: (string | number)[][] = [
-    ['المنشور', 'المنصة', 'الوصول', 'الانطباعات', 'التفاعل', 'وقت القياس'],
-    ...byPost.map((r: any) => [r.title || '', r.platform, r.reach || 0, r.impressions || 0, r.engagement || 0, riyadh(r.captured_at)]),
+    ['المنشور', 'المنصة', 'المصدر', 'الوصول', 'الانطباعات', 'التفاعل', 'وقت القياس'],
+    ...byPost.map((r: any) => [r.title || '', r.platform, r.via_platform ? 'عبر المنصة' : 'Buffer', r.reach || 0, r.impressions || 0, r.engagement || 0, riyadh(r.captured_at)]),
   ];
 
   const sheets: Sheet[] = [

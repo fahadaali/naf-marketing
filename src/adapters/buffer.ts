@@ -27,6 +27,26 @@ export async function bufferGraphql<T = any>(token: string, query: string): Prom
   return json.data as T;
 }
 
+// يطابق مصفوفة PostMetric من Buffer على reach/impressions/engagement
+const ENGAGE_METRICS = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows']);
+export function mapPostMetrics(metrics: any[]): { reach: number; impressions: number; engagement: number } {
+  let reach = 0;
+  let impressions = 0;
+  let views = 0;
+  let engagement = 0;
+  for (const m of metrics || []) {
+    const key = String(m.type || m.name || '').toLowerCase();
+    const value = Number(m.value || 0);
+    if (!Number.isFinite(value)) continue;
+    if (key === 'reach') reach += value;
+    else if (key === 'impressions') impressions += value;
+    else if (key === 'views') views += value;
+    else if (ENGAGE_METRICS.has(key)) engagement += value;
+  }
+  if (!impressions) impressions = views || reach; // بعض الشبكات تعطي views بدل impressions
+  return { reach, impressions, engagement };
+}
+
 // قناة Buffer كما تظهر للربط
 export type BufferChannel = { id: string; service: string; name: string };
 
@@ -42,6 +62,59 @@ export async function listBufferChannels(token: string): Promise<BufferChannel[]
     );
     for (const ch of chData?.channels || []) {
       out.push({ id: String(ch.id), service: ch.service || '', name: ch.displayName || ch.name || String(ch.id) });
+    }
+  }
+  return out;
+}
+
+// منشور Buffer مُرسَل مع مقاييسه — لسحب تحليلات كل منشورات المؤسسة
+export type BufferPostMetric = {
+  id: string;
+  channelId: string;
+  service: string;
+  title: string;
+  sentAt: string | null;
+  reach: number;
+  impressions: number;
+  engagement: number;
+};
+
+// يجلب كل المنشورات المُرسَلة (sent) في كل مؤسسات الحساب مع مقاييسها (مع ترقيم صفحات)
+export async function listSentPostMetrics(token: string): Promise<BufferPostMetric[]> {
+  const orgData = await bufferGraphql<any>(token, 'query { account { organizations { id } } }');
+  const orgs: any[] = orgData?.account?.organizations || [];
+  const out: BufferPostMetric[] = [];
+  for (const org of orgs) {
+    let after: string | null = null;
+    for (let page = 0; page < 40; page++) {
+      // حد أمان ~2000 منشور
+      const afterClause = after ? `, after: ${JSON.stringify(after)}` : '';
+      const q = `query { posts(first: 50${afterClause}, input: {
+        organizationId: ${JSON.stringify(String(org.id))},
+        filter: { status: [sent] }
+      }) {
+        edges { node { id text channelId channelService sentAt metrics { type name value unit } } }
+        pageInfo { hasNextPage endCursor }
+      } }`;
+      const data: any = await bufferGraphql<any>(token, q);
+      const conn: any = data?.posts;
+      for (const edge of conn?.edges || []) {
+        const n = edge?.node;
+        if (!n) continue;
+        const { reach, impressions, engagement } = mapPostMetrics(n.metrics || []);
+        out.push({
+          id: String(n.id),
+          channelId: String(n.channelId || ''),
+          service: String(n.channelService || ''),
+          title: (n.text || '').slice(0, 140),
+          sentAt: n.sentAt || null,
+          reach,
+          impressions,
+          engagement,
+        });
+      }
+      if (!conn?.pageInfo?.hasNextPage) break;
+      after = conn.pageInfo.endCursor ? String(conn.pageInfo.endCursor) : null;
     }
   }
   return out;
@@ -90,24 +163,7 @@ export class BufferProvider implements PublishingProvider {
       metrics { type name value unit }
     } }`;
     const data = await bufferGraphql<any>(this.token, q);
-    const metrics: any[] = data?.post?.metrics || [];
-    // نطابق على PostMetricType (enum دقيق) لا على الاسم البشري
-    const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows']);
-    let reach = 0;
-    let impressions = 0;
-    let views = 0;
-    let engagement = 0;
-    for (const m of metrics) {
-      const key = String(m.type || m.name || '').toLowerCase();
-      const value = Number(m.value || 0);
-      if (!Number.isFinite(value)) continue;
-      if (key === 'reach') reach += value;
-      else if (key === 'impressions') impressions += value;
-      else if (key === 'views') views += value;
-      else if (ENGAGE.has(key)) engagement += value;
-    }
-    if (!impressions) impressions = views || reach; // بعض الشبكات تعطي views بدل impressions
-    return { reach, impressions, engagement };
+    return mapPostMetrics(data?.post?.metrics || []);
   }
 
   async deletePost(providerPostId: string): Promise<void> {
