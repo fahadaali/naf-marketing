@@ -216,32 +216,61 @@ function Platforms() {
   const [customKey, setCustomKey] = useState('');
   const [customLabel, setCustomLabel] = useState('');
   const [err, setErr] = useState('');
-  // ربط حسابات Buffer: خريطة (منصة → معرّف حساب Buffer) + قائمة الحسابات المجلوبة
-  const [bufferProfiles, setBufferProfiles] = useState<Record<string, string>>({});
-  const [bufferAccounts, setBufferAccounts] = useState<{ id: string; service: string; username: string }[]>([]);
-  const [bufferMsg, setBufferMsg] = useState('');
-  const [bufferLoading, setBufferLoading] = useState(false);
+  // ربط حسابات المزوّد (Buffer / SocialAPI): خريطة (منصة → معرّف حساب) + قائمة الحسابات المجلوبة
+  const [savedMaps, setSavedMaps] = useState<Record<string, Record<string, string>>>({});
+  const [acctMap, setAcctMap] = useState<Record<string, string>>({});
+  const [acctList, setAcctList] = useState<{ id: string; service: string; username: string }[]>([]);
+  const [acctMsg, setAcctMsg] = useState('');
+  const [acctLoading, setAcctLoading] = useState(false);
+
+  const MAP_CFG: Record<string, { key: string; endpoint: string; label: string; hint: string }> = {
+    buffer: {
+      key: 'buffer_profiles', endpoint: '/buffer/profiles', label: 'Buffer',
+      hint: 'Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك واربط كل منصة بالقناة المقابلة. المفتاح الشخصي من publish.buffer.com/settings/api عبر PROVIDER_API_KEY. (النشر/الجدولة/التحليلات عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)',
+    },
+    socialapi: {
+      key: 'socialapi_profiles', endpoint: '/socialapi/profiles', label: 'SocialAPI.ai',
+      hint: 'SocialAPI.ai ينشر إلى حسابات مربوطة لديه. اجلب حساباتك واربط كل منصة بالحساب المقابل. مفتاح API عبر PROVIDER_API_KEY. (يدعم النشر والتحليلات والتعليقات والرسائل ومراجعات Google Business عبر الـ API.)',
+    },
+  };
+  const cfg = MAP_CFG[provider];
 
   useEffect(() => {
     api.get('/settings').then((d) => {
       setEnabled(d.settings?.enabled_platforms || []);
       setLabels(d.settings?.platform_labels || {});
-      setProvider(d.settings?.provider_name || 'mock');
-      setBufferProfiles(d.settings?.buffer_profiles || {});
+      const pv = d.settings?.provider_name || 'mock';
+      setProvider(pv);
+      const maps: Record<string, Record<string, string>> = {
+        buffer_profiles: d.settings?.buffer_profiles || {},
+        socialapi_profiles: d.settings?.socialapi_profiles || {},
+      };
+      setSavedMaps(maps);
+      const k = MAP_CFG[pv]?.key;
+      setAcctMap(k ? (maps[k] || {}) : {});
     });
   }, []);
 
-  async function fetchBufferAccounts() {
-    setBufferMsg('');
-    setBufferLoading(true);
+  function onProviderChange(pv: string) {
+    setProvider(pv);
+    setAcctList([]);
+    setAcctMsg('');
+    const k = MAP_CFG[pv]?.key;
+    setAcctMap(k ? (savedMaps[k] || {}) : {});
+  }
+
+  async function fetchAccounts() {
+    if (!cfg) return;
+    setAcctMsg('');
+    setAcctLoading(true);
     try {
-      const d = await api.get('/buffer/profiles');
-      setBufferAccounts(d.profiles || []);
-      if (!d.profiles?.length) setBufferMsg('لا توجد حسابات مربوطة في Buffer بعد.');
+      const d = await api.get(cfg.endpoint);
+      setAcctList(d.profiles || []);
+      if (!d.profiles?.length) setAcctMsg('لا توجد حسابات مربوطة بعد.');
     } catch (e: any) {
-      setBufferMsg(e.message || 'تعذّر جلب حسابات Buffer');
+      setAcctMsg(e.message || 'تعذّر جلب الحسابات');
     } finally {
-      setBufferLoading(false);
+      setAcctLoading(false);
     }
   }
 
@@ -271,12 +300,9 @@ function Platforms() {
 
   async function save() {
     setMsg('');
-    await api.put('/settings', {
-      enabled_platforms: enabled,
-      platform_labels: labels,
-      provider_name: provider,
-      buffer_profiles: bufferProfiles,
-    });
+    const body: Record<string, unknown> = { enabled_platforms: enabled, platform_labels: labels, provider_name: provider };
+    if (cfg) body[cfg.key] = acctMap;
+    await api.put('/settings', body);
     setMsg('تم الحفظ');
   }
 
@@ -339,9 +365,10 @@ function Platforms() {
 
       <div className="field">
         <label>مزوّد النشر الموحّد</label>
-        <select className="select" style={{ maxWidth: 260 }} value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <select className="select" style={{ maxWidth: 260 }} value={provider} onChange={(e) => onProviderChange(e.target.value)}>
           <option value="mock">Mock (تجريبي)</option>
           <option value="buffer">Buffer</option>
+          <option value="socialapi">SocialAPI.ai</option>
           <option value="ayrshare">Ayrshare</option>
           <option value="zernio">Zernio</option>
           <option value="late">Late</option>
@@ -349,21 +376,17 @@ function Platforms() {
         <p className="muted" style={{ fontSize: 12 }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
       </div>
 
-      {provider === 'buffer' && (
+      {cfg && (
         <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
           <div className="row" style={{ marginBottom: 8 }}>
-            <strong style={{ fontSize: 14 }}>ربط حسابات Buffer</strong>
+            <strong style={{ fontSize: 14 }}>ربط حسابات {cfg.label}</strong>
             <div className="spacer" />
-            <button className="btn ghost sm" onClick={fetchBufferAccounts} disabled={bufferLoading}>
-              {bufferLoading ? 'جارٍ الجلب…' : 'جلب حسابات Buffer'}
+            <button className="btn ghost sm" onClick={fetchAccounts} disabled={acctLoading}>
+              {acctLoading ? 'جارٍ الجلب…' : `جلب حسابات ${cfg.label}`}
             </button>
           </div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك ثم اربط كل منصة مفعّلة بالقناة المقابلة في Buffer.
-            يتطلب ضبط <code>PROVIDER_API_KEY</code> بالمفتاح الشخصي من <code>publish.buffer.com/settings/api</code> عبر Cloudflare Secrets أولاً.
-            (النشر والجدولة والتحليلات مدعومة عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)
-          </p>
-          {bufferMsg && <p className="muted" style={{ fontSize: 12 }}>{bufferMsg}</p>}
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>{cfg.hint}</p>
+          {acctMsg && <p className="muted" style={{ fontSize: 12 }}>{acctMsg}</p>}
           {enabled.length === 0 && <p className="muted" style={{ fontSize: 12 }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
           {enabled.map((p) => (
             <div key={p} className="row" style={{ gap: 10, marginBottom: 8, alignItems: 'center' }}>
@@ -373,16 +396,15 @@ function Platforms() {
               <select
                 className="select"
                 style={{ maxWidth: 320 }}
-                value={bufferProfiles[p] || ''}
-                onChange={(e) => setBufferProfiles((m) => ({ ...m, [p]: e.target.value }))}
+                value={acctMap[p] || ''}
+                onChange={(e) => setAcctMap((m) => ({ ...m, [p]: e.target.value }))}
               >
                 <option value="">— بدون ربط —</option>
-                {bufferAccounts.map((a) => (
+                {acctList.map((a) => (
                   <option key={a.id} value={a.id}>{a.service} — {a.username}</option>
                 ))}
-                {/* أبقِ القيمة المحفوظة ظاهرة حتى قبل جلب القائمة */}
-                {bufferProfiles[p] && !bufferAccounts.some((a) => a.id === bufferProfiles[p]) && (
-                  <option value={bufferProfiles[p]}>{bufferProfiles[p]} (محفوظ)</option>
+                {acctMap[p] && !acctList.some((a) => a.id === acctMap[p]) && (
+                  <option value={acctMap[p]}>{acctMap[p]} (محفوظ)</option>
                 )}
               </select>
             </div>

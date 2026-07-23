@@ -3,6 +3,7 @@ import type { PublishingProvider } from './provider';
 import { MockProvider } from './mock';
 import { AyrshareProvider } from './ayrshare';
 import { BufferProvider } from './buffer';
+import { SocialApiProvider } from './socialapi';
 
 // مصنع المزوّد — يُحقَن المزوّد الفعلي حسب الإعدادات، ومفتاحه من Secrets.
 // إضافة مزوّد جديد (Zernio / Late): أنشئ ملفاً ينفّذ PublishingProvider وأضِفه هنا.
@@ -23,6 +24,13 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
       let profiles: Record<string, string> = {};
       try { profiles = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
       return new BufferProvider(key, profiles);
+    }
+    case 'socialapi': {
+      if (!key) throw new Error('PROVIDER_API_KEY (مفتاح SocialAPI.ai) غير مضبوط للمزوّد socialapi');
+      const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
+      let accounts: Record<string, string> = {};
+      try { accounts = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
+      return new SocialApiProvider(key, accounts);
     }
     // case 'zernio': return new ZernioProvider(key);
     // case 'late':   return new LateProvider(key);
