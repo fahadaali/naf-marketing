@@ -7,8 +7,12 @@ export type Env = {
   APP_NAME: string;
   // secrets
   CLAUDE_API_KEY?: string;
-  PROVIDER_API_KEY?: string;
+  PROVIDER_API_KEY?: string; // مفتاح عام (تراجعي) — يُستخدم إن لم يوجد سرّ خاص بالمزوّد
   PROVIDER_NAME?: string;
+  // أسرار خاصة لكل مزوّد (تتيح تخزين أكثر من مفتاح والتبديل بينها):
+  BUFFER_API_KEY?: string;
+  SOCIALAPI_API_KEY?: string;
+  AYRSHARE_API_KEY?: string;
   AUTH_SECRET?: string;
   // basecamp (مركز المعرفة)
   BASECAMP_CLIENT_ID?: string;
