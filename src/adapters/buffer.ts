@@ -1,100 +1,116 @@
-import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem } from './provider';
+import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult } from './provider';
 
-// مزوّد Buffer — ينفّذ الواجهة المحايدة عبر واجهة Buffer API v1.
-// ملاحظتان:
-//  - Buffer ينشر إلى «حسابات» (profiles) لها معرّفات، لا إلى أسماء منصات؛ لذا نمرّر خريطة
-//    (منصة → معرّف حساب Buffer) تُضبط من الإعدادات (buffer_profiles).
-//  - الرد المباشر على التعليقات غير متاح في واجهة Buffer العامة (يتم من لوحة Buffer)، لذا
-//    لا نُنفّذ replyComment — تعرض المنصة التعليقات فقط وتُبلّغ بعدم دعم الرد المباشر.
-const BUFFER_BASE = 'https://api.bufferapp.com/1';
+// مزوّد Buffer — واجهة Buffer الحديثة (GraphQL) على https://api.buffer.com
+// المصادقة: ترويسة Authorization: Bearer <مفتاح شخصي من publish.buffer.com/settings/api>
+// يدعم: النشر والجدولة (createPost)، وحذف المنشور، والتحليلات (post.metrics).
+// لا يدعم التعليقات/الردود عبر الـ API (لوحة Buffer فقط) — لذا لا نُنفّذ getComments.
+//
+// ملاحظة: Buffer ينشر إلى «قنوات» (channels) لها معرّفات؛ نمرّر خريطة (منصة → معرّف قناة)
+// تُضبط من الإعدادات (buffer_profiles).
+const BUFFER_ENDPOINT = 'https://api.buffer.com';
 
-function toIso(v: unknown): string {
-  if (v == null) return new Date().toISOString();
-  const n = Number(v);
-  const d = Number.isFinite(n) && n > 1e9 && n < 1e11 ? new Date(n * 1000) : new Date(v as string);
-  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+// منفّذ GraphQL مشترك — يُصدَّر لاستعماله في مسار جلب القنوات أيضاً.
+export async function bufferGraphql<T = any>(token: string, query: string): Promise<T> {
+  const res = await fetch(BUFFER_ENDPOINT, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token.trim()}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  const text = await res.text();
+  let json: any = null;
+  try { json = JSON.parse(text); } catch { /* رد غير JSON */ }
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`رمز وصول Buffer مرفوض (${res.status}) — تأكد من صحة المفتاح الشخصي وأنه غير منتهٍ.`);
+  }
+  if (json?.errors?.length) throw new Error(`Buffer: ${json.errors[0]?.message || 'خطأ GraphQL'}`);
+  if (!res.ok || json == null) throw new Error(`تعذّر الاتصال بـ Buffer (${res.status})`);
+  return json.data as T;
+}
+
+// قناة Buffer كما تظهر للربط
+export type BufferChannel = { id: string; service: string; name: string };
+
+// يجلب كل قنوات الحساب عبر كل مؤسساته
+export async function listBufferChannels(token: string): Promise<BufferChannel[]> {
+  const orgData = await bufferGraphql<any>(token, 'query { account { organizations { id name } } }');
+  const orgs: any[] = orgData?.account?.organizations || [];
+  const out: BufferChannel[] = [];
+  for (const org of orgs) {
+    const chData = await bufferGraphql<any>(
+      token,
+      `query { channels(input: { organizationId: ${JSON.stringify(String(org.id))} }) { id name displayName service } }`,
+    );
+    for (const ch of chData?.channels || []) {
+      out.push({ id: String(ch.id), service: ch.service || '', name: ch.displayName || ch.name || String(ch.id) });
+    }
+  }
+  return out;
 }
 
 export class BufferProvider implements PublishingProvider {
   private token: string;
   constructor(accessToken: string, private profiles: Record<string, string>) {
-    // قصّ أي مسافات/أسطر زائدة قد تتسلّل عند إدخال السرّ (سبب شائع لخطأ 401)
     this.token = (accessToken || '').trim();
   }
 
-  // نرسل الرمز عبر ترويسة Bearer (الأكثر توافقاً) إضافةً إلى معامل الرابط — لتغطية كلا الأسلوبين.
-  private authHeaders(extra?: Record<string, string>): Record<string, string> {
-    return { authorization: `Bearer ${this.token}`, ...(extra || {}) };
-  }
-  private url(path: string): string {
-    const sep = path.includes('?') ? '&' : '?';
-    return `${BUFFER_BASE}${path}${sep}access_token=${encodeURIComponent(this.token)}`;
-  }
-
   async publish(input: PublishInput): Promise<PublishResult> {
-    const profileIds = input.platforms.map((p) => this.profiles[p]).filter(Boolean);
-    if (!profileIds.length) {
-      throw new Error(`لا يوجد حساب Buffer مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
+    const channelIds = input.platforms.map((p) => this.profiles[p]).filter(Boolean);
+    if (!channelIds.length) {
+      throw new Error(`لا توجد قناة Buffer مربوطة للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
     }
-    const form = new URLSearchParams();
-    form.set('text', input.text);
-    for (const id of profileIds) form.append('profile_ids[]', id);
-    if (input.scheduleAt) form.set('scheduled_at', input.scheduleAt);
-    else form.set('now', 'true');
-    if (input.mediaUrls?.length) {
-      form.set('media[photo]', input.mediaUrls[0]);
-      form.set('media[thumbnail]', input.mediaUrls[0]);
-    }
+    const modeClause = input.scheduleAt
+      ? `mode: customScheduled, dueAt: ${JSON.stringify(input.scheduleAt)}`
+      : 'mode: shareNow';
+    const assetsClause = input.mediaUrls?.length
+      ? `, assets: [{ image: ${JSON.stringify(input.mediaUrls[0])} }]`
+      : '';
 
-    const res = await fetch(this.url('/updates/create.json'), {
-      method: 'POST',
-      headers: this.authHeaders({ 'content-type': 'application/x-www-form-urlencoded' }),
-      body: form.toString(),
-    });
-    const data = (await res.json()) as any;
-    if (!res.ok || data?.success === false) {
-      throw new Error(`فشل النشر عبر Buffer: ${data?.message || data?.error || res.status}`);
+    let lastId = '';
+    for (const channelId of channelIds) {
+      const q = `mutation { createPost(input: {
+        text: ${JSON.stringify(input.text)},
+        channelId: ${JSON.stringify(channelId)},
+        schedulingType: automatic,
+        ${modeClause}${assetsClause}
+      }) {
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
+      } }`;
+      const data = await bufferGraphql<any>(this.token, q);
+      const result = data?.createPost;
+      if (result?.message) throw new Error(`فشل النشر عبر Buffer: ${result.message}`);
+      lastId = result?.post?.id ? String(result.post.id) : lastId;
     }
-    const update = (data.updates || [])[0] || {};
-    return {
-      providerPostId: String(update.id || ''),
-      status: input.scheduleAt ? 'scheduled' : String(update.status || 'published'),
-    };
+    return { providerPostId: lastId, status: input.scheduleAt ? 'scheduled' : 'published' };
   }
 
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
-    const res = await fetch(this.url(`/updates/${providerPostId}.json`), { headers: this.authHeaders() });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(`فشل سحب تحليلات Buffer: ${data?.message || res.status}`);
-    const s = data?.statistics || {};
-    const reach = Number(s.reach || 0);
-    const impressions = Number(s.impressions || s.reach || 0);
-    const engagement =
-      Number(s.likes || 0) +
-      Number(s.favorites || 0) +
-      Number(s.comments || 0) +
-      Number(s.shares || 0) +
-      Number(s.retweets || 0) +
-      Number(s.mentions || 0);
+    const q = `query { post(input: { id: ${JSON.stringify(providerPostId)} }) {
+      metrics { type name value unit }
+    } }`;
+    const data = await bufferGraphql<any>(this.token, q);
+    const metrics: any[] = data?.post?.metrics || [];
+    let reach = 0;
+    let impressions = 0;
+    let engagement = 0;
+    for (const m of metrics) {
+      const name = String(m.name || m.type || '').toLowerCase();
+      const value = Number(m.value || 0);
+      if (!Number.isFinite(value)) continue;
+      if (name.includes('reach')) reach += value;
+      else if (name.includes('impression')) impressions += value;
+      else if (/like|comment|share|repost|retweet|reaction|save|click|engag|favorite|reply/.test(name)) {
+        engagement += value;
+      }
+    }
+    if (!impressions && reach) impressions = reach;
     return { reach, impressions, engagement };
   }
 
   async deletePost(providerPostId: string): Promise<void> {
-    await fetch(this.url(`/updates/${providerPostId}/destroy.json`), { method: 'POST', headers: this.authHeaders() });
-  }
-
-  // تعليقات/تفاعلات المنشور من Buffer (event=comment)
-  async getComments(providerPostId: string): Promise<CommentItem[]> {
-    const res = await fetch(this.url(`/updates/${providerPostId}/interactions.json?event=comment`), { headers: this.authHeaders() });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(`فشل جلب تعليقات Buffer: ${data?.message || res.status}`);
-    const list: any[] = data?.interactions || data?.comments || [];
-    return list.map((it) => ({
-      id: String(it.id || it.interaction_id || it.comment_id),
-      kind: 'comment' as const,
-      authorName: it.author?.name || it.name || it.username || it.from || 'مستخدم',
-      body: it.text || it.comment || it.body || it.message || '',
-      createdAt: toIso(it.created_at || it.created),
-    }));
+    // أفضل جهد — الحذف غير حرِج؛ نتجاهل أي خطأ في الشكل/الصلاحية
+    try {
+      await bufferGraphql(this.token, `mutation { deletePost(input: { id: ${JSON.stringify(providerPostId)} }) { __typename } }`);
+    } catch { /* تُتجاهل */ }
   }
 }

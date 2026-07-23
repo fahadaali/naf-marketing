@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
+import { listBufferChannels } from '../adapters/buffer';
 
 export const bufferRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -15,32 +16,16 @@ bufferRoutes.get('/status', requirePermission('settings.manage'), async (c) => {
   return c.json({ configured, mapped });
 });
 
-// جلب حسابات Buffer (profiles) لربطها بمنصات المنصة
+// جلب قنوات Buffer (channels) لربطها بمنصات المنصة — عبر واجهة Buffer الحديثة (GraphQL)
 bufferRoutes.get('/profiles', requirePermission('settings.manage'), async (c) => {
   // قصّ أي مسافات/أسطر زائدة قد تتسلّل عند إدخال السرّ (سبب شائع لخطأ 401)
   const key = (c.env.PROVIDER_API_KEY || '').trim();
   if (!key) return c.json({ error: 'PROVIDER_API_KEY (رمز وصول Buffer) غير مضبوط عبر Cloudflare Secrets' }, 400);
   try {
-    // نرسل الرمز عبر ترويسة Bearer ومعامل الرابط معاً لتغطية كلا أسلوبي مصادقة Buffer
-    const res = await fetch(`https://api.bufferapp.com/1/profiles.json?access_token=${encodeURIComponent(key)}`, {
-      headers: { authorization: `Bearer ${key}` },
-    });
-    const text = await res.text();
-    let data: any = null;
-    try { data = JSON.parse(text); } catch { /* رد غير JSON */ }
-    if (res.status === 401 || res.status === 403) {
-      return c.json({ error: `رمز وصول Buffer مرفوض (${res.status}) — تأكد من صحة الرمز وأنه غير منتهٍ، ثم أعِد ضبط PROVIDER_API_KEY.` }, 502);
-    }
-    if (!res.ok || data == null) {
-      return c.json({ error: `تعذّر الاتصال بـ Buffer (${res.status})${data?.message ? `: ${data.message}` : ''}` }, 502);
-    }
-    const profiles = (Array.isArray(data) ? data : []).map((p: any) => ({
-      id: String(p.id),
-      service: p.service || '',
-      username: p.formatted_username || p.service_username || p.formatted_service || p.service || String(p.id),
-    }));
+    const channels = await listBufferChannels(key);
+    const profiles = channels.map((ch) => ({ id: ch.id, service: ch.service, username: ch.name }));
     return c.json({ profiles });
   } catch (e: any) {
-    return c.json({ error: `تعذّر الاتصال بـ Buffer: ${String(e?.message || e)}` }, 502);
+    return c.json({ error: String(e?.message || e) }, 502);
   }
 });
