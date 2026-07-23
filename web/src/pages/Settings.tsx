@@ -216,14 +216,34 @@ function Platforms() {
   const [customKey, setCustomKey] = useState('');
   const [customLabel, setCustomLabel] = useState('');
   const [err, setErr] = useState('');
+  // ربط حسابات Buffer: خريطة (منصة → معرّف حساب Buffer) + قائمة الحسابات المجلوبة
+  const [bufferProfiles, setBufferProfiles] = useState<Record<string, string>>({});
+  const [bufferAccounts, setBufferAccounts] = useState<{ id: string; service: string; username: string }[]>([]);
+  const [bufferMsg, setBufferMsg] = useState('');
+  const [bufferLoading, setBufferLoading] = useState(false);
 
   useEffect(() => {
     api.get('/settings').then((d) => {
       setEnabled(d.settings?.enabled_platforms || []);
       setLabels(d.settings?.platform_labels || {});
       setProvider(d.settings?.provider_name || 'mock');
+      setBufferProfiles(d.settings?.buffer_profiles || {});
     });
   }, []);
+
+  async function fetchBufferAccounts() {
+    setBufferMsg('');
+    setBufferLoading(true);
+    try {
+      const d = await api.get('/buffer/profiles');
+      setBufferAccounts(d.profiles || []);
+      if (!d.profiles?.length) setBufferMsg('لا توجد حسابات مربوطة في Buffer بعد.');
+    } catch (e: any) {
+      setBufferMsg(e.message || 'تعذّر جلب حسابات Buffer');
+    } finally {
+      setBufferLoading(false);
+    }
+  }
 
   function toggle(key: string) {
     setEnabled((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key]));
@@ -251,7 +271,12 @@ function Platforms() {
 
   async function save() {
     setMsg('');
-    await api.put('/settings', { enabled_platforms: enabled, platform_labels: labels, provider_name: provider });
+    await api.put('/settings', {
+      enabled_platforms: enabled,
+      platform_labels: labels,
+      provider_name: provider,
+      buffer_profiles: bufferProfiles,
+    });
     setMsg('تم الحفظ');
   }
 
@@ -316,12 +341,54 @@ function Platforms() {
         <label>مزوّد النشر الموحّد</label>
         <select className="select" style={{ maxWidth: 260 }} value={provider} onChange={(e) => setProvider(e.target.value)}>
           <option value="mock">Mock (تجريبي)</option>
+          <option value="buffer">Buffer</option>
           <option value="ayrshare">Ayrshare</option>
           <option value="zernio">Zernio</option>
           <option value="late">Late</option>
         </select>
         <p className="muted" style={{ fontSize: 12 }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
       </div>
+
+      {provider === 'buffer' && (
+        <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <strong style={{ fontSize: 14 }}>ربط حسابات Buffer</strong>
+            <div className="spacer" />
+            <button className="btn ghost sm" onClick={fetchBufferAccounts} disabled={bufferLoading}>
+              {bufferLoading ? 'جارٍ الجلب…' : 'جلب حسابات Buffer'}
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            Buffer ينشر إلى حسابات مربوطة لديه. اجلب حساباتك ثم اربط كل منصة مفعّلة بالحساب المقابل في Buffer.
+            يتطلب ضبط <code>PROVIDER_API_KEY</code> (رمز وصول Buffer) عبر Cloudflare Secrets أولاً.
+          </p>
+          {bufferMsg && <p className="muted" style={{ fontSize: 12 }}>{bufferMsg}</p>}
+          {enabled.length === 0 && <p className="muted" style={{ fontSize: 12 }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
+          {enabled.map((p) => (
+            <div key={p} className="row" style={{ gap: 10, marginBottom: 8, alignItems: 'center' }}>
+              <span style={{ minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <PlatformIcon platform={p} size={18} /> {platformLabel(p, labels)}
+              </span>
+              <select
+                className="select"
+                style={{ maxWidth: 320 }}
+                value={bufferProfiles[p] || ''}
+                onChange={(e) => setBufferProfiles((m) => ({ ...m, [p]: e.target.value }))}
+              >
+                <option value="">— بدون ربط —</option>
+                {bufferAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.service} — {a.username}</option>
+                ))}
+                {/* أبقِ القيمة المحفوظة ظاهرة حتى قبل جلب القائمة */}
+                {bufferProfiles[p] && !bufferAccounts.some((a) => a.id === bufferProfiles[p]) && (
+                  <option value={bufferProfiles[p]}>{bufferProfiles[p]} (محفوظ)</option>
+                )}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
     </div>
