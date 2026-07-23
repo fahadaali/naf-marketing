@@ -359,8 +359,9 @@ function Platforms() {
             </button>
           </div>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            Buffer ينشر إلى حسابات مربوطة لديه. اجلب حساباتك ثم اربط كل منصة مفعّلة بالحساب المقابل في Buffer.
-            يتطلب ضبط <code>PROVIDER_API_KEY</code> (رمز وصول Buffer) عبر Cloudflare Secrets أولاً.
+            Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك ثم اربط كل منصة مفعّلة بالقناة المقابلة في Buffer.
+            يتطلب ضبط <code>PROVIDER_API_KEY</code> بالمفتاح الشخصي من <code>publish.buffer.com/settings/api</code> عبر Cloudflare Secrets أولاً.
+            (النشر والجدولة والتحليلات مدعومة عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)
           </p>
           {bufferMsg && <p className="muted" style={{ fontSize: 12 }}>{bufferMsg}</p>}
           {enabled.length === 0 && <p className="muted" style={{ fontSize: 12 }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
