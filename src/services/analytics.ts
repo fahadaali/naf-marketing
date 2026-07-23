@@ -13,25 +13,35 @@ type MetricRow = {
   impressions: number;
   engagement: number;
   sentAt: string | null;
+  metricsJson: string | null; // كل المقاييس الخام (JSON) — لعرض ديناميكي لكل منصة
 };
 
 // upsert لقطة مقاييس واحدة لكل منشور (مفتاح: provider_post_id)
 async function upsertMetric(env: Env, row: MetricRow): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO analytics_snapshots
-       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at, metrics_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(provider_post_id) DO UPDATE SET
        platform = excluded.platform, title = excluded.title, post_id = excluded.post_id,
        via_platform = excluded.via_platform, reach = excluded.reach, impressions = excluded.impressions,
-       engagement = excluded.engagement, sent_at = excluded.sent_at,
+       engagement = excluded.engagement, sent_at = excluded.sent_at, metrics_json = excluded.metrics_json,
        captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
   )
     .bind(
       newId('an'), row.providerPostId, row.platform, row.title, row.postId, row.viaPlatform,
-      row.reach, row.impressions, row.engagement, row.sentAt,
+      row.reach, row.impressions, row.engagement, row.sentAt, row.metricsJson,
     )
     .run();
+}
+
+// مقاييس مُصطنعة للمزوّدين الذين يعيدون reach/impressions/engagement فقط (Mock/Ayrshare)
+function synthMetrics(reach: number, impressions: number, engagement: number): string {
+  return JSON.stringify([
+    { type: 'reach', name: 'الوصول', value: reach, unit: 'count' },
+    { type: 'impressions', name: 'الانطباعات', value: impressions, unit: 'count' },
+    { type: 'engagement', name: 'التفاعل', value: engagement, unit: 'count' },
+  ]);
 }
 
 // سحب التحليلات دورياً — يختار المسار حسب المزوّد.
@@ -67,6 +77,7 @@ async function pullViaSchedules(env: Env): Promise<number> {
         impressions: a.impressions,
         engagement: a.engagement,
         sentAt: row.published_at,
+        metricsJson: synthMetrics(a.reach, a.impressions, a.engagement),
       });
       captured++;
     } catch {
@@ -114,6 +125,7 @@ async function pullAllBuffer(env: Env): Promise<number> {
       impressions: post.impressions,
       engagement: post.engagement,
       sentAt: post.sentAt,
+      metricsJson: JSON.stringify(post.metrics || []),
     });
     captured++;
   }

@@ -73,8 +73,37 @@ analyticsRoutes.get('/dashboard', async (c) => {
     ? Math.round(((t.engagement / t.impressions) * 100 + Number.EPSILON) * 100) / 100
     : 0;
 
+  // تجميع ديناميكي لكل أنواع المقاييس: المتشابهة تُجمع (count) أو تُمتوسّط (percentage)
+  const metricRows = await c.env.DB.prepare(
+    `SELECT metrics_json FROM analytics_snapshots a ${clause}`,
+  )
+    .bind(...binds)
+    .all<{ metrics_json: string | null }>();
+  const agg = new Map<string, { type: string; name: string; unit: string; sum: number; count: number }>();
+  for (const r of metricRows.results) {
+    let arr: any[] = [];
+    try { arr = r.metrics_json ? JSON.parse(r.metrics_json) : []; } catch { arr = []; }
+    for (const m of arr) {
+      const key = String(m.type || m.name || '').toLowerCase();
+      if (!key) continue;
+      const e = agg.get(key) || { type: String(m.type || key), name: String(m.name || key), unit: String(m.unit || 'count'), sum: 0, count: 0 };
+      e.sum += Number(m.value || 0);
+      e.count += 1;
+      agg.set(key, e);
+    }
+  }
+  const metrics = Array.from(agg.values()).map((e) => ({
+    type: e.type,
+    name: e.name,
+    unit: e.unit,
+    value: e.unit === 'percentage'
+      ? Math.round((e.sum / Math.max(e.count, 1)) * 100) / 100 // نسبة → متوسط
+      : e.sum, // عدد → مجموع
+  }));
+
   return c.json({
     totals: { ...t, engagement_rate: engRate },
+    metrics,
     byPlatform: byPlatform.results,
     topPosts: topPosts.results,
     pipeline: pipeline.results,

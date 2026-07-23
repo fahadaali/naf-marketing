@@ -5,6 +5,25 @@ import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateRangePicker } from '../components/DatePicker';
 
+// تسميات عربية لأنواع مقاييس Buffer (PostMetricType) — غير المعروف يُعرض باسمه من Buffer
+const METRIC_LABELS: Record<string, string> = {
+  impressions: 'الانطباعات', reach: 'الوصول', reactions: 'التفاعلات', comments: 'التعليقات',
+  shares: 'المشاركات', reposts: 'إعادات النشر', retweets: 'إعادات التغريد', saves: 'الحفظ',
+  clicks: 'النقرات', likes: 'الإعجابات', quotes: 'الاقتباسات', follows: 'متابعون جدد',
+  views: 'المشاهدات', viewers: 'المشاهدون', totaltimewatched: 'وقت المشاهدة (دقائق)',
+  engagementrate: 'معدل التفاعل', engagement: 'التفاعل', postcount: 'عدد المنشورات',
+};
+// ترتيب العرض المفضّل (الأهم أولاً)؛ الباقي يأتي بعده
+const METRIC_ORDER = ['impressions', 'reach', 'views', 'reactions', 'likes', 'comments', 'shares', 'reposts', 'retweets', 'quotes', 'saves', 'clicks', 'follows', 'viewers', 'totaltimewatched', 'engagementrate'];
+function metricLabel(m: { type?: string; name?: string }): string {
+  const key = String(m.type || m.name || '').toLowerCase();
+  return METRIC_LABELS[key] || m.name || m.type || key;
+}
+function metricRank(m: { type?: string; name?: string }): number {
+  const i = METRIC_ORDER.indexOf(String(m.type || m.name || '').toLowerCase());
+  return i < 0 ? 999 : i;
+}
+
 // الداشبورد الموحّد للتحليلات مع فلاتر: النطاق الزمني، المنصة، الحملة.
 export default function Analytics() {
   const navigate = useNavigate();
@@ -95,13 +114,27 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* المؤشرات */}
-      <div className="grid cols-4" style={{ marginBottom: 16 }}>
-        <Stat label="الوصول" value={t.reach ?? 0} />
-        <Stat label="الانطباعات" value={t.impressions ?? 0} />
-        <Stat label="التفاعل" value={t.engagement ?? 0} />
-        <Stat label="معدل التفاعل" value={`${t.engagement_rate ?? 0}%`} />
-      </div>
+      {/* المؤشرات — ديناميكية: كل مقاييس المنصات (المتشابهة مجمّعة). صفِّ بالمنصة لرؤية مقاييسها وحدها. */}
+      {(() => {
+        const metrics = [...(data?.metrics || [])].sort((a: any, b: any) => metricRank(a) - metricRank(b) || (b.value - a.value));
+        const shown = metrics.length ? metrics : [
+          { type: 'impressions', value: t.impressions ?? 0, unit: 'count' },
+          { type: 'reach', value: t.reach ?? 0, unit: 'count' },
+          { type: 'engagement', value: t.engagement ?? 0, unit: 'count' },
+          { type: 'engagementrate', value: t.engagement_rate ?? 0, unit: 'percentage' },
+        ];
+        return (
+          <div className="grid cols-4" style={{ marginBottom: 16 }}>
+            {shown.map((m: any, i: number) => (
+              <Stat
+                key={i}
+                label={metricLabel(m)}
+                value={m.unit === 'percentage' ? `${m.value}%` : m.value}
+              />
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="grid cols-2">
         {/* تفصيل المنصات */}

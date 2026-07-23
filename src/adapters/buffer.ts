@@ -67,6 +67,9 @@ export async function listBufferChannels(token: string): Promise<BufferChannel[]
   return out;
 }
 
+// مقياس خام واحد من Buffer
+export type RawMetric = { type: string; name: string; value: number; unit: string };
+
 // منشور Buffer مُرسَل مع مقاييسه — لسحب تحليلات كل منشورات المؤسسة
 export type BufferPostMetric = {
   id: string;
@@ -77,6 +80,7 @@ export type BufferPostMetric = {
   reach: number;
   impressions: number;
   engagement: number;
+  metrics: RawMetric[]; // كل المقاييس الخام كما تعيدها Buffer (لكل منصة مقاييسها)
 };
 
 // يجلب كل المنشورات المُرسَلة (sent) في كل مؤسسات الحساب مع مقاييسها (مع ترقيم صفحات)
@@ -101,6 +105,12 @@ export async function listSentPostMetrics(token: string): Promise<BufferPostMetr
       for (const edge of conn?.edges || []) {
         const n = edge?.node;
         if (!n) continue;
+        const raw: RawMetric[] = (n.metrics || []).map((m: any) => ({
+          type: String(m.type || ''),
+          name: String(m.name || m.type || ''),
+          value: Number(m.value || 0),
+          unit: String(m.unit || 'count'),
+        }));
         const { reach, impressions, engagement } = mapPostMetrics(n.metrics || []);
         out.push({
           id: String(n.id),
@@ -111,6 +121,7 @@ export async function listSentPostMetrics(token: string): Promise<BufferPostMetr
           reach,
           impressions,
           engagement,
+          metrics: raw,
         });
       }
       if (!conn?.pageInfo?.hasNextPage) break;
