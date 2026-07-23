@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { getProvider } from '../adapters';
+import { getProvider, providerKey } from '../adapters';
 import { listSentPostMetrics } from '../adapters/buffer';
 import { newId } from '../util';
 
@@ -89,7 +89,7 @@ async function pullViaSchedules(env: Env): Promise<number> {
 
 // Buffer: يسحب مقاييس كل المنشورات المُرسَلة في المؤسسة (لا فقط ما نُشر عبر المنصة)
 async function pullAllBuffer(env: Env): Promise<number> {
-  const token = (env.PROVIDER_API_KEY || '').trim();
+  const token = providerKey(env, 'buffer');
   if (!token) return 0;
 
   // خريطة عكسية: معرّف قناة Buffer → مفتاح منصة المنصة

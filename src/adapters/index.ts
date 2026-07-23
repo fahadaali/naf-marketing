@@ -5,6 +5,18 @@ import { AyrshareProvider } from './ayrshare';
 import { BufferProvider } from './buffer';
 import { SocialApiProvider } from './socialapi';
 
+// يحل مفتاح المزوّد: يُفضّل السرّ الخاص بالمزوّد، ثم يتراجع إلى PROVIDER_API_KEY العام.
+// هكذا يمكن تخزين مفتاح Buffer وSocialAPI معاً على Cloudflare بأسماء مختلفة والتبديل بينهما.
+export function providerKey(env: Env, name: string): string {
+  const n = name.toLowerCase();
+  const specific =
+    n === 'buffer' ? env.BUFFER_API_KEY :
+    n === 'socialapi' ? env.SOCIALAPI_API_KEY :
+    n === 'ayrshare' ? env.AYRSHARE_API_KEY :
+    undefined;
+  return (specific || env.PROVIDER_API_KEY || '').trim();
+}
+
 // مصنع المزوّد — يُحقَن المزوّد الفعلي حسب الإعدادات، ومفتاحه من Secrets.
 // إضافة مزوّد جديد (Zernio / Late): أنشئ ملفاً ينفّذ PublishingProvider وأضِفه هنا.
 export async function getProvider(env: Env): Promise<PublishingProvider> {
@@ -12,21 +24,21 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
     value: string;
   }>();
   const name = (setting?.value || env.PROVIDER_NAME || 'mock').toLowerCase();
-  const key = env.PROVIDER_API_KEY || '';
+  const key = providerKey(env, name);
 
   switch (name) {
     case 'ayrshare':
-      if (!key) throw new Error('PROVIDER_API_KEY غير مضبوط للمزوّد ayrshare');
+      if (!key) throw new Error('مفتاح Ayrshare غير مضبوط (AYRSHARE_API_KEY أو PROVIDER_API_KEY)');
       return new AyrshareProvider(key);
     case 'buffer': {
-      if (!key) throw new Error('PROVIDER_API_KEY (رمز وصول Buffer) غير مضبوط للمزوّد buffer');
+      if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
       let profiles: Record<string, string> = {};
       try { profiles = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
       return new BufferProvider(key, profiles);
     }
     case 'socialapi': {
-      if (!key) throw new Error('PROVIDER_API_KEY (مفتاح SocialAPI.ai) غير مضبوط للمزوّد socialapi');
+      if (!key) throw new Error('مفتاح SocialAPI.ai غير مضبوط (SOCIALAPI_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
       let accounts: Record<string, string> = {};
       try { accounts = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }

@@ -226,11 +226,11 @@ function Platforms() {
   const MAP_CFG: Record<string, { key: string; endpoint: string; label: string; hint: string }> = {
     buffer: {
       key: 'buffer_profiles', endpoint: '/buffer/profiles', label: 'Buffer',
-      hint: 'Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك واربط كل منصة بالقناة المقابلة. المفتاح الشخصي من publish.buffer.com/settings/api عبر PROVIDER_API_KEY. (النشر/الجدولة/التحليلات عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)',
+      hint: 'Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك واربط كل منصة بالقناة المقابلة. المفتاح الشخصي من publish.buffer.com/settings/api يُضبط في سرّ Cloudflare باسم BUFFER_API_KEY (أو PROVIDER_API_KEY العام). (النشر/الجدولة/التحليلات عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)',
     },
     socialapi: {
       key: 'socialapi_profiles', endpoint: '/socialapi/profiles', label: 'SocialAPI.ai',
-      hint: 'SocialAPI.ai ينشر إلى حسابات مربوطة لديه. اجلب حساباتك واربط كل منصة بالحساب المقابل. مفتاح API عبر PROVIDER_API_KEY. (يدعم النشر والتحليلات والتعليقات والرسائل ومراجعات Google Business عبر الـ API.)',
+      hint: 'SocialAPI.ai ينشر إلى حسابات مربوطة لديه. اجلب حساباتك واربط كل منصة بالحساب المقابل. مفتاح API يُضبط في سرّ Cloudflare باسم SOCIALAPI_API_KEY (أو PROVIDER_API_KEY العام). (يدعم النشر والتحليلات والتعليقات والرسائل ومراجعات Google Business عبر الـ API.)',
     },
   };
   const cfg = MAP_CFG[provider];
