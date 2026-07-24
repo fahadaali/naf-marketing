@@ -10,11 +10,11 @@ const METRIC_LABELS: Record<string, string> = {
   impressions: 'الانطباعات', reach: 'الوصول', reactions: 'التفاعلات', comments: 'التعليقات',
   shares: 'المشاركات', reposts: 'إعادات النشر', retweets: 'إعادات التغريد', saves: 'الحفظ',
   clicks: 'النقرات', likes: 'الإعجابات', quotes: 'الاقتباسات', follows: 'متابعون جدد',
-  views: 'المشاهدات', viewers: 'المشاهدون', totaltimewatched: 'وقت المشاهدة (دقائق)',
+  views: 'المشاهدات', view_count: 'مرات المشاهدة', viewers: 'المشاهدون', totaltimewatched: 'وقت المشاهدة (دقائق)',
   engagementrate: 'معدل التفاعل', engagement: 'التفاعل', postcount: 'عدد المنشورات',
 };
 // ترتيب العرض المفضّل (الأهم أولاً)؛ الباقي يأتي بعده
-const METRIC_ORDER = ['impressions', 'reach', 'views', 'reactions', 'likes', 'comments', 'shares', 'reposts', 'retweets', 'quotes', 'saves', 'clicks', 'follows', 'viewers', 'totaltimewatched', 'engagementrate'];
+const METRIC_ORDER = ['impressions', 'reach', 'views', 'view_count', 'reactions', 'likes', 'comments', 'shares', 'reposts', 'retweets', 'quotes', 'saves', 'clicks', 'follows', 'viewers', 'totaltimewatched', 'engagementrate'];
 function metricLabel(m: { type?: string; name?: string }): string {
   const key = String(m.type || m.name || '').toLowerCase();
   return METRIC_LABELS[key] || m.name || m.type || key;
@@ -160,11 +160,21 @@ export default function Analytics() {
         <div className="card">
           <h4 style={{ marginTop: 0 }}>أفضل المنشورات</h4>
           <table className="table">
-            <thead><tr><th>المنشور</th><th>المنصة</th><th>المصدر</th><th>تفاعل</th><th>انطباعات</th><th></th></tr></thead>
+            <thead><tr><th>المنشور</th><th>المنصة</th><th>المصدر</th><th>تفاعل</th><th>انطباعات</th></tr></thead>
             <tbody>
               {(data?.topPosts || []).map((p: any, i: number) => (
-                <tr key={i}>
-                  <td>{p.title}</td>
+                <tr
+                  key={i}
+                  onClick={() => p.external_url && window.open(p.external_url, '_blank', 'noopener,noreferrer')}
+                  style={p.external_url ? { cursor: 'pointer' } : undefined}
+                  title={p.external_url ? 'فتح المنشور على المنصة' : undefined}
+                >
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {p.external_url && <ExternalLink size={13} style={{ opacity: 0.55, flexShrink: 0 }} />}
+                      {p.title}
+                    </span>
+                  </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                       <PlatformIcon platform={p.platform} size={18} /> {platformLabel(p.platform)}
@@ -173,16 +183,9 @@ export default function Analytics() {
                   <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
                   <td>{p.engagement}</td>
                   <td>{p.impressions}</td>
-                  <td>
-                    {p.external_url && (
-                      <a className="icon-btn" href={p.external_url} target="_blank" rel="noreferrer" title="فتح المنشور على المنصة">
-                        <ExternalLink size={15} />
-                      </a>
-                    )}
-                  </td>
                 </tr>
               ))}
-              {(data?.topPosts || []).length === 0 && <tr><td colSpan={6} className="muted">—</td></tr>}
+              {(data?.topPosts || []).length === 0 && <tr><td colSpan={5} className="muted">—</td></tr>}
             </tbody>
           </table>
         </div>

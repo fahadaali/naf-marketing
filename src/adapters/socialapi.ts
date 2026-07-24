@@ -157,19 +157,41 @@ export type InboxItem = { id: string; platform: string; kind: 'comment' | 'dm'; 
 //      {text, author_name, author_username, platform_id, created_at, platform, ...}
 export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
   const out: InboxItem[] = [];
-  // 1) المنشورات التي عليها تعليقات
-  let postRows: any[] = [];
+
+  // نجمع المنشورات المرشّحة من مصدرين لتغطية كل المنصّات:
+  //   أ) /inbox/comments  → المنشورات التي رصد SocialAPI عليها تعليقات.
+  //   ب) /posts (targets) → كل منشوراتنا المنشورة (قد تحمل تعليقات لا تظهر في الصندوق بعد).
+  // المفتاح "postId|accountId" لمنع التكرار.
+  const candidates = new Map<string, { postId: string; accountId: string; platform: string }>();
+  const addCand = (postId: string, accountId: string, platform: string) => {
+    if (!postId) return;
+    const key = `${postId}|${accountId}`;
+    if (!candidates.has(key)) candidates.set(key, { postId, accountId, platform });
+  };
+
   try {
     const data = await sapi<any>(apiKey, 'GET', EP.comments);
-    postRows = data?.data || data?.comments || data?.posts || (Array.isArray(data) ? data : []);
-  } catch { /* لا منشورات عليها تعليقات */ }
+    const rows: any[] = data?.data || data?.comments || data?.posts || (Array.isArray(data) ? data : []);
+    for (const row of rows) {
+      addCand(
+        String(row.id || row.post_id || ''),
+        String(row.account_id || row.account?.id || ''),
+        String(row.platform || row.account?.platform || 'unknown'),
+      );
+    }
+  } catch { /* لا منشورات في الصندوق */ }
 
-  for (const row of postRows) {
-    const postId = String(row.id || row.post_id || '');
-    const accountId = String(row.account_id || row.account?.id || '');
-    const rowPlatform = String(row.platform || row.account?.platform || 'unknown');
-    if (!postId) continue;
-    // 2) تعليقات هذا المنشور
+  try {
+    const pData = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
+    const posts: any[] = pData?.data || pData?.posts || (Array.isArray(pData) ? pData : []);
+    for (const p of posts) {
+      for (const t of (Array.isArray(p.targets) ? p.targets : [])) {
+        addCand(String(t.platform_post_id || t.platform_id || ''), String(t.account_id || ''), String(t.platform || 'unknown'));
+      }
+    }
+  } catch { /* تعذّر جلب المنشورات */ }
+
+  for (const { postId, accountId, platform: rowPlatform } of candidates.values()) {
     try {
       const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
       const cData = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
