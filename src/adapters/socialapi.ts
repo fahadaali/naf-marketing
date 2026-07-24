@@ -91,6 +91,23 @@ export type SocialApiPost = {
   metrics: any[];
 };
 
+// رابط احتياطي للمنشور على منصته حين لا يوفّر SocialAPI حقل permalink.
+function buildPermalink(platform: string, id: string): string | null {
+  if (!id) return null;
+  switch (platform) {
+    case 'youtube': return `https://www.youtube.com/watch?v=${id}`;
+    case 'twitter': return `https://x.com/i/web/status/${id}`;
+    case 'facebook': return `https://www.facebook.com/${id}`;
+    case 'threads': return `https://www.threads.net/t/${id}`;
+    case 'linkedin':
+    case 'linkedin_page':
+      return id.startsWith('urn:')
+        ? `https://www.linkedin.com/feed/update/${id}`
+        : `https://www.linkedin.com/feed/update/urn:li:activity:${id}`;
+    default: return null; // إنستقرام/تيك توك يحتاجان اسم المستخدم/الرمز القصير — لا نبني رابطاً غير موثوق
+  }
+}
+
 // يجلب كل المنشورات: المقاييس والرابط والمنصّة كلها داخل targets[] لكل منشور
 export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
   const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
@@ -114,7 +131,7 @@ export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[
         reach: mapped.reach,
         impressions: mapped.impressions,
         engagement: mapped.engagement,
-        externalUrl: t.permalink || t.url || null,
+        externalUrl: t.permalink || t.url || buildPermalink(String(t.platform || ''), platformPostId),
         metrics: mapped.raw,
       });
     }

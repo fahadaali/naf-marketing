@@ -161,6 +161,13 @@ async function pullAllSocialApi(env: Env): Promise<number> {
   for (const r of sched.results) schedMap.set(r.provider_post_id, { postId: r.post_id, title: r.title });
 
   const posts = await listSocialApiPosts(token);
+
+  // نُعيد بناء لقطات المنشورات «الخارجية» (غير المنشورة عبر المنصة) في كل سحب:
+  // نحذف القديمة أولاً كي تختفي الصفوف العالقة/المكرّرة (بمعرّفات قديمة أو من مزوّد سابق)
+  // التي لا تحمل رابطاً خارجياً. ما نُشر عبر المنصة (post_id غير فارغ) يبقى.
+  // نحذف بعد نجاح الجلب فقط (أعلاه قد يرمي استثناءً) كي لا نفقد البيانات عند فشل الشبكة.
+  await env.DB.prepare('DELETE FROM analytics_snapshots WHERE post_id IS NULL').run();
+
   let captured = 0;
   for (const post of posts) {
     // الربط بجدول النشر عبر معرّف المنشور الداخلي (postUuid) أو معرّف المنصة
