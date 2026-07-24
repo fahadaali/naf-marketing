@@ -22,9 +22,10 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
   const items = await listSocialApiInbox(token);
 
   // تنظيف السجلات القديمة الفارغة/العالقة (من مزامنات سابقة قبل الإصلاحات):
-  // نحذف كل عنصر بلا نص ولم يُردّ عليه — العناصر الحقيقية تُعاد إضافتها فوراً أدناه.
+  // نحذف كل عنصر بلا نص ولم يُردّ عليه — عدا التقييمات (قد تكون تقييم نجوم بلا نص فتبقى).
+  // العناصر الحقيقية تُعاد إضافتها فوراً أدناه.
   await env.DB.prepare(
-    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL",
+    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL AND kind <> 'review'",
   ).run();
 
   let added = 0;
