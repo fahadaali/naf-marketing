@@ -98,21 +98,3 @@ export function PlatformIcon({ platform, size = 24 }: { platform: string; size?:
   };
   return <span style={style}>{meta?.glyph || <Globe size={Math.round(size * 0.62)} />}</span>;
 }
-
-// شارة منصة: أيقونة + تسمية
-export function PlatformTag({
-  platform,
-  custom,
-  size = 20,
-}: {
-  platform: string;
-  custom?: Record<string, string>;
-  size?: number;
-}) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <PlatformIcon platform={platform} size={size} />
-      <span>{platformLabel(platform, custom)}</span>
-    </span>
-  );
-}
