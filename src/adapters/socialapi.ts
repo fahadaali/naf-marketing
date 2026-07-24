@@ -15,7 +15,7 @@ const EP = {
   postComments: (postId: string) => `/inbox/comments/${postId}`, // GET/POST تعليقات منشور معيّن، والرد عليها
   reviews: '/inbox/reviews', // GET ملخّص المراجعات لكل حساب (متوسط + عدد)
   reviewsForAccount: (accountId: string) => `/inbox/reviews/${accountId}`, // GET مراجعات حساب معيّن
-  replyReview: (accountId: string) => `/inbox/reviews/${accountId}`, // POST رد على مراجعة
+  replyReview: (reviewId: string) => `/inbox/reviews/${reviewId}/reply`, // POST رد على مراجعة (معرّف المراجعة sapi_rev_)
 };
 
 // نفصل بين (معرّف المنشور | معرّف الحساب | معرّف التعليق) داخل provider_comment_id واحد
@@ -297,9 +297,10 @@ export class SocialApiProvider implements PublishingProvider {
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
     }
-    // جسم النشر وفق التوثيق: { text, targets: [{account_id}], scheduled_at? }
+    // جسم النشر وفق التوثيق: { text, targets:[{account_id}], scheduled_at? } — والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
+    else body.publish_now = true;
     const data = await sapi<any>(this.key, 'POST', EP.posts, body);
     const id = data?.id || data?.post_id || data?.data?.id;
     return { providerPostId: String(id || ''), status: input.scheduleAt ? 'scheduled' : (data?.status || 'published') };
@@ -339,10 +340,10 @@ export class SocialApiProvider implements PublishingProvider {
 
   async replyComment(_providerPostId: string, commentId: string, text: string): Promise<void> {
     if (commentId.startsWith('rv:')) {
-      // رد على مراجعة: "rv:{accountId}:{reviewId}"
+      // رد على مراجعة: "rv:{accountId}:{reviewId}" → POST /inbox/reviews/{reviewId}/reply بجسم {account_id, text}
       const [, accountId, reviewId] = commentId.split(':');
       const account_id = accountId || Object.values(this.accounts).filter(Boolean)[0] || '';
-      await sapi(this.key, 'POST', EP.replyReview(account_id), { review_id: reviewId, comment_id: reviewId, text });
+      await sapi(this.key, 'POST', EP.replyReview(reviewId), { account_id, text });
       return;
     }
     // رد على تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
