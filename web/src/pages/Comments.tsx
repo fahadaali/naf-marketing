@@ -129,6 +129,7 @@ export default function Comments() {
           const km = kindMeta(c.kind);
           const isComment = c.kind === 'comment';
           const canPrivate = !!caps.can_private_reply;
+          const canEditReply = isComment || c.kind === 'review'; // الرسائل/الإشارات لا تُعدَّل بعد الإرسال
           const sugg = suggestions[c.id] || [];
           return (
             <div className="card" key={c.id} style={c.is_hidden ? { opacity: 0.6 } : undefined}>
@@ -161,8 +162,13 @@ export default function Comments() {
                   <div className="row" style={{ marginBottom: 4 }}>
                     <div className="muted" style={{ fontSize: 12 }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
                     <div className="spacer" />
-                    <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((e) => ({ ...e, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={13} /></button>
-                    <button className="btn sm ghost" disabled={busy === c.id} onClick={() => removeReply(c.id)} title="حذف الرد"><Trash2 size={13} /></button>
+                    {/* التعديل/الحذف مدعومان للتعليقات والتقييمات فقط — الرسائل والإشارات لا تُعدَّل بعد الإرسال */}
+                    {canEditReply && (
+                      <>
+                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((e) => ({ ...e, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={13} /></button>
+                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => removeReply(c.id)} title="حذف الرد"><Trash2 size={13} /></button>
+                      </>
+                    )}
                   </div>
                   {c.reply_body}
                 </div>

@@ -50,6 +50,9 @@ export default function Editor() {
   const [basecampSynced, setBasecampSynced] = useState(false);
   const [syncingNotes, setSyncingNotes] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [variants, setVariants] = useState<Record<string, string>>({}); // نص مخصّص لكل منصة (فارغ = النص الأساسي)
+  const [savingVariant, setSavingVariant] = useState('');
+  const [showVariants, setShowVariants] = useState(false);
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
@@ -80,6 +83,9 @@ export default function Editor() {
     setNotes(d.notes || []);
     setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
+    const vmap: Record<string, string> = {};
+    for (const v of d.variants || []) if (v.body_override) vmap[v.platform] = v.body_override;
+    setVariants(vmap);
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
   }
 
@@ -180,6 +186,34 @@ export default function Editor() {
     try {
       await api.del(`/posts/${postId}`);
       navigate('/posts');
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  // يحفظ النص المخصّص لمنصة واحدة (يستخدمه النشر بدل النص الأساسي عند وجوده)
+  async function saveVariant(platform: string) {
+    if (!postId) return;
+    setSavingVariant(platform);
+    setErr('');
+    try {
+      await api.put(`/posts/${postId}/variants/${platform}`, { body_override: variants[platform]?.trim() || null });
+      setMsg(`حُفظ نص ${platformLabel(platform, platLabels)}`);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setSavingVariant('');
+    }
+  }
+
+  // إلغاء موعد نشر معلّق أو فاشل (الخادم يرفض إلغاء ما نُشر فعلاً)
+  async function cancelSchedule(sid: string) {
+    if (!postId) return;
+    if (!confirm('إلغاء موعد النشر هذا؟')) return;
+    try {
+      await api.del(`/schedules/${sid}`);
+      setMsg('أُلغي موعد النشر');
+      loadPost(postId);
     } catch (e: any) {
       setErr(e.message);
     }
@@ -345,6 +379,49 @@ export default function Editor() {
             </div>
           </div>
 
+          {/* نصوص مخصّصة لكل منصة — النشر يستخدمها بدل النص الأساسي عند وجودها */}
+          {postId && platforms.length > 0 && can('draft.edit') && (
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div className="row" style={{ cursor: 'pointer' }} onClick={() => setShowVariants((v) => !v)}>
+                <h4 style={{ margin: 0 }}>نصوص مخصّصة لكل منصة</h4>
+                <div className="spacer" />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
+                </span>
+              </div>
+              {showVariants && (
+                <div style={{ marginTop: 10 }}>
+                  <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                    اترك الحقل فارغاً لاستخدام النص الأساسي. النص المخصّص يُنشر على منصته بدلاً منه.
+                  </p>
+                  {platforms.map((p) => (
+                    <div key={p} style={{ marginBottom: 10 }}>
+                      <div className="row" style={{ marginBottom: 4 }}>
+                        <PlatformIcon platform={p} size={18} />
+                        <span style={{ fontSize: 13 }}>{platformLabel(p, platLabels)}</span>
+                        <div className="spacer" />
+                        <button
+                          className="btn sm ghost"
+                          disabled={savingVariant === p}
+                          onClick={() => saveVariant(p)}
+                        >
+                          {savingVariant === p ? 'جارٍ الحفظ…' : 'حفظ'}
+                        </button>
+                      </div>
+                      <textarea
+                        className="input"
+                        rows={3}
+                        placeholder="(يُستخدم النص الأساسي)"
+                        value={variants[p] || ''}
+                        onChange={(e) => setVariants((v) => ({ ...v, [p]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* الجداول */}
           {schedules.length > 0 && (
             <div className="card" style={{ marginBottom: 14 }}>
@@ -364,6 +441,16 @@ export default function Editor() {
                     >
                       {late && s.status !== 'published' ? 'متأخر' : SCHED_STATUS[s.status]}
                     </span>
+                    {/* الإلغاء متاح للمعلّق والفاشل فقط — المنشور فعلاً لا يُلغى من هنا */}
+                    {['pending', 'failed'].includes(s.status) && can('content.schedule') && (
+                      <button
+                        className="btn sm ghost"
+                        title="إلغاء هذا الموعد"
+                        onClick={() => cancelSchedule(s.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 );
               })}

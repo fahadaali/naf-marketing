@@ -370,8 +370,6 @@ function Platforms() {
           <option value="buffer">Buffer</option>
           <option value="socialapi">SocialAPI.ai</option>
           <option value="ayrshare">Ayrshare</option>
-          <option value="zernio">Zernio</option>
-          <option value="late">Late</option>
         </select>
         <p className="muted" style={{ fontSize: 12 }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
       </div>
