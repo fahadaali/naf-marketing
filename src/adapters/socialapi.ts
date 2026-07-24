@@ -108,6 +108,17 @@ function buildPermalink(platform: string, id: string): string | null {
   }
 }
 
+// يجبر SocialAPI على مزامنة كل فيديوهات قنوات يوتيوب المربوطة (المسار الوحيد الموثّق
+// للمزامنة القسرية للمحتوى القديم). أفضل جهد — نتجاهل أي فشل.
+export async function syncYouTubePosts(apiKey: string): Promise<void> {
+  let accts: SocialApiAccount[] = [];
+  try { accts = await listSocialApiAccounts(apiKey); } catch { return; }
+  for (const a of accts) {
+    if (a.platform !== 'youtube') continue;
+    try { await sapi(apiKey, 'POST', `/platforms/youtube/accounts/${a.id}/sync`); } catch { /* أفضل جهد */ }
+  }
+}
+
 // يجلب كل المنشورات: المقاييس والرابط والمنصّة كلها داخل targets[] لكل منشور
 export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
   const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
