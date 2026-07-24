@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import { getProvider, providerKey } from '../adapters';
 import { listSentPostMetrics } from '../adapters/buffer';
-import { listSocialApiPosts, syncYouTubePosts } from '../adapters/socialapi';
+import { listSocialApiPosts, syncYouTubePosts, getExportVideos, mapMetrics } from '../adapters/socialapi';
 import { newId } from '../util';
 
 type MetricRow = {
@@ -16,23 +16,24 @@ type MetricRow = {
   sentAt: string | null;
   metricsJson: string | null; // كل المقاييس الخام (JSON) — لعرض ديناميكي لكل منصة
   externalUrl: string | null; // رابط المنشور على منصته
+  source?: string | null; // 'posts' | 'export' | null
 };
 
 // upsert لقطة مقاييس واحدة لكل منشور (مفتاح: provider_post_id)
 async function upsertMetric(env: Env, row: MetricRow): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO analytics_snapshots
-       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at, metrics_json, external_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at, metrics_json, external_url, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(provider_post_id) DO UPDATE SET
        platform = excluded.platform, title = excluded.title, post_id = excluded.post_id,
        via_platform = excluded.via_platform, reach = excluded.reach, impressions = excluded.impressions,
        engagement = excluded.engagement, sent_at = excluded.sent_at, metrics_json = excluded.metrics_json,
-       external_url = excluded.external_url, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
+       external_url = excluded.external_url, source = excluded.source, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
   )
     .bind(
       newId('an'), row.providerPostId, row.platform, row.title, row.postId, row.viaPlatform,
-      row.reach, row.impressions, row.engagement, row.sentAt, row.metricsJson, row.externalUrl,
+      row.reach, row.impressions, row.engagement, row.sentAt, row.metricsJson, row.externalUrl, row.source ?? null,
     )
     .run();
 }
@@ -164,11 +165,13 @@ async function pullAllSocialApi(env: Env): Promise<number> {
   await syncYouTubePosts(token);
   const posts = await listSocialApiPosts(token);
 
-  // نُعيد بناء لقطات المنشورات «الخارجية» (غير المنشورة عبر المنصة) في كل سحب:
-  // نحذف القديمة أولاً كي تختفي الصفوف العالقة/المكرّرة (بمعرّفات قديمة أو من مزوّد سابق)
-  // التي لا تحمل رابطاً خارجياً. ما نُشر عبر المنصة (post_id غير فارغ) يبقى.
+  // نُعيد بناء لقطات المنشورات «الخارجية» من /posts في كل سحب:
+  // نحذف صفوف /posts القديمة (وكذلك العالقة بلا مصدر) كي تختفي المكرّرات، مع الإبقاء على
+  // صفوف التصدير (source='export') وما نُشر عبر المنصة (post_id غير فارغ).
   // نحذف بعد نجاح الجلب فقط (أعلاه قد يرمي استثناءً) كي لا نفقد البيانات عند فشل الشبكة.
-  await env.DB.prepare('DELETE FROM analytics_snapshots WHERE post_id IS NULL').run();
+  await env.DB.prepare(
+    "DELETE FROM analytics_snapshots WHERE post_id IS NULL AND (source IS NULL OR source = 'posts')",
+  ).run();
 
   let captured = 0;
   for (const post of posts) {
@@ -186,8 +189,38 @@ async function pullAllSocialApi(env: Env): Promise<number> {
       sentAt: post.sentAt,
       metricsJson: JSON.stringify(post.metrics || []),
       externalUrl: post.externalUrl || null,
+      source: 'posts',
     });
     captured++;
   }
   return captured;
+}
+
+// يستورد فيديوهات تصدير مكتمل إلى لقطات التحليلات (source='export')، فتظهر في اللوحة وتبقى.
+export async function ingestExportVideos(env: Env, exportId: string): Promise<number> {
+  const token = providerKey(env, 'socialapi');
+  if (!token) return 0;
+  const videos = await getExportVideos(token, exportId);
+  let n = 0;
+  for (const v of videos) {
+    const id = String(v.platform_post_id || v.platform_id || v.video_id || v.id || '');
+    if (!id) continue;
+    const m = mapMetrics(v.metrics || v);
+    await upsertMetric(env, {
+      providerPostId: id,
+      platform: String(v.platform || 'youtube'),
+      title: String(v.title || v.caption || '').slice(0, 140) || null,
+      postId: null,
+      viaPlatform: 0,
+      reach: m.reach,
+      impressions: m.impressions,
+      engagement: m.engagement,
+      sentAt: v.published_at || v.created_at || null,
+      metricsJson: JSON.stringify(m.raw),
+      externalUrl: v.url || v.permalink || v.link || null,
+      source: 'export',
+    });
+    n++;
+  }
+  return n;
 }

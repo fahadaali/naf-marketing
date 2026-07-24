@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -113,6 +113,8 @@ export default function Analytics() {
           </div>
         </div>
       </div>
+
+      <VideoAnalyticsExport onImported={load} />
 
       {/* المؤشرات — ديناميكية: كل مقاييس المنصات (المتشابهة مجمّعة). صفِّ بالمنصة لرؤية مقاييسها وحدها. */}
       {(() => {
@@ -282,6 +284,95 @@ function Stat({ label, value }: { label: string; value: number | string }) {
     <div className="card stat">
       <div className="num">{typeof value === 'number' ? value.toLocaleString('ar-EG') : value}</div>
       <div className="label">{label}</div>
+    </div>
+  );
+}
+
+// ===== تصدير تحليلات الفيديو (يوتيوب/تيك توك) — تحليلات أعمق عبر SocialAPI Analytics Export =====
+function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [exports, setExports] = useState<any[]>([]);
+  const [account, setAccount] = useState('');
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const [open, setOpen] = useState(false);
+
+  function load() {
+    api.get('/analytics/exports').then((d) => {
+      setAccounts(d.accounts || []);
+      setExports(d.exports || []);
+      if (!account && d.accounts?.[0]) setAccount(d.accounts[0].id);
+    }).catch(() => {});
+  }
+  useEffect(() => { if (open) load(); }, [open]);
+
+  async function create() {
+    if (!account) return;
+    setBusy('create'); setMsg('جارٍ إنشاء التصدير…');
+    try {
+      await api.post('/analytics/export', { account_id: account });
+      setMsg('تم إنشاء مهمة التصدير — قد تستغرق دقائق. حدّث الحالة ثم استورد عند الاكتمال.');
+      load();
+    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
+  }
+
+  async function ingest(id: string) {
+    setBusy(id); setMsg('');
+    try {
+      const d = await api.post(`/analytics/exports/${id}/ingest`);
+      if (d.pending) { setMsg(`التصدير لم يكتمل بعد (${d.status}). أعد المحاولة لاحقاً.`); }
+      else { setMsg(`تم استيراد ${d.imported} فيديو إلى اللوحة.`); onImported(); }
+      load();
+    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
+  }
+
+  const done = (s: string) => ['completed', 'complete', 'done'].includes(s);
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginLeft: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
+        <div className="spacer" />
+        <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى ٣٠ فيديو، تهدئة ٧ أيام).
+          </p>
+          {accounts.length === 0 ? (
+            <p className="muted" style={{ fontSize: 13 }}>لا توجد حسابات فيديو مربوطة (يوتيوب/تيك توك).</p>
+          ) : (
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{platformLabel(a.platform)} — {a.name}</option>)}
+              </select>
+              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileDown size={14} /> إنشاء تصدير</button>
+              <button className="btn sm ghost" onClick={load}><RefreshCw size={14} /> تحديث الحالة</button>
+            </div>
+          )}
+          {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
+          {exports.length > 0 && (
+            <table className="table">
+              <thead><tr><th>المعرّف</th><th>الحالة</th><th>فيديوهات</th><th></th></tr></thead>
+              <tbody>
+                {exports.map((x) => (
+                  <tr key={x.id}>
+                    <td className="muted" style={{ fontSize: 12 }}>{String(x.id).slice(0, 10)}…</td>
+                    <td>{x.status}</td>
+                    <td>{x.videoCount ?? '—'}</td>
+                    <td>
+                      {done(x.status)
+                        ? <button className="btn sm" disabled={busy === x.id} onClick={() => ingest(x.id)}>استيراد</button>
+                        : <button className="btn sm ghost" disabled={busy === x.id} onClick={() => ingest(x.id)}>فحص/استيراد</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
