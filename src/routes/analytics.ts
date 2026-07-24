@@ -47,7 +47,7 @@ analyticsRoutes.get('/dashboard', async (c) => {
     .all();
 
   const topPosts = await c.env.DB.prepare(
-    `SELECT a.post_id, COALESCE(a.title, '—') AS title, a.engagement, a.impressions, a.via_platform
+    `SELECT a.post_id, COALESCE(a.title, '—') AS title, a.platform, a.external_url, a.engagement, a.impressions, a.via_platform
      FROM analytics_snapshots a ${clause} ORDER BY a.engagement DESC LIMIT 10`,
   )
     .bind(...binds)

@@ -80,6 +80,7 @@ export type BufferPostMetric = {
   reach: number;
   impressions: number;
   engagement: number;
+  externalUrl: string | null; // رابط المنشور على المنصة
   metrics: RawMetric[]; // كل المقاييس الخام كما تعيدها Buffer (لكل منصة مقاييسها)
 };
 
@@ -97,7 +98,7 @@ export async function listSentPostMetrics(token: string): Promise<BufferPostMetr
         organizationId: ${JSON.stringify(String(org.id))},
         filter: { status: [sent] }
       }) {
-        edges { node { id text channelId channelService sentAt metrics { type name value unit } } }
+        edges { node { id text channelId channelService sentAt externalLink metrics { type name value unit } } }
         pageInfo { hasNextPage endCursor }
       } }`;
       const data: any = await bufferGraphql<any>(token, q);
@@ -121,6 +122,7 @@ export async function listSentPostMetrics(token: string): Promise<BufferPostMetr
           reach,
           impressions,
           engagement,
+          externalUrl: n.externalLink || null,
           metrics: raw,
         });
       }

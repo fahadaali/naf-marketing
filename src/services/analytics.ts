@@ -15,23 +15,24 @@ type MetricRow = {
   engagement: number;
   sentAt: string | null;
   metricsJson: string | null; // كل المقاييس الخام (JSON) — لعرض ديناميكي لكل منصة
+  externalUrl: string | null; // رابط المنشور على منصته
 };
 
 // upsert لقطة مقاييس واحدة لكل منشور (مفتاح: provider_post_id)
 async function upsertMetric(env: Env, row: MetricRow): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO analytics_snapshots
-       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at, metrics_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at, metrics_json, external_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(provider_post_id) DO UPDATE SET
        platform = excluded.platform, title = excluded.title, post_id = excluded.post_id,
        via_platform = excluded.via_platform, reach = excluded.reach, impressions = excluded.impressions,
        engagement = excluded.engagement, sent_at = excluded.sent_at, metrics_json = excluded.metrics_json,
-       captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
+       external_url = excluded.external_url, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
   )
     .bind(
       newId('an'), row.providerPostId, row.platform, row.title, row.postId, row.viaPlatform,
-      row.reach, row.impressions, row.engagement, row.sentAt, row.metricsJson,
+      row.reach, row.impressions, row.engagement, row.sentAt, row.metricsJson, row.externalUrl,
     )
     .run();
 }
@@ -80,6 +81,7 @@ async function pullViaSchedules(env: Env): Promise<number> {
         engagement: a.engagement,
         sentAt: row.published_at,
         metricsJson: synthMetrics(a.reach, a.impressions, a.engagement),
+        externalUrl: null,
       });
       captured++;
     } catch {
@@ -128,6 +130,7 @@ async function pullAllBuffer(env: Env): Promise<number> {
       engagement: post.engagement,
       sentAt: post.sentAt,
       metricsJson: JSON.stringify(post.metrics || []),
+      externalUrl: post.externalUrl || null,
     });
     captured++;
   }
@@ -172,6 +175,7 @@ async function pullAllSocialApi(env: Env): Promise<number> {
       engagement: post.engagement,
       sentAt: post.sentAt,
       metricsJson: JSON.stringify(post.metrics || []),
+      externalUrl: post.externalUrl || null,
     });
     captured++;
   }
