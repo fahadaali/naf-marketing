@@ -18,6 +18,7 @@ import { searchRoutes } from './routes/search';
 import { auditRoutes } from './routes/audit';
 import { bufferRoutes } from './routes/buffer';
 import { socialApiRoutes } from './routes/socialapi';
+import { webhookRoutes } from './routes/webhooks';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -41,6 +42,7 @@ api.route('/search', searchRoutes);
 api.route('/audit', auditRoutes);
 api.route('/buffer', bufferRoutes);
 api.route('/socialapi', socialApiRoutes);
+api.route('/webhooks', webhookRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 

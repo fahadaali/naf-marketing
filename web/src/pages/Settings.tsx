@@ -412,8 +412,68 @@ function Platforms() {
         </div>
       )}
 
+      {provider === 'socialapi' && <SocialApiWebhook />}
+
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
+    </div>
+  );
+}
+
+/* ===== تسجيل الويب هوك (استقبال فوري للتعليقات/الرسائل/التقييمات) ===== */
+function SocialApiWebhook() {
+  const [hooks, setHooks] = useState<any[]>([]);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function refresh() {
+    api.get('/webhooks/socialapi/manage/list').then((d) => setHooks(d.webhooks || [])).catch(() => {});
+  }
+  useEffect(refresh, []);
+
+  async function register() {
+    setBusy(true);
+    setMsg('جارٍ التسجيل…');
+    try {
+      const d = await api.post('/webhooks/socialapi/manage/register');
+      setMsg(`تم التسجيل: ${d.url}`);
+      refresh();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(true);
+    try {
+      await api.del(`/webhooks/socialapi/manage/${id}`);
+      refresh();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <strong style={{ fontSize: 14 }}>الاستقبال الفوري (Webhook)</strong>
+        <div className="spacer" />
+        <button className="btn ghost sm" onClick={register} disabled={busy}>تسجيل نقطة الاستقبال</button>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        يسجّل نقطة استقبال لدى SocialAPI لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
+      </p>
+      {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
+      {hooks.map((h) => (
+        <div key={h.id} className="row" style={{ gap: 10, marginBottom: 6, alignItems: 'center' }}>
+          <span className="muted" style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>{h.url || h.id}</span>
+          <button className="btn ghost sm" onClick={() => remove(h.id)} disabled={busy}>حذف</button>
+        </div>
+      ))}
     </div>
   );
 }
