@@ -91,6 +91,23 @@ export type SocialApiPost = {
   metrics: any[];
 };
 
+// رابط احتياطي للمنشور على منصته حين لا يوفّر SocialAPI حقل permalink.
+function buildPermalink(platform: string, id: string): string | null {
+  if (!id) return null;
+  switch (platform) {
+    case 'youtube': return `https://www.youtube.com/watch?v=${id}`;
+    case 'twitter': return `https://x.com/i/web/status/${id}`;
+    case 'facebook': return `https://www.facebook.com/${id}`;
+    case 'threads': return `https://www.threads.net/t/${id}`;
+    case 'linkedin':
+    case 'linkedin_page':
+      return id.startsWith('urn:')
+        ? `https://www.linkedin.com/feed/update/${id}`
+        : `https://www.linkedin.com/feed/update/urn:li:activity:${id}`;
+    default: return null; // إنستقرام/تيك توك يحتاجان اسم المستخدم/الرمز القصير — لا نبني رابطاً غير موثوق
+  }
+}
+
 // يجلب كل المنشورات: المقاييس والرابط والمنصّة كلها داخل targets[] لكل منشور
 export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
   const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
@@ -114,7 +131,7 @@ export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[
         reach: mapped.reach,
         impressions: mapped.impressions,
         engagement: mapped.engagement,
-        externalUrl: t.permalink || t.url || null,
+        externalUrl: t.permalink || t.url || buildPermalink(String(t.platform || ''), platformPostId),
         metrics: mapped.raw,
       });
     }
@@ -249,7 +266,9 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
         const stars = r.rating ?? r.star_rating ?? r.stars;
         const body = r.text || r.comment || r.content || r.body || '';
         const rid = String(r.id || r.review_id || r.platform_id || '');
-        if (!rid && !body) continue;
+        // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
+        if (!body.trim()) continue;
+        if (!rid) continue;
         out.push({
           id: `rv:${accountId}:${rid}`,
           platform: accPlatform,
@@ -439,31 +458,67 @@ export class SocialApiProvider implements PublishingProvider {
     return Object.values(this.accounts).filter(Boolean)[0] || '';
   }
 
-  async replyComment(_providerPostId: string, commentId: string, text: string): Promise<void> {
+  private static replyId(data: any): string {
+    return String(data?.comment_id || data?.id || data?.data?.id || data?.reply?.id || '');
+  }
+
+  async replyComment(_providerPostId: string, commentId: string, text: string): Promise<string> {
     if (commentId.startsWith('rv:')) {
       // مراجعة: "rv:{accountId}:{reviewId}" → POST /inbox/reviews/{reviewId}/reply {account_id, text}
       const [, accountId, reviewId] = commentId.split(':');
-      await sapi(this.key, 'POST', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount(), text });
-      return;
+      const d = await sapi<any>(this.key, 'POST', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount(), text });
+      return SocialApiProvider.replyId(d);
     }
     if (commentId.startsWith('dm:')) {
       // رسالة خاصة: "dm:{conversationId}:{accountId}" → POST /inbox/conversations/{id}/messages {account_id, text}
       const [, convId, accountId] = commentId.split(':');
-      await sapi(this.key, 'POST', EP.conversationMessages(convId), { account_id: accountId || this.fallbackAccount(), text });
-      return;
+      const d = await sapi<any>(this.key, 'POST', EP.conversationMessages(convId), { account_id: accountId || this.fallbackAccount(), text });
+      return SocialApiProvider.replyId(d);
     }
     if (commentId.startsWith('mn:')) {
       // إشارة: "mn:{mentionId}:{accountId}:{mediaId}" → POST /inbox/mentions/{id}/reply {account_id, media_id?, text}
       const [, mentionId, accountId, mediaId] = commentId.split(':');
       const payload: Record<string, unknown> = { account_id: accountId || this.fallbackAccount(), text };
       if (mediaId) payload.media_id = mediaId;
-      await sapi(this.key, 'POST', EP.replyMention(mentionId), payload);
-      return;
+      const d = await sapi<any>(this.key, 'POST', EP.replyMention(mentionId), payload);
+      return SocialApiProvider.replyId(d);
     }
     // تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
     const dec = decodeCid(commentId);
     if (!dec) throw new Error('تعذّر تحديد المنشور/الحساب للرد على هذا التعليق');
-    await sapi(this.key, 'POST', EP.postComments(dec.postId), { account_id: dec.accountId || this.fallbackAccount(), comment_id: dec.commentId, text });
+    const d = await sapi<any>(this.key, 'POST', EP.postComments(dec.postId), { account_id: dec.accountId || this.fallbackAccount(), comment_id: dec.commentId, text });
+    return SocialApiProvider.replyId(d);
+  }
+
+  async editReply(commentId: string, replyProviderId: string | null, text: string): Promise<string> {
+    // التقييمات: إعادة الرد تُحدّثه على Google. الباقي: نحذف الرد القديم (إن عُرف معرّفه) ثم نرسل جديداً.
+    if (commentId.startsWith('rv:')) {
+      const [, accountId, reviewId] = commentId.split(':');
+      const d = await sapi<any>(this.key, 'POST', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount(), text });
+      return SocialApiProvider.replyId(d);
+    }
+    if (replyProviderId && !commentId.startsWith('dm:')) {
+      const dec = decodeCid(commentId);
+      const account_id = dec?.accountId || this.fallbackAccount();
+      try { await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id, action: 'delete' }); } catch { /* قد لا يُدعم الحذف */ }
+    }
+    return (await this.replyComment('', commentId, text)) || '';
+  }
+
+  async deleteReply(commentId: string, replyProviderId: string | null): Promise<void> {
+    if (commentId.startsWith('rv:')) {
+      // حذف الرد على تقييم Google — أفضل جهد
+      const [, accountId, reviewId] = commentId.split(':');
+      await sapi(this.key, 'DELETE', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount() });
+      return;
+    }
+    if (replyProviderId) {
+      // حذف تعليق الرد نفسه عبر الإشراف
+      const dec = decodeCid(commentId);
+      await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id: dec?.accountId || this.fallbackAccount(), action: 'delete' });
+      return;
+    }
+    throw new Error('لا يمكن حذف هذا الرد من المنصة (غير مدعوم أو معرّف الرد غير متوفّر)');
   }
 
   async moderateComment(commentId: string, action: ModerateAction): Promise<void> {

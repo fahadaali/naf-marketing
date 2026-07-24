@@ -21,11 +21,10 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
   if (!token) return 0;
   const items = await listSocialApiInbox(token);
 
-  // تنظيف السجلات القديمة الفارغة/العالقة (من مزامنات سابقة قبل الإصلاحات):
-  // نحذف كل عنصر بلا نص ولم يُردّ عليه — عدا التقييمات (قد تكون تقييم نجوم بلا نص فتبقى).
-  // العناصر الحقيقية تُعاد إضافتها فوراً أدناه.
+  // تنظيف السجلات الفارغة (بلا نص ولم يُردّ عليها) — يشمل التقييمات بلا تعليق مكتوب.
+  // العناصر الحقيقية (التي لها نص) تُعاد إضافتها فوراً أدناه.
   await env.DB.prepare(
-    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL AND kind <> 'review'",
+    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL",
   ).run();
 
   let added = 0;
@@ -97,12 +96,53 @@ export async function replyToComment(env: Env, commentId: string, text: string, 
 
   const provider = await getProvider(env);
   if (!provider.replyComment) throw new Error('المزوّد الحالي لا يدعم الرد على التعليقات');
-  await provider.replyComment(comment.provider_post_id || '', comment.provider_comment_id, text);
+  const replyId = await provider.replyComment(comment.provider_post_id || '', comment.provider_comment_id, text);
 
   await env.DB.prepare(
-    "UPDATE platform_comments SET reply_body = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ? WHERE id = ?",
+    "UPDATE platform_comments SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ? WHERE id = ?",
   )
-    .bind(text, userId, commentId)
+    .bind(text, replyId || null, userId, commentId)
+    .run();
+}
+
+// تعديل ردّي على المنصة (يحدّثه فعلياً للتقييمات؛ ولغيرها يستبدله)
+export async function editReply(env: Env, commentId: string, text: string, userId: string): Promise<void> {
+  const row = await env.DB.prepare(
+    'SELECT provider_comment_id, reply_provider_id, reply_body FROM platform_comments WHERE id = ?',
+  )
+    .bind(commentId)
+    .first<{ provider_comment_id: string; reply_provider_id: string | null; reply_body: string | null }>();
+  if (!row) throw new Error('التعليق غير موجود');
+  if (!row.reply_body) throw new Error('لا يوجد ردّ لتعديله');
+
+  const provider = await getProvider(env);
+  if (!provider.editReply) throw new Error('المزوّد الحالي لا يدعم تعديل الرد');
+  const newId = await provider.editReply(row.provider_comment_id, row.reply_provider_id, text);
+
+  await env.DB.prepare(
+    "UPDATE platform_comments SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ? WHERE id = ?",
+  )
+    .bind(text, newId || row.reply_provider_id || null, userId, commentId)
+    .run();
+}
+
+// حذف ردّي من المنصة، وإرجاع العنصر إلى حالة «بلا رد» محلياً
+export async function deleteReply(env: Env, commentId: string): Promise<void> {
+  const row = await env.DB.prepare(
+    'SELECT provider_comment_id, reply_provider_id FROM platform_comments WHERE id = ?',
+  )
+    .bind(commentId)
+    .first<{ provider_comment_id: string; reply_provider_id: string | null }>();
+  if (!row) throw new Error('التعليق غير موجود');
+
+  const provider = await getProvider(env);
+  if (!provider.deleteReply) throw new Error('المزوّد الحالي لا يدعم حذف الرد');
+  await provider.deleteReply(row.provider_comment_id, row.reply_provider_id);
+
+  await env.DB.prepare(
+    'UPDATE platform_comments SET reply_body = NULL, reply_provider_id = NULL, replied_at = NULL, replied_by = NULL WHERE id = ?',
+  )
+    .bind(commentId)
     .run();
 }
 
