@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { syncComments, replyToComment } from '../services/commentsSync';
+import { providerKey } from '../adapters';
+import { debugSocialApi } from '../adapters/socialapi';
 
 export const commentRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -39,6 +41,17 @@ commentRoutes.post('/refresh', async (c) => {
     return c.json({ ok: true, added });
   } catch (e: any) {
     return c.json({ error: `فشل جلب التعليقات: ${String(e?.message || e)}` }, 502);
+  }
+});
+
+// تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية
+commentRoutes.get('/debug', async (c) => {
+  const token = providerKey(c.env, 'socialapi');
+  if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
+  try {
+    return c.json(await debugSocialApi(token));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
   }
 });
 

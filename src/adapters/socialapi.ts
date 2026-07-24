@@ -13,8 +13,9 @@ const EP = {
   metrics: (id: string) => `/posts/${id}/metrics`, // GET مقاييس منشور
   comments: '/inbox/comments', // GET قائمة المنشورات التي عليها تعليقات (InboxPostRow)
   postComments: (postId: string) => `/inbox/comments/${postId}`, // GET/POST تعليقات منشور معيّن، والرد عليها
-  reviews: '/inbox/reviews', // GET المراجعات (Google Business/Facebook)
-  replyReview: (id: string) => `/inbox/reviews/${id}`, // POST رد على مراجعة
+  reviews: '/inbox/reviews', // GET ملخّص المراجعات لكل حساب (متوسط + عدد)
+  reviewsForAccount: (accountId: string) => `/inbox/reviews/${accountId}`, // GET مراجعات حساب معيّن
+  replyReview: (accountId: string) => `/inbox/reviews/${accountId}`, // POST رد على مراجعة
 };
 
 // نفصل بين (معرّف المنشور | معرّف الحساب | معرّف التعليق) داخل provider_comment_id واحد
@@ -69,9 +70,10 @@ export async function listSocialApiAccounts(apiKey: string): Promise<SocialApiAc
   }));
 }
 
-// منشور SocialAPI مع مقاييسه — لسحب تحليلات كل المنشورات
+// منشور SocialAPI مع مقاييسه — سطر لكل وجهة نشر (target) لأن المنشور الواحد قد يُنشر لعدّة منصات
 export type SocialApiPost = {
-  id: string;
+  id: string; // معرّف المنشور على المنصة (platform_post_id) — فريد لكل وجهة
+  postUuid: string; // معرّف المنشور الداخلي في SocialAPI (يربطه بجدول النشر)
   platform: string;
   accountId: string;
   title: string;
@@ -83,47 +85,53 @@ export type SocialApiPost = {
   metrics: any[];
 };
 
-// يجلب كل المنشورات مع مقاييسها (المقاييس ضمن القائمة إن وُجدت، وإلا تُطلب لكل منشور)
+// يجلب كل المنشورات: المقاييس والرابط والمنصّة كلها داخل targets[] لكل منشور
 export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
   const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
-  const list: any[] = data?.posts || data?.data || (Array.isArray(data) ? data : []);
+  const list: any[] = data?.data || data?.posts || (Array.isArray(data) ? data : []);
   const out: SocialApiPost[] = [];
   for (const p of list) {
-    const id = String(p.id || p.post_id || '');
-    if (!id) continue;
-    let metricsObj = p.metrics || p.analytics;
-    if (metricsObj == null) {
-      try {
-        const m = await sapi<any>(apiKey, 'GET', EP.metrics(id));
-        metricsObj = m?.metrics || m?.data || m;
-      } catch { metricsObj = {}; }
+    const postUuid = String(p.id || p.post_id || '');
+    const title = (p.text || p.caption || '').slice(0, 140);
+    const targets: any[] = Array.isArray(p.targets) ? p.targets : [];
+    if (!targets.length) continue; // لا وجهة نشر → لا مقاييس
+    for (const t of targets) {
+      const platformPostId = String(t.platform_post_id || t.platform_id || '');
+      const mapped = mapMetrics(t.metrics || {});
+      out.push({
+        id: platformPostId || `${postUuid}:${t.platform || ''}`,
+        postUuid,
+        platform: String(t.platform || ''),
+        accountId: String(t.account_id || ''),
+        title,
+        sentAt: t.published_at || p.published_at || p.created_at || null,
+        reach: mapped.reach,
+        impressions: mapped.impressions,
+        engagement: mapped.engagement,
+        externalUrl: t.permalink || t.url || null,
+        metrics: mapped.raw,
+      });
     }
-    const mapped = mapMetrics(metricsObj);
-    out.push({
-      id,
-      platform: String(p.platform || p.account?.platform || p.targets?.[0]?.platform || ''),
-      accountId: String(p.account_id || p.account?.id || p.targets?.[0]?.account_id || ''),
-      title: (p.text || p.caption || '').slice(0, 140),
-      sentAt: p.published_at || p.created_at || p.scheduled_at || null,
-      reach: mapped.reach,
-      impressions: mapped.impressions,
-      engagement: mapped.engagement,
-      externalUrl: p.permalink || p.url || p.external_url || p.link || null,
-      metrics: mapped.raw,
-    });
   }
   return out;
 }
 
-// يطابق مصفوفة مقاييس موحّدة على reach/impressions/engagement (المتشابهة كما في Buffer)
+// يطابق مقاييس SocialAPI على reach/impressions/engagement، ويستخرج كل المقاييس الخام.
+// يدعم: كائن {likes, comments, …, extra:{view_count}}، أو مصفوفة [{name,value}].
 const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets']);
 function mapMetrics(metricsObj: any): { reach: number; impressions: number; engagement: number; raw: any[] } {
-  // قد تعود المقاييس ككائن {impressions: 10, ...} أو مصفوفة [{name,value}]
   const entries: [string, number][] = [];
   if (Array.isArray(metricsObj)) {
     for (const m of metricsObj) entries.push([String(m.type || m.name || '').toLowerCase(), Number(m.value || 0)]);
   } else if (metricsObj && typeof metricsObj === 'object') {
-    for (const [k, v] of Object.entries(metricsObj)) if (typeof v === 'number') entries.push([k.toLowerCase(), v]);
+    // نتعمّق في الكائنات المتداخلة (مثل extra:{view_count}) لتسطيح كل المقاييس الرقمية
+    const walk = (o: any) => {
+      for (const [k, v] of Object.entries(o)) {
+        if (v && typeof v === 'object') walk(v);
+        else if (typeof v === 'number') entries.push([k.toLowerCase(), v]);
+      }
+    };
+    walk(metricsObj);
   }
   let reach = 0, impressions = 0, views = 0, engagement = 0;
   const raw: any[] = [];
@@ -183,25 +191,76 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
     } catch { /* تعذّر جلب تعليقات هذا المنشور */ }
   }
 
-  // المراجعات (Google Business/Facebook) — بادئة rv: لتوجيه الرد
+  // المراجعات (Google Business/Facebook) — خطوتان: ملخّص لكل حساب ثم مراجعات كل حساب.
+  // نُرمّز المعرّف "rv:{accountId}:{reviewId}" لتوجيه الرد لاحقاً.
   try {
     const rv = await sapi<any>(apiKey, 'GET', EP.reviews);
-    const rlist: any[] = rv?.data || rv?.reviews || (Array.isArray(rv) ? rv : []);
-    for (const r of rlist) {
-      const stars = r.rating || r.stars;
-      const body = r.text || r.comment || r.body || r.content || '';
-      const rid = String(r.id || r.review_id || r.platform_id || '');
-      if (!rid && !body) continue;
-      out.push({
-        id: `rv:${rid}`,
-        platform: String(r.platform || r.account?.platform || 'googlebusiness'),
-        kind: 'comment',
-        authorName: (r.author_name || r.author?.name || r.reviewer || r.name || 'مراجعة') + (stars ? ` (★${stars})` : ''),
-        body,
-        createdAt: toIso(r.created_at || r.created || r.timestamp),
-      });
+    const accounts: any[] = rv?.data || rv?.reviews || (Array.isArray(rv) ? rv : []);
+    for (const acc of accounts) {
+      const accountId = String(acc.account_id || acc.id || '');
+      const accPlatform = String(acc.platform || 'google');
+      if (!accountId) continue;
+      let list: any[] = [];
+      try {
+        const detail = await sapi<any>(apiKey, 'GET', EP.reviewsForAccount(accountId));
+        list = detail?.data || detail?.reviews || (Array.isArray(detail) ? detail : []);
+      } catch { list = []; }
+      for (const r of list) {
+        const stars = r.rating ?? r.star_rating ?? r.stars;
+        const body = r.text || r.comment || r.content || r.body || '';
+        const rid = String(r.id || r.review_id || r.platform_id || '');
+        if (!rid && !body) continue;
+        out.push({
+          id: `rv:${accountId}:${rid}`,
+          platform: accPlatform,
+          kind: 'comment',
+          authorName: (r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة') + (stars != null ? ` (★${stars})` : ''),
+          body,
+          createdAt: toIso(r.created_at || r.updated_at || r.created || r.timestamp),
+        });
+      }
     }
   } catch { /* لا مراجعات */ }
+  return out;
+}
+
+// تشخيص: يُعيد الاستجابات الخام من SocialAPI كما هي، لتحديد أسماء الحقول الفعلية بدقّة
+// (لا نُخمّن الحقول بعد الآن — نقرأها من هنا). يُستدعى من مسار /comments/debug.
+export async function debugSocialApi(apiKey: string): Promise<any> {
+  const out: any = {};
+  // 1) قائمة المنشورات التي عليها تعليقات
+  try {
+    out.inbox_comments = await sapi<any>(apiKey, 'GET', EP.comments);
+  } catch (e: any) { out.inbox_comments_error = String(e?.message || e); }
+  // 2) تعليقات أول منشور
+  try {
+    const rows: any[] = out.inbox_comments?.data || out.inbox_comments?.comments || (Array.isArray(out.inbox_comments) ? out.inbox_comments : []);
+    const first = rows[0];
+    if (first) {
+      const postId = String(first.id || first.post_id || '');
+      const accountId = String(first.account_id || first.account?.id || '');
+      out.first_post = { postId, accountId, keys: Object.keys(first) };
+      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      out.post_comments = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
+    }
+  } catch (e: any) { out.post_comments_error = String(e?.message || e); }
+  // 3) المراجعات: ملخّص لكل حساب ثم تفاصيل أول حساب
+  try {
+    out.reviews = await sapi<any>(apiKey, 'GET', EP.reviews);
+    const accs: any[] = out.reviews?.data || out.reviews?.reviews || (Array.isArray(out.reviews) ? out.reviews : []);
+    const firstAcc = accs[0];
+    if (firstAcc) {
+      const accId = String(firstAcc.account_id || firstAcc.id || '');
+      out.review_detail = await sapi<any>(apiKey, 'GET', EP.reviewsForAccount(accId));
+    }
+  } catch (e: any) { out.reviews_error = String(e?.message || e); }
+  // 4) المنشورات (لاكتشاف حقل الرابط الخارجي)
+  try {
+    const posts = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=3`);
+    const list: any[] = posts?.data || posts?.posts || (Array.isArray(posts) ? posts : []);
+    out.posts_sample = list.slice(0, 2);
+    out.posts_first_keys = list[0] ? Object.keys(list[0]) : [];
+  } catch (e: any) { out.posts_error = String(e?.message || e); }
   return out;
 }
 
@@ -258,9 +317,10 @@ export class SocialApiProvider implements PublishingProvider {
 
   async replyComment(_providerPostId: string, commentId: string, text: string): Promise<void> {
     if (commentId.startsWith('rv:')) {
-      // رد على مراجعة
-      const account_id = Object.values(this.accounts).filter(Boolean)[0];
-      await sapi(this.key, 'POST', EP.replyReview(commentId.slice(3)), { text, ...(account_id ? { account_id } : {}) });
+      // رد على مراجعة: "rv:{accountId}:{reviewId}"
+      const [, accountId, reviewId] = commentId.split(':');
+      const account_id = accountId || Object.values(this.accounts).filter(Boolean)[0] || '';
+      await sapi(this.key, 'POST', EP.replyReview(account_id), { review_id: reviewId, comment_id: reviewId, text });
       return;
     }
     // رد على تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
