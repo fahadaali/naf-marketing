@@ -37,10 +37,14 @@ export interface PublishingProvider {
   publish(input: PublishInput): Promise<PublishResult>;
   getAnalytics(providerPostId: string): Promise<AnalyticsResult>;
   deletePost(providerPostId: string): Promise<void>;
-  // إدارة التعليقات/الرسائل — اختيارية؛ المزوّدون غير الداعمين يتجاوزونها بأمان
+  // إدارة التعليقات/الرسائل — اختيارية؛ المزوّدون غير الداعمين يتجاوزونها بأمان.
+  // يعيد replyComment معرّف الرد على المنصة (إن توفّر) لتمكين تعديله/حذفه لاحقاً.
   getComments?(providerPostId: string): Promise<CommentItem[]>;
-  replyComment?(providerPostId: string, commentId: string, text: string): Promise<void>;
+  replyComment?(providerPostId: string, commentId: string, text: string): Promise<string | void>;
   // إشراف على التعليقات ورد خاص — اختيارية
   moderateComment?(commentId: string, action: ModerateAction): Promise<void>;
   privateReply?(commentId: string, text: string): Promise<void>;
+  // تعديل/حذف ردّي على المنصة — اختيارية (يمرَّر معرّف الرد الملتقَط سابقاً)
+  editReply?(commentId: string, replyProviderId: string | null, text: string): Promise<string | void>;
+  deleteReply?(commentId: string, replyProviderId: string | null): Promise<void>;
 }

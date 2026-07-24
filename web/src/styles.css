@@ -338,6 +338,19 @@ h3, h4 { letter-spacing: -0.01em; }
   padding: 6px 12px; border-radius: 7px; cursor: pointer;
 }
 .seg button.on { background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.1); }
+.count-pill {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px; background: hsl(var(--muted-foreground) / 0.18);
+  color: inherit; font-size: 11px; font-weight: 700; line-height: 1;
+}
+.seg button.on .count-pill { background: hsl(var(--primary) / 0.16); color: hsl(var(--primary)); }
+.suggest-chip {
+  display: inline-flex; align-items: flex-start; gap: 6px; text-align: right; width: 100%;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--foreground)); font-family: inherit; font-size: 13px; line-height: 1.5;
+  padding: 8px 10px; border-radius: 9px; cursor: pointer; transition: background 0.12s, border-color 0.12s;
+}
+.suggest-chip:hover { background: hsl(var(--primary-soft)); border-color: hsl(var(--primary) / 0.4); }
 
 /* ===== قائمة منسدلة ===== */
 .menu {

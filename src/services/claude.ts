@@ -125,6 +125,78 @@ export async function generateText(env: Env, options: GenerateOptions): Promise<
   return text || '(لم يُرجِع النموذج نصاً)';
 }
 
+// اقتراح ردود على تعليق/تقييم/رسالة — ٣ مقترحات متنوّعة وقصيرة بصيغة الجمع (نحن)
+// وفق أفضل ممارسات خدمة العملاء، مع مراعاة المنشور الأساسي (إن وُجد) ونص التعليق.
+export type SuggestInput = {
+  commentBody: string;
+  authorName?: string;
+  platform?: string;
+  kind?: string; // comment | review | dm | mention
+  rating?: number | null; // للتقييمات
+  postText?: string | null; // المنشور الأساسي إن كان الرد على منشور
+};
+
+const DEV_SUGGESTIONS = [
+  'نشكرك على تواصلك معنا، وسعدنا بملاحظتك — نحن دائماً في خدمتك.',
+  'نقدّر لك وقتك، ويسعدنا أن نوضّح لك أي تفصيل؛ تواصل معنا وسنكون بجانبك.',
+  'شكراً لثقتك بنا، ونعمل باستمرار على تقديم الأفضل. نرحّب بأي استفسار.',
+];
+
+export async function suggestReplies(env: Env, input: SuggestInput): Promise<string[]> {
+  if (!env.CLAUDE_API_KEY) return DEV_SUGGESTIONS;
+
+  const kindAr = input.kind === 'review' ? 'تقييم' : input.kind === 'dm' ? 'رسالة خاصة' : input.kind === 'mention' ? 'إشارة' : 'تعليق';
+  const lines = [
+    'أنت مسؤول خدمة العملاء في شركة «ناف» للاستشارات القانونية بالرياض، وتردّ على تفاعلات العملاء على منصات التواصل.',
+    input.postText ? `المنشور الأساسي الذي يعلّق عليه العميل:\n"""${String(input.postText).slice(0, 800)}"""` : '',
+    `نوع التفاعل: ${kindAr}${input.platform ? ` على منصة ${input.platform}` : ''}.`,
+    input.rating != null ? `تقييم العميل: ${input.rating} من ٥ نجوم.` : '',
+    `${kindAr} العميل${input.authorName ? ` (${input.authorName})` : ''}:\n"""${String(input.commentBody).slice(0, 800)}"""`,
+    'اكتب ٣ ردود مقترحة متنوّعة (كل واحد بأسلوب مختلف قليلاً) وفق هذه القواعد:',
+    '- قصيرة جداً (جملة إلى جملتين).',
+    '- بصيغة الجمع للمتكلّم (نحن، سعدنا، نشكرك، نعتذر...) نيابةً عن الشركة.',
+    '- عربية فصيحة مهذّبة واحترافية تليق بقطاع قانوني.',
+    '- وفق أفضل ممارسات خدمة العملاء: اشكر الإيجابي، وتعاطف واعتذر باحتراف مع السلبي واعرض المتابعة، دون وعود قانونية ملزمة.',
+    '- لا تُكرّر نفس الصياغة، ولا تضع أرقاماً أو ترويسات.',
+    'أعِد الناتج حصراً بصيغة JSON: مصفوفة من ٣ نصوص فقط، دون أي شرح أو أسطر إضافية.',
+  ].filter(Boolean);
+
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 700,
+      messages: [{ role: 'user', content: lines.join('\n\n') }],
+    }),
+  });
+  const data = (await res.json()) as any;
+  if (!res.ok) throw new Error(`خطأ من Claude API: ${data?.error?.message || res.status}`);
+  const text = (data.content || []).map((b: any) => b.text || '').join('').trim();
+  return parseSuggestions(text);
+}
+
+// يستخرج ٣ مقترحات من ناتج النموذج (JSON مصفوفة، أو أسطر مرقّمة كخطة بديلة)
+function parseSuggestions(text: string): string[] {
+  const clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  try {
+    const start = clean.indexOf('[');
+    const end = clean.lastIndexOf(']');
+    if (start >= 0 && end > start) {
+      const arr = JSON.parse(clean.slice(start, end + 1));
+      if (Array.isArray(arr)) {
+        const out = arr.map((s) => String(s).trim()).filter(Boolean).slice(0, 3);
+        if (out.length) return out;
+      }
+    }
+  } catch { /* نتراجع للتقسيم بالأسطر */ }
+  const byLine = clean
+    .split('\n')
+    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)-])\s*/, '').replace(/^["']|["']$/g, '').trim())
+    .filter(Boolean);
+  return byLine.slice(0, 3);
+}
+
 // توليد محتوى من وسيط: الصور وPDF عبر رؤية Claude؛ الأنواع الأخرى (صوت/فيديو/وورد/إكسل)
 // تعتمد على اسم الملف كموضوع لعدم دعم Claude لقراءة محتواها مباشرةً.
 export async function generateFromMedia(
