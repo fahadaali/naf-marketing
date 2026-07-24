@@ -249,7 +249,9 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
         const stars = r.rating ?? r.star_rating ?? r.stars;
         const body = r.text || r.comment || r.content || r.body || '';
         const rid = String(r.id || r.review_id || r.platform_id || '');
-        if (!rid && !body) continue;
+        // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
+        if (!body.trim()) continue;
+        if (!rid) continue;
         out.push({
           id: `rv:${accountId}:${rid}`,
           platform: accPlatform,
