@@ -34,8 +34,12 @@ commentRoutes.get('/', async (c) => {
 
 // جلب فوري (إضافةً إلى الدورة الآلية كل ساعة)
 commentRoutes.post('/refresh', async (c) => {
-  const added = await syncComments(c.env);
-  return c.json({ ok: true, added });
+  try {
+    const added = await syncComments(c.env);
+    return c.json({ ok: true, added });
+  } catch (e: any) {
+    return c.json({ error: `فشل جلب التعليقات: ${String(e?.message || e)}` }, 502);
+  }
 });
 
 // الرد على تعليق/رسالة
