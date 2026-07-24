@@ -289,11 +289,10 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
     } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها */ }
   }
 
-  // الإشارات (Mentions) — تُطلب لكل حساب على منصة داعمة (مع account_id؛ النداء العام يعيد 404).
+  // الإشارات (Mentions) — تُطلب لكل حساب مع account_id (النداء العام يعيد 404).
+  // تلقائية بالكامل: نُجرّبها على كل الحسابات ونتجاهل غير الداعمة بصمت (404/501).
   // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
-  const MENTION_PLATFORMS = new Set(['instagram', 'facebook', 'twitter']);
   for (const acc of accts) {
-    if (!MENTION_PLATFORMS.has(acc.platform)) continue;
     try {
       const q = `?account_id=${encodeURIComponent(acc.id)}&platform=${encodeURIComponent(acc.platform)}&limit=50`;
       const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}${q}`);
