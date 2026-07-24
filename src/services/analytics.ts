@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { getProvider, providerKey } from '../adapters';
 import { listSentPostMetrics } from '../adapters/buffer';
+import { listSocialApiPosts } from '../adapters/socialapi';
 import { newId } from '../util';
 
 type MetricRow = {
@@ -51,6 +52,7 @@ export async function pullAnalytics(env: Env): Promise<number> {
   )?.value?.toLowerCase() || (env.PROVIDER_NAME || 'mock').toLowerCase();
 
   if (providerName === 'buffer') return pullAllBuffer(env);
+  if (providerName === 'socialapi') return pullAllSocialApi(env);
   return pullViaSchedules(env);
 }
 
@@ -118,6 +120,50 @@ async function pullAllBuffer(env: Env): Promise<number> {
     await upsertMetric(env, {
       providerPostId: post.id,
       platform: channelToPlatform[post.channelId] || post.service || 'unknown',
+      title: via?.title || post.title || null,
+      postId: via?.postId || null,
+      viaPlatform: via ? 1 : 0,
+      reach: post.reach,
+      impressions: post.impressions,
+      engagement: post.engagement,
+      sentAt: post.sentAt,
+      metricsJson: JSON.stringify(post.metrics || []),
+    });
+    captured++;
+  }
+  return captured;
+}
+
+// SocialAPI: يسحب مقاييس كل منشورات الحساب (لا فقط ما نُشر عبر المنصة)
+async function pullAllSocialApi(env: Env): Promise<number> {
+  const token = providerKey(env, 'socialapi');
+  if (!token) return 0;
+
+  // خريطة عكسية: معرّف حساب SocialAPI → مفتاح منصة المنصة
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
+  const accountToPlatform: Record<string, string> = {};
+  try {
+    const map = row?.value ? JSON.parse(row.value) : {};
+    for (const [platform, accId] of Object.entries(map)) {
+      if (accId) accountToPlatform[String(accId)] = platform;
+    }
+  } catch { /* خريطة فارغة */ }
+
+  const schedMap = new Map<string, { postId: string; title: string }>();
+  const sched = await env.DB.prepare(
+    `SELECT s.provider_post_id, s.post_id, p.title
+     FROM schedules s JOIN content_posts p ON p.id = s.post_id
+     WHERE s.provider_post_id IS NOT NULL`,
+  ).all<{ provider_post_id: string; post_id: string; title: string }>();
+  for (const r of sched.results) schedMap.set(r.provider_post_id, { postId: r.post_id, title: r.title });
+
+  const posts = await listSocialApiPosts(token);
+  let captured = 0;
+  for (const post of posts) {
+    const via = schedMap.get(post.id);
+    await upsertMetric(env, {
+      providerPostId: post.id,
+      platform: accountToPlatform[post.accountId] || post.platform || 'unknown',
       title: via?.title || post.title || null,
       postId: via?.postId || null,
       viaPlatform: via ? 1 : 0,

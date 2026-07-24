@@ -5,13 +5,13 @@ import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, 
 // ملاحظة: المسارات أدناه ثوابت في مكان واحد ليسهل تصحيحها فور تأكيدها من توثيق SocialAPI.ai الحيّ.
 const BASE = 'https://api.social-api.ai/v1';
 
-// نقاط النهاية (تُراجَع مع التوثيق الرسمي عند أول اختبار فعلي):
+// نقاط النهاية — مؤكّدة من توثيق SocialAPI.ai الرسمي:
 const EP = {
   accounts: '/accounts', // GET قائمة الحسابات المربوطة
-  publish: '/posts', // POST نشر/جدولة منشور
-  post: (id: string) => `/posts/${id}`, // GET تفاصيل/تحليلات منشور، DELETE حذف
-  analytics: (id: string) => `/posts/${id}/analytics`, // GET تحليلات منشور
-  comments: '/inbox/comments', // GET قائمة التعليقات (يقبل ?post_id=)
+  posts: '/posts', // GET قائمة المنشورات، POST نشر/جدولة
+  post: (id: string) => `/posts/${id}`, // GET/DELETE منشور
+  metrics: (id: string) => `/posts/${id}/metrics`, // GET مقاييس منشور
+  comments: '/inbox/comments', // GET التعليقات
   replyComment: (id: string) => `/inbox/comments/${id}`, // POST رد على تعليق
   reviews: '/inbox/reviews', // GET المراجعات (Google Business/Facebook)
   replyReview: (id: string) => `/inbox/reviews/${id}`, // POST رد على مراجعة
@@ -57,6 +57,50 @@ export async function listSocialApiAccounts(apiKey: string): Promise<SocialApiAc
   }));
 }
 
+// منشور SocialAPI مع مقاييسه — لسحب تحليلات كل المنشورات
+export type SocialApiPost = {
+  id: string;
+  platform: string;
+  accountId: string;
+  title: string;
+  sentAt: string | null;
+  reach: number;
+  impressions: number;
+  engagement: number;
+  metrics: any[];
+};
+
+// يجلب كل المنشورات مع مقاييسها (المقاييس ضمن القائمة إن وُجدت، وإلا تُطلب لكل منشور)
+export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
+  const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
+  const list: any[] = data?.posts || data?.data || (Array.isArray(data) ? data : []);
+  const out: SocialApiPost[] = [];
+  for (const p of list) {
+    const id = String(p.id || p.post_id || '');
+    if (!id) continue;
+    let metricsObj = p.metrics || p.analytics;
+    if (metricsObj == null) {
+      try {
+        const m = await sapi<any>(apiKey, 'GET', EP.metrics(id));
+        metricsObj = m?.metrics || m?.data || m;
+      } catch { metricsObj = {}; }
+    }
+    const mapped = mapMetrics(metricsObj);
+    out.push({
+      id,
+      platform: String(p.platform || p.account?.platform || p.targets?.[0]?.platform || ''),
+      accountId: String(p.account_id || p.account?.id || p.targets?.[0]?.account_id || ''),
+      title: (p.text || p.caption || '').slice(0, 140),
+      sentAt: p.published_at || p.created_at || p.scheduled_at || null,
+      reach: mapped.reach,
+      impressions: mapped.impressions,
+      engagement: mapped.engagement,
+      metrics: mapped.raw,
+    });
+  }
+  return out;
+}
+
 // يطابق مصفوفة مقاييس موحّدة على reach/impressions/engagement (المتشابهة كما في Buffer)
 const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets']);
 function mapMetrics(metricsObj: any): { reach: number; impressions: number; engagement: number; raw: any[] } {
@@ -92,22 +136,17 @@ export class SocialApiProvider implements PublishingProvider {
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
     }
-    const body: Record<string, unknown> = { text: input.text, account_ids: accountIds };
-    if (input.mediaUrls?.length) body.media_urls = input.mediaUrls;
-    if (input.scheduleAt) body.schedule_date = input.scheduleAt;
-    const data = await sapi<any>(this.key, 'POST', EP.publish, body);
+    // جسم النشر وفق التوثيق: { text, targets: [{account_id}], scheduled_at? }
+    const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
+    if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
+    const data = await sapi<any>(this.key, 'POST', EP.posts, body);
     const id = data?.id || data?.post_id || data?.data?.id;
     return { providerPostId: String(id || ''), status: input.scheduleAt ? 'scheduled' : (data?.status || 'published') };
   }
 
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
-    let data: any;
-    try {
-      data = await sapi<any>(this.key, 'GET', EP.analytics(providerPostId));
-    } catch {
-      data = await sapi<any>(this.key, 'GET', EP.post(providerPostId)); // تراجع: قد تكون المقاييس ضمن تفاصيل المنشور
-    }
-    const m = mapMetrics(data?.analytics || data?.metrics || data);
+    const data = await sapi<any>(this.key, 'GET', EP.metrics(providerPostId));
+    const m = mapMetrics(data?.metrics || data?.data || data);
     return { reach: m.reach, impressions: m.impressions, engagement: m.engagement };
   }
 
