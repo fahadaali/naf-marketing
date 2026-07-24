@@ -163,7 +163,8 @@ async function pullAllSocialApi(env: Env): Promise<number> {
   const posts = await listSocialApiPosts(token);
   let captured = 0;
   for (const post of posts) {
-    const via = schedMap.get(post.id);
+    // الربط بجدول النشر عبر معرّف المنشور الداخلي (postUuid) أو معرّف المنصة
+    const via = schedMap.get(post.postUuid) || schedMap.get(post.id);
     await upsertMetric(env, {
       providerPostId: post.id,
       platform: accountToPlatform[post.accountId] || post.platform || 'unknown',
