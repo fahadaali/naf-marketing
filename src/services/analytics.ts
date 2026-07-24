@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import { getProvider, providerKey } from '../adapters';
 import { listSentPostMetrics } from '../adapters/buffer';
-import { listSocialApiPosts } from '../adapters/socialapi';
+import { listSocialApiPosts, syncYouTubePosts } from '../adapters/socialapi';
 import { newId } from '../util';
 
 type MetricRow = {
@@ -160,6 +160,8 @@ async function pullAllSocialApi(env: Env): Promise<number> {
   ).all<{ provider_post_id: string; post_id: string; title: string }>();
   for (const r of sched.results) schedMap.set(r.provider_post_id, { postId: r.post_id, title: r.title });
 
+  // نجبر مزامنة فيديوهات يوتيوب أولاً (المسار الوحيد لسحب المحتوى القديم) قبل القراءة.
+  await syncYouTubePosts(token);
   const posts = await listSocialApiPosts(token);
 
   // نُعيد بناء لقطات المنشورات «الخارجية» (غير المنشورة عبر المنصة) في كل سحب:
