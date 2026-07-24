@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe } from 'lucide-react';
+import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, Star } from 'lucide-react';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
 // المنصات المعروفة لها أيقونات وألوان رسمية؛ المنصات المخصّصة تأخذ أيقونة عامة.
@@ -25,6 +25,7 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
   linkedin: { label: 'لينكدإن', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
   linkedin_page: { label: 'لينكدإن (صفحة)', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
   x: { label: 'إكس', color: '#000000', glyph: <XGlyph size={14} /> },
+  google: { label: 'نشاطي التجاري (Google)', color: '#4285F4', glyph: <Star size={g(14)} /> },
   instagram: {
     label: 'إنستغرام',
     color: '#DD2A7B',
@@ -39,7 +40,30 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
 };
 
 // المنصات المعروفة القابلة للإضافة من الإعدادات
-export const KNOWN_PLATFORMS = Object.keys(PLATFORM_META);
+// (المرادفات مستبعدة — تُعرض بمفتاحها الأساسي فقط)
+export const KNOWN_PLATFORMS = Object.keys(PLATFORM_META).filter((k) => k !== 'google');
+
+// مرادفات المزوّدين → مفاتيح المنصات لدينا.
+// المزوّدون (SocialAPI/Buffer) يستخدمون تسميات مختلفة عن مفاتيحنا، فتظهر خام بلا أيقونة
+// إن لم تُوحَّد — مثل twitter بدل x، وgooglebusiness بدل google.
+const PLATFORM_ALIASES: Record<string, string> = {
+  twitter: 'x',
+  'twitter.com': 'x',
+  googlebusiness: 'google',
+  google_business: 'google',
+  gbp: 'google',
+  linkedinpage: 'linkedin_page',
+  'linkedin-page': 'linkedin_page',
+  ig: 'instagram',
+  fb: 'facebook',
+  yt: 'youtube',
+};
+
+// يوحّد مفتاح المنصة أياً كان مصدره (المزوّد أو الإعدادات)
+export function normalizePlatform(key: string): string {
+  const k = String(key || '').toLowerCase().trim();
+  return PLATFORM_ALIASES[k] || k;
+}
 
 // توجيهات افتراضية لكل منصة عند التوليد بالذكاء الاصطناعي (تُطابق الخادم)
 export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
@@ -55,12 +79,13 @@ export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
 };
 
 export function platformLabel(key: string, custom?: Record<string, string>): string {
-  return custom?.[key] || PLATFORM_META[key]?.label || key;
+  const k = normalizePlatform(key);
+  return custom?.[key] || custom?.[k] || PLATFORM_META[k]?.label || key;
 }
 
 // أيقونة منصة داخل رقعة ملوّنة بلونها الرسمي
 export function PlatformIcon({ platform, size = 24 }: { platform: string; size?: number }) {
-  const meta = PLATFORM_META[platform];
+  const meta = PLATFORM_META[normalizePlatform(platform)];
   const style: React.CSSProperties = {
     width: size,
     height: size,

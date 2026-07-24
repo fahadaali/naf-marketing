@@ -404,18 +404,6 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
       out.conversations = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
     }
   } catch (e: any) { out.conversations_error = String(e?.message || e); }
-
-  // 7) فحص إمكانية سرد تغريدات إكس الموجودة (مسارات مرشّحة — قراءة فقط)
-  const tw = allAccts.find((a) => a.platform === 'twitter');
-  if (tw) {
-    out.twitter_account_id = tw.id;
-    try { out.twitter_posts_filter = await sapi<any>(apiKey, 'GET', `${EP.posts}?platform=twitter&account_ids=${encodeURIComponent(tw.id)}&limit=10`); }
-    catch (e: any) { out.twitter_posts_filter_error = String(e?.message || e); }
-    try { out.twitter_platform_posts = await sapi<any>(apiKey, 'GET', `/platforms/twitter/accounts/${tw.id}/posts?limit=10`); }
-    catch (e: any) { out.twitter_platform_posts_error = String(e?.message || e); }
-    try { out.twitter_platform_tweets = await sapi<any>(apiKey, 'GET', `/platforms/twitter/accounts/${tw.id}/tweets?limit=10`); }
-    catch (e: any) { out.twitter_platform_tweets_error = String(e?.message || e); }
-  }
   return out;
 }
 
@@ -556,34 +544,45 @@ export class SocialApiProvider implements PublishingProvider {
   }
 
   async editReply(commentId: string, replyProviderId: string | null, text: string): Promise<string> {
-    // التقييمات: إعادة الرد تُحدّثه على Google. الباقي: نحذف الرد القديم (إن عُرف معرّفه) ثم نرسل جديداً.
+    // التقييمات: إعادة إرسال الرد تُحدّثه على Google مباشرةً.
     if (commentId.startsWith('rv:')) {
       const [, accountId, reviewId] = commentId.split(':');
       const d = await sapi<any>(this.key, 'POST', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount(), text });
       return SocialApiProvider.replyId(d);
     }
-    if (replyProviderId && !commentId.startsWith('dm:')) {
+    // الرسائل والإشارات: لا تملك واجهة تعديل — الرسالة المُرسَلة لا تُعدَّل.
+    if (commentId.startsWith('dm:') || commentId.startsWith('mn:')) {
+      throw new Error('تعديل الرد غير مدعوم للرسائل والإشارات — أرسل رداً جديداً بدلاً من ذلك');
+    }
+    // التعليقات: لا يوجد تعديل، فنُرسل الرد الجديد أولاً ثم نحذف القديم.
+    // (الترتيب مقصود: لو فشل الحذف يبقى ردّان مرئيان — أهون من فقدان الرد لو فشل الإرسال بعد الحذف)
+    const newId = (await this.replyComment('', commentId, text)) || '';
+    if (replyProviderId) {
       const dec = decodeCid(commentId);
       const account_id = dec?.accountId || this.fallbackAccount();
-      try { await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id, action: 'delete' }); } catch { /* قد لا يُدعم الحذف */ }
+      try {
+        await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id, action: 'delete' });
+      } catch { /* حذف القديم أفضل جهد — قد لا تدعمه المنصة */ }
     }
-    return (await this.replyComment('', commentId, text)) || '';
+    return newId;
   }
 
   async deleteReply(commentId: string, replyProviderId: string | null): Promise<void> {
     if (commentId.startsWith('rv:')) {
-      // حذف الرد على تقييم Google — أفضل جهد
+      // حذف الرد على تقييم Google
       const [, accountId, reviewId] = commentId.split(':');
       await sapi(this.key, 'DELETE', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount() });
       return;
     }
-    if (replyProviderId) {
-      // حذف تعليق الرد نفسه عبر الإشراف
-      const dec = decodeCid(commentId);
-      await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id: dec?.accountId || this.fallbackAccount(), action: 'delete' });
-      return;
+    if (commentId.startsWith('dm:') || commentId.startsWith('mn:')) {
+      throw new Error('حذف الرد غير مدعوم للرسائل والإشارات');
     }
-    throw new Error('لا يمكن حذف هذا الرد من المنصة (غير مدعوم أو معرّف الرد غير متوفّر)');
+    if (!replyProviderId) {
+      throw new Error('تعذّر حذف الرد — معرّف الرد على المنصة غير متوفّر (رد قديم قبل تفعيل هذه الميزة)');
+    }
+    // حذف تعليق الرد نفسه عبر الإشراف
+    const dec = decodeCid(commentId);
+    await sapi(this.key, 'POST', EP.moderateComment(replyProviderId), { account_id: dec?.accountId || this.fallbackAccount(), action: 'delete' });
   }
 
   async moderateComment(commentId: string, action: ModerateAction): Promise<void> {
