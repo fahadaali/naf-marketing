@@ -156,6 +156,10 @@ analyticsRoutes.get('/alerts', async (c) => {
 
 // سحب فوري (إضافةً إلى Cron)
 analyticsRoutes.post('/refresh', async (c) => {
-  const captured = await pullAnalytics(c.env);
-  return c.json({ ok: true, captured });
+  try {
+    const captured = await pullAnalytics(c.env);
+    return c.json({ ok: true, captured });
+  } catch (e: any) {
+    return c.json({ error: `فشل سحب التحليلات: ${String(e?.message || e)}` }, 502);
+  }
 });
