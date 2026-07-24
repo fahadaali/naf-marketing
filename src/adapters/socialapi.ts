@@ -263,50 +263,56 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
     }
   } catch { /* لا مراجعات */ }
 
-  // الرسائل الخاصة (DMs) — لكل حساب داعم: GET /inbox/conversations?account_id=&platform=
-  // نُرمّز "dm:{conversationId}:{accountId}" لتوجيه الرد عبر /inbox/conversations/{id}/messages
-  try {
-    const accts = await listSocialApiAccounts(apiKey);
-    for (const acc of accts) {
-      try {
-        const q = `?account_id=${encodeURIComponent(acc.id)}${acc.platform ? `&platform=${encodeURIComponent(acc.platform)}` : ''}&limit=50`;
-        const data = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
-        const convos: any[] = data?.data || data?.conversations || (Array.isArray(data) ? data : []);
-        for (const cv of convos) {
-          const convId = String(cv.id || cv.conversation_id || '');
-          if (!convId) continue;
-          out.push({
-            id: `dm:${convId}:${acc.id}`,
-            platform: String(cv.platform || acc.platform || 'unknown'),
-            kind: 'dm',
-            authorName: cv.participant_name || cv.participant?.name || cv.from || 'مستخدم',
-            body: cv.last_message || cv.last_message_text || '',
-            createdAt: toIso(cv.last_message_at || cv.updated_at || cv.created_at),
-          });
-        }
-      } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها (501) */ }
-    }
-  } catch { /* تعذّر جلب الحسابات */ }
+  // نجلب الحسابات مرة واحدة للرسائل الخاصة والإشارات (كلاهما لكل حساب)
+  let accts: SocialApiAccount[] = [];
+  try { accts = await listSocialApiAccounts(apiKey); } catch { accts = []; }
 
-  // الإشارات (Mentions) — GET /inbox/mentions. نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
-  try {
-    const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}?limit=50`);
-    const mentions: any[] = data?.data || data?.mentions || (Array.isArray(data) ? data : []);
-    for (const m of mentions) {
-      const mid = String(m.id || m.platform_id || '');
-      if (!mid) continue;
-      const accountId = String(m.account_id || m.account?.id || '');
-      const mediaId = String(m.metadata?.media_id || m.media_id || '');
-      out.push({
-        id: `mn:${mid}:${accountId}:${mediaId}`,
-        platform: String(m.platform || 'unknown'),
-        kind: 'mention',
-        authorName: m.author?.name || m.author_name || m.username || 'مستخدم',
-        body: m.content?.text || m.text || m.caption || '',
-        createdAt: toIso(m.created_at || m.received_at || m.timestamp),
-      });
-    }
-  } catch { /* لا إشارات أو غير مدعومة */ }
+  // الرسائل الخاصة (DMs) — لكل حساب: GET /inbox/conversations?account_id=&platform=
+  // نُرمّز "dm:{conversationId}:{accountId}" لتوجيه الرد عبر /inbox/conversations/{id}/messages
+  for (const acc of accts) {
+    try {
+      const q = `?account_id=${encodeURIComponent(acc.id)}${acc.platform ? `&platform=${encodeURIComponent(acc.platform)}` : ''}&limit=50`;
+      const data = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
+      const convos: any[] = data?.data || data?.conversations || (Array.isArray(data) ? data : []);
+      for (const cv of convos || []) {
+        const convId = String(cv.id || cv.conversation_id || '');
+        if (!convId) continue;
+        out.push({
+          id: `dm:${convId}:${acc.id}`,
+          platform: String(cv.platform || acc.platform || 'unknown'),
+          kind: 'dm',
+          authorName: cv.participant_name || cv.participant?.name || cv.from || 'مستخدم',
+          body: cv.last_message || cv.last_message_text || '',
+          createdAt: toIso(cv.last_message_at || cv.updated_at || cv.created_at),
+        });
+      }
+    } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها */ }
+  }
+
+  // الإشارات (Mentions) — تُطلب لكل حساب مع account_id (النداء العام يعيد 404).
+  // تلقائية بالكامل: نُجرّبها على كل الحسابات ونتجاهل غير الداعمة بصمت (404/501).
+  // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
+  for (const acc of accts) {
+    try {
+      const q = `?account_id=${encodeURIComponent(acc.id)}&platform=${encodeURIComponent(acc.platform)}&limit=50`;
+      const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}${q}`);
+      const mentions: any[] = data?.data || data?.mentions || (Array.isArray(data) ? data : []);
+      for (const m of mentions || []) {
+        const mid = String(m.id || m.platform_id || '');
+        if (!mid) continue;
+        const accountId = String(m.account_id || m.account?.id || acc.id);
+        const mediaId = String(m.metadata?.media_id || m.media_id || '');
+        out.push({
+          id: `mn:${mid}:${accountId}:${mediaId}`,
+          platform: String(m.platform || acc.platform),
+          kind: 'mention',
+          authorName: m.author?.name || m.author_name || m.username || 'مستخدم',
+          body: m.content?.text || m.text || m.caption || '',
+          createdAt: toIso(m.created_at || m.received_at || m.timestamp),
+        });
+      }
+    } catch { /* لا إشارات لهذا الحساب أو غير مدعومة */ }
+  }
 
   return out;
 }
@@ -348,6 +354,19 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
     out.posts_sample = list.slice(0, 2);
     out.posts_first_keys = list[0] ? Object.keys(list[0]) : [];
   } catch (e: any) { out.posts_error = String(e?.message || e); }
+  // 5) الإشارات
+  try { out.mentions = await sapi<any>(apiKey, 'GET', `${EP.mentions}?limit=5`); }
+  catch (e: any) { out.mentions_error = String(e?.message || e); }
+  // 6) المحادثات (رسائل خاصة) لأول حساب
+  try {
+    const accts = await listSocialApiAccounts(apiKey);
+    out.accounts_sample = accts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
+    const first = accts[0];
+    if (first) {
+      const q = `?account_id=${encodeURIComponent(first.id)}${first.platform ? `&platform=${encodeURIComponent(first.platform)}` : ''}&limit=5`;
+      out.conversations = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
+    }
+  } catch (e: any) { out.conversations_error = String(e?.message || e); }
   return out;
 }
 

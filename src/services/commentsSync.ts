@@ -20,6 +20,14 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
   const token = providerKey(env, 'socialapi');
   if (!token) return 0;
   const items = await listSocialApiInbox(token);
+
+  // تنظيف السجلات القديمة الفارغة/العالقة (من مزامنات سابقة قبل الإصلاحات):
+  // نحذف كل عنصر بلا نص ولم يُردّ عليه — عدا التقييمات (قد تكون تقييم نجوم بلا نص فتبقى).
+  // العناصر الحقيقية تُعاد إضافتها فوراً أدناه.
+  await env.DB.prepare(
+    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL AND kind <> 'review'",
+  ).run();
+
   let added = 0;
   for (const it of items) {
     if (!it.id) continue;
@@ -30,7 +38,7 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
           capabilities_json, is_hidden, reply_body)
        VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(platform, provider_comment_id) DO UPDATE SET
-         body = excluded.body, author_name = excluded.author_name,
+         kind = excluded.kind, body = excluded.body, author_name = excluded.author_name,
          capabilities_json = excluded.capabilities_json, is_hidden = excluded.is_hidden,
          reply_body = COALESCE(platform_comments.reply_body, excluded.reply_body)`,
     )
