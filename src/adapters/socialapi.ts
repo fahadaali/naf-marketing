@@ -205,6 +205,39 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
   return out;
 }
 
+// تشخيص: يُعيد الاستجابات الخام من SocialAPI كما هي، لتحديد أسماء الحقول الفعلية بدقّة
+// (لا نُخمّن الحقول بعد الآن — نقرأها من هنا). يُستدعى من مسار /comments/debug.
+export async function debugSocialApi(apiKey: string): Promise<any> {
+  const out: any = {};
+  // 1) قائمة المنشورات التي عليها تعليقات
+  try {
+    out.inbox_comments = await sapi<any>(apiKey, 'GET', EP.comments);
+  } catch (e: any) { out.inbox_comments_error = String(e?.message || e); }
+  // 2) تعليقات أول منشور
+  try {
+    const rows: any[] = out.inbox_comments?.data || out.inbox_comments?.comments || (Array.isArray(out.inbox_comments) ? out.inbox_comments : []);
+    const first = rows[0];
+    if (first) {
+      const postId = String(first.id || first.post_id || '');
+      const accountId = String(first.account_id || first.account?.id || '');
+      out.first_post = { postId, accountId, keys: Object.keys(first) };
+      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      out.post_comments = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
+    }
+  } catch (e: any) { out.post_comments_error = String(e?.message || e); }
+  // 3) المراجعات
+  try { out.reviews = await sapi<any>(apiKey, 'GET', EP.reviews); }
+  catch (e: any) { out.reviews_error = String(e?.message || e); }
+  // 4) المنشورات (لاكتشاف حقل الرابط الخارجي)
+  try {
+    const posts = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=3`);
+    const list: any[] = posts?.data || posts?.posts || (Array.isArray(posts) ? posts : []);
+    out.posts_sample = list.slice(0, 2);
+    out.posts_first_keys = list[0] ? Object.keys(list[0]) : [];
+  } catch (e: any) { out.posts_error = String(e?.message || e); }
+  return out;
+}
+
 export class SocialApiProvider implements PublishingProvider {
   private key: string;
   constructor(apiKey: string, private accounts: Record<string, string>) {
