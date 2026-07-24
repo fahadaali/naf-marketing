@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import type { ModerateAction } from '../adapters/provider';
 import { getProvider, providerKey } from '../adapters';
 import { listSocialApiInbox } from '../adapters/socialapi';
 import { newId } from '../util';
@@ -22,12 +23,21 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
   let added = 0;
   for (const it of items) {
     if (!it.id) continue;
+    const caps = it.capabilities ? JSON.stringify(it.capabilities) : null;
     const res = await env.DB.prepare(
-      `INSERT OR IGNORE INTO platform_comments
-         (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at)
-       VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO platform_comments
+         (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at,
+          capabilities_json, is_hidden, reply_body)
+       VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(platform, provider_comment_id) DO UPDATE SET
+         body = excluded.body, author_name = excluded.author_name,
+         capabilities_json = excluded.capabilities_json, is_hidden = excluded.is_hidden,
+         reply_body = COALESCE(platform_comments.reply_body, excluded.reply_body)`,
     )
-      .bind(newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt)
+      .bind(
+        newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt,
+        caps, it.isHidden ? 1 : 0, it.repliedBody || null,
+      )
       .run();
     if (res.meta.changes > 0) added++;
   }
@@ -85,5 +95,43 @@ export async function replyToComment(env: Env, commentId: string, text: string, 
     "UPDATE platform_comments SET reply_body = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ? WHERE id = ?",
   )
     .bind(text, userId, commentId)
+    .run();
+}
+
+// إشراف على تعليق: إخفاء/إظهار/حذف/إعجاب عبر المزوّد، وتحديث الحالة محلياً.
+export async function moderateComment(env: Env, commentId: string, action: ModerateAction): Promise<void> {
+  const row = await env.DB.prepare('SELECT provider_comment_id FROM platform_comments WHERE id = ?')
+    .bind(commentId)
+    .first<{ provider_comment_id: string }>();
+  if (!row) throw new Error('التعليق غير موجود');
+
+  const provider = await getProvider(env);
+  if (!provider.moderateComment) throw new Error('المزوّد الحالي لا يدعم الإشراف على التعليقات');
+  await provider.moderateComment(row.provider_comment_id, action);
+
+  if (action === 'delete') {
+    await env.DB.prepare('DELETE FROM platform_comments WHERE id = ?').bind(commentId).run();
+  } else if (action === 'hide' || action === 'unhide') {
+    await env.DB.prepare('UPDATE platform_comments SET is_hidden = ? WHERE id = ?')
+      .bind(action === 'hide' ? 1 : 0, commentId)
+      .run();
+  }
+}
+
+// رد خاص لصاحب التعليق (Instagram/Facebook) — يُسجَّل كردّ محلياً.
+export async function privateReplyToComment(env: Env, commentId: string, text: string, userId: string): Promise<void> {
+  const row = await env.DB.prepare('SELECT provider_comment_id FROM platform_comments WHERE id = ?')
+    .bind(commentId)
+    .first<{ provider_comment_id: string }>();
+  if (!row) throw new Error('التعليق غير موجود');
+
+  const provider = await getProvider(env);
+  if (!provider.privateReply) throw new Error('المزوّد الحالي لا يدعم الرد الخاص');
+  await provider.privateReply(row.provider_comment_id, text);
+
+  await env.DB.prepare(
+    "UPDATE platform_comments SET reply_body = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ? WHERE id = ?",
+  )
+    .bind(`(رد خاص) ${text}`, userId, commentId)
     .run();
 }

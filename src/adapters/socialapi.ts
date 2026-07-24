@@ -1,4 +1,4 @@
-import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem } from './provider';
+import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem, ModerateAction } from './provider';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
@@ -13,9 +13,15 @@ const EP = {
   metrics: (id: string) => `/posts/${id}/metrics`, // GET مقاييس منشور
   comments: '/inbox/comments', // GET قائمة المنشورات التي عليها تعليقات (InboxPostRow)
   postComments: (postId: string) => `/inbox/comments/${postId}`, // GET/POST تعليقات منشور معيّن، والرد عليها
+  moderateComment: (commentId: string) => `/inbox/comments/${commentId}/moderate`, // POST إخفاء/إظهار/حذف/إعجاب
+  privateReply: (commentId: string) => `/inbox/comments/${commentId}/private-reply`, // POST رد خاص لصاحب التعليق
   reviews: '/inbox/reviews', // GET ملخّص المراجعات لكل حساب (متوسط + عدد)
   reviewsForAccount: (accountId: string) => `/inbox/reviews/${accountId}`, // GET مراجعات حساب معيّن
-  replyReview: (accountId: string) => `/inbox/reviews/${accountId}`, // POST رد على مراجعة
+  replyReview: (reviewId: string) => `/inbox/reviews/${reviewId}/reply`, // POST رد على مراجعة (معرّف المراجعة sapi_rev_)
+  conversations: '/inbox/conversations', // GET المحادثات (رسائل خاصة)
+  conversationMessages: (id: string) => `/inbox/conversations/${id}/messages`, // POST إرسال رسالة
+  mentions: '/inbox/mentions', // GET الإشارات
+  replyMention: (id: string) => `/inbox/mentions/${id}/reply`, // POST رد على إشارة
 };
 
 // نفصل بين (معرّف المنشور | معرّف الحساب | معرّف التعليق) داخل provider_comment_id واحد
@@ -147,8 +153,18 @@ function mapMetrics(metricsObj: any): { reach: number; impressions: number; enga
   return { reach, impressions, engagement, raw };
 }
 
-// عنصر صندوق وارد موحّد (تعليق/رسالة/مراجعة) مع منصّته
-export type InboxItem = { id: string; platform: string; kind: 'comment' | 'dm'; authorName: string; body: string; createdAt: string };
+// عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته
+export type InboxItem = {
+  id: string;
+  platform: string;
+  kind: 'comment' | 'dm' | 'mention' | 'review';
+  authorName: string;
+  body: string;
+  createdAt: string;
+  capabilities?: Record<string, boolean>;
+  isHidden?: boolean;
+  repliedBody?: string | null; // رد موجود مسبقاً على المنصة (للتقييمات)
+};
 
 // يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور.
 // خطوتان وفق توثيق SocialAPI:
@@ -201,13 +217,15 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
         const body = c.text || c.body || c.message || c.comment || '';
         if (!commentId && !body) continue;
         out.push({
-          // نُرمّز (المنشور|الحساب|التعليق) كي يتوفّر للرد لاحقاً كل ما يحتاجه SocialAPI
+          // نُرمّز (المنشور|الحساب|التعليق) كي يتوفّر للرد/الإشراف لاحقاً كل ما يحتاجه SocialAPI
           id: encodeCid(postId, accountId, commentId),
           platform: String(c.platform || rowPlatform),
           kind: 'comment',
           authorName: c.author_name || c.author_username || c.author?.name || c.author?.username || 'مستخدم',
           body,
           createdAt: toIso(c.created_at || c.created || c.timestamp),
+          capabilities: (c.capabilities && typeof c.capabilities === 'object') ? c.capabilities : undefined,
+          isHidden: !!c.is_hidden,
         });
       }
     } catch { /* تعذّر جلب تعليقات هذا المنشور */ }
@@ -235,14 +253,61 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
         out.push({
           id: `rv:${accountId}:${rid}`,
           platform: accPlatform,
-          kind: 'comment',
+          kind: 'review',
           authorName: (r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة') + (stars != null ? ` (★${stars})` : ''),
           body,
           createdAt: toIso(r.created_at || r.updated_at || r.created || r.timestamp),
+          repliedBody: r.reply?.text || null,
         });
       }
     }
   } catch { /* لا مراجعات */ }
+
+  // الرسائل الخاصة (DMs) — لكل حساب داعم: GET /inbox/conversations?account_id=&platform=
+  // نُرمّز "dm:{conversationId}:{accountId}" لتوجيه الرد عبر /inbox/conversations/{id}/messages
+  try {
+    const accts = await listSocialApiAccounts(apiKey);
+    for (const acc of accts) {
+      try {
+        const q = `?account_id=${encodeURIComponent(acc.id)}${acc.platform ? `&platform=${encodeURIComponent(acc.platform)}` : ''}&limit=50`;
+        const data = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
+        const convos: any[] = data?.data || data?.conversations || (Array.isArray(data) ? data : []);
+        for (const cv of convos) {
+          const convId = String(cv.id || cv.conversation_id || '');
+          if (!convId) continue;
+          out.push({
+            id: `dm:${convId}:${acc.id}`,
+            platform: String(cv.platform || acc.platform || 'unknown'),
+            kind: 'dm',
+            authorName: cv.participant_name || cv.participant?.name || cv.from || 'مستخدم',
+            body: cv.last_message || cv.last_message_text || '',
+            createdAt: toIso(cv.last_message_at || cv.updated_at || cv.created_at),
+          });
+        }
+      } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها (501) */ }
+    }
+  } catch { /* تعذّر جلب الحسابات */ }
+
+  // الإشارات (Mentions) — GET /inbox/mentions. نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
+  try {
+    const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}?limit=50`);
+    const mentions: any[] = data?.data || data?.mentions || (Array.isArray(data) ? data : []);
+    for (const m of mentions) {
+      const mid = String(m.id || m.platform_id || '');
+      if (!mid) continue;
+      const accountId = String(m.account_id || m.account?.id || '');
+      const mediaId = String(m.metadata?.media_id || m.media_id || '');
+      out.push({
+        id: `mn:${mid}:${accountId}:${mediaId}`,
+        platform: String(m.platform || 'unknown'),
+        kind: 'mention',
+        authorName: m.author?.name || m.author_name || m.username || 'مستخدم',
+        body: m.content?.text || m.text || m.caption || '',
+        createdAt: toIso(m.created_at || m.received_at || m.timestamp),
+      });
+    }
+  } catch { /* لا إشارات أو غير مدعومة */ }
+
   return out;
 }
 
@@ -286,6 +351,19 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
   return out;
 }
 
+// إدارة الويب هوكس — تسجيل/سرد/حذف نقطة استقبال أحداث الصندوق الفورية.
+export async function registerSocialApiWebhook(apiKey: string, url: string, events: string[]): Promise<{ id: string; secret: string }> {
+  const data = await sapi<any>(apiKey, 'POST', '/webhooks', { url, events });
+  return { id: String(data?.id || data?.data?.id || ''), secret: String(data?.secret || data?.data?.secret || '') };
+}
+export async function listSocialApiWebhooks(apiKey: string): Promise<any[]> {
+  const data = await sapi<any>(apiKey, 'GET', '/webhooks');
+  return data?.data || data?.webhooks || (Array.isArray(data) ? data : []);
+}
+export async function deleteSocialApiWebhook(apiKey: string, id: string): Promise<void> {
+  try { await sapi(apiKey, 'DELETE', `/webhooks/${id}`); } catch { /* غير حرِج */ }
+}
+
 export class SocialApiProvider implements PublishingProvider {
   private key: string;
   constructor(apiKey: string, private accounts: Record<string, string>) {
@@ -297,9 +375,10 @@ export class SocialApiProvider implements PublishingProvider {
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
     }
-    // جسم النشر وفق التوثيق: { text, targets: [{account_id}], scheduled_at? }
+    // جسم النشر وفق التوثيق: { text, targets:[{account_id}], scheduled_at? } — والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
+    else body.publish_now = true;
     const data = await sapi<any>(this.key, 'POST', EP.posts, body);
     const id = data?.id || data?.post_id || data?.data?.id;
     return { providerPostId: String(id || ''), status: input.scheduleAt ? 'scheduled' : (data?.status || 'published') };
@@ -337,18 +416,48 @@ export class SocialApiProvider implements PublishingProvider {
     return out;
   }
 
+  private fallbackAccount(): string {
+    return Object.values(this.accounts).filter(Boolean)[0] || '';
+  }
+
   async replyComment(_providerPostId: string, commentId: string, text: string): Promise<void> {
     if (commentId.startsWith('rv:')) {
-      // رد على مراجعة: "rv:{accountId}:{reviewId}"
+      // مراجعة: "rv:{accountId}:{reviewId}" → POST /inbox/reviews/{reviewId}/reply {account_id, text}
       const [, accountId, reviewId] = commentId.split(':');
-      const account_id = accountId || Object.values(this.accounts).filter(Boolean)[0] || '';
-      await sapi(this.key, 'POST', EP.replyReview(account_id), { review_id: reviewId, comment_id: reviewId, text });
+      await sapi(this.key, 'POST', EP.replyReview(reviewId), { account_id: accountId || this.fallbackAccount(), text });
       return;
     }
-    // رد على تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
+    if (commentId.startsWith('dm:')) {
+      // رسالة خاصة: "dm:{conversationId}:{accountId}" → POST /inbox/conversations/{id}/messages {account_id, text}
+      const [, convId, accountId] = commentId.split(':');
+      await sapi(this.key, 'POST', EP.conversationMessages(convId), { account_id: accountId || this.fallbackAccount(), text });
+      return;
+    }
+    if (commentId.startsWith('mn:')) {
+      // إشارة: "mn:{mentionId}:{accountId}:{mediaId}" → POST /inbox/mentions/{id}/reply {account_id, media_id?, text}
+      const [, mentionId, accountId, mediaId] = commentId.split(':');
+      const payload: Record<string, unknown> = { account_id: accountId || this.fallbackAccount(), text };
+      if (mediaId) payload.media_id = mediaId;
+      await sapi(this.key, 'POST', EP.replyMention(mentionId), payload);
+      return;
+    }
+    // تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
     const dec = decodeCid(commentId);
     if (!dec) throw new Error('تعذّر تحديد المنشور/الحساب للرد على هذا التعليق');
-    const account_id = dec.accountId || Object.values(this.accounts).filter(Boolean)[0] || '';
-    await sapi(this.key, 'POST', EP.postComments(dec.postId), { account_id, comment_id: dec.commentId, text });
+    await sapi(this.key, 'POST', EP.postComments(dec.postId), { account_id: dec.accountId || this.fallbackAccount(), comment_id: dec.commentId, text });
+  }
+
+  async moderateComment(commentId: string, action: ModerateAction): Promise<void> {
+    // الإشراف على التعليقات فقط: POST /inbox/comments/{commentId}/moderate {account_id, action}
+    const dec = decodeCid(commentId);
+    if (!dec) throw new Error('الإشراف متاح على التعليقات فقط');
+    await sapi(this.key, 'POST', EP.moderateComment(dec.commentId), { account_id: dec.accountId || this.fallbackAccount(), action });
+  }
+
+  async privateReply(commentId: string, text: string): Promise<void> {
+    // رد خاص لصاحب التعليق (Instagram/Facebook): POST /inbox/comments/{commentId}/private-reply {account_id, text}
+    const dec = decodeCid(commentId);
+    if (!dec) throw new Error('الرد الخاص متاح على التعليقات فقط');
+    await sapi(this.key, 'POST', EP.privateReply(dec.commentId), { account_id: dec.accountId || this.fallbackAccount(), text });
   }
 }

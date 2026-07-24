@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { syncComments, replyToComment } from '../services/commentsSync';
+import { syncComments, replyToComment, moderateComment, privateReplyToComment } from '../services/commentsSync';
+import type { ModerateAction } from '../adapters/provider';
 import { providerKey } from '../adapters';
 import { debugSocialApi } from '../adapters/socialapi';
 
@@ -61,6 +62,30 @@ commentRoutes.post('/:id/reply', async (c) => {
   if (!text?.trim()) return c.json({ error: 'اكتب نص الرد' }, 400);
   try {
     await replyToComment(c.env, c.req.param('id'), text.trim(), c.get('user').id);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// إشراف على تعليق: إخفاء/إظهار/حذف/إعجاب
+commentRoutes.post('/:id/moderate', async (c) => {
+  const { action } = await c.req.json<{ action: ModerateAction }>();
+  if (!['hide', 'unhide', 'delete', 'like'].includes(action)) return c.json({ error: 'إجراء غير صالح' }, 400);
+  try {
+    await moderateComment(c.env, c.req.param('id'), action);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// رد خاص لصاحب التعليق (Instagram/Facebook)
+commentRoutes.post('/:id/private-reply', async (c) => {
+  const { text } = await c.req.json<{ text: string }>();
+  if (!text?.trim()) return c.json({ error: 'اكتب نص الرد' }, 400);
+  try {
+    await privateReplyToComment(c.env, c.req.param('id'), text.trim(), c.get('user').id);
     return c.json({ ok: true });
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 502);
