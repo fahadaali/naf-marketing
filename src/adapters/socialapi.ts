@@ -394,15 +394,28 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
   try { out.exports = await sapi<any>(apiKey, 'GET', EP.exports); }
   catch (e: any) { out.exports_error = String(e?.message || e); }
   // 6) المحادثات (رسائل خاصة) لأول حساب
+  let allAccts: SocialApiAccount[] = [];
   try {
-    const accts = await listSocialApiAccounts(apiKey);
-    out.accounts_sample = accts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
-    const first = accts[0];
+    allAccts = await listSocialApiAccounts(apiKey);
+    out.accounts_sample = allAccts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
+    const first = allAccts[0];
     if (first) {
       const q = `?account_id=${encodeURIComponent(first.id)}${first.platform ? `&platform=${encodeURIComponent(first.platform)}` : ''}&limit=5`;
       out.conversations = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
     }
   } catch (e: any) { out.conversations_error = String(e?.message || e); }
+
+  // 7) فحص إمكانية سرد تغريدات إكس الموجودة (مسارات مرشّحة — قراءة فقط)
+  const tw = allAccts.find((a) => a.platform === 'twitter');
+  if (tw) {
+    out.twitter_account_id = tw.id;
+    try { out.twitter_posts_filter = await sapi<any>(apiKey, 'GET', `${EP.posts}?platform=twitter&account_ids=${encodeURIComponent(tw.id)}&limit=10`); }
+    catch (e: any) { out.twitter_posts_filter_error = String(e?.message || e); }
+    try { out.twitter_platform_posts = await sapi<any>(apiKey, 'GET', `/platforms/twitter/accounts/${tw.id}/posts?limit=10`); }
+    catch (e: any) { out.twitter_platform_posts_error = String(e?.message || e); }
+    try { out.twitter_platform_tweets = await sapi<any>(apiKey, 'GET', `/platforms/twitter/accounts/${tw.id}/tweets?limit=10`); }
+    catch (e: any) { out.twitter_platform_tweets_error = String(e?.message || e); }
+  }
   return out;
 }
 
