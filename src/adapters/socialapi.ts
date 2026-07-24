@@ -348,6 +348,19 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
     out.posts_sample = list.slice(0, 2);
     out.posts_first_keys = list[0] ? Object.keys(list[0]) : [];
   } catch (e: any) { out.posts_error = String(e?.message || e); }
+  // 5) الإشارات
+  try { out.mentions = await sapi<any>(apiKey, 'GET', `${EP.mentions}?limit=5`); }
+  catch (e: any) { out.mentions_error = String(e?.message || e); }
+  // 6) المحادثات (رسائل خاصة) لأول حساب
+  try {
+    const accts = await listSocialApiAccounts(apiKey);
+    out.accounts_sample = accts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
+    const first = accts[0];
+    if (first) {
+      const q = `?account_id=${encodeURIComponent(first.id)}${first.platform ? `&platform=${encodeURIComponent(first.platform)}` : ''}&limit=5`;
+      out.conversations = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
+    }
+  } catch (e: any) { out.conversations_error = String(e?.message || e); }
   return out;
 }
 
