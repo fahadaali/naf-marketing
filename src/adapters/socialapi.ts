@@ -125,6 +125,53 @@ function mapMetrics(metricsObj: any): { reach: number; impressions: number; enga
   return { reach, impressions, engagement, raw };
 }
 
+// عنصر صندوق وارد موحّد (تعليق/رسالة/مراجعة) مع منصّته
+export type InboxItem = { id: string; platform: string; kind: 'comment' | 'dm'; authorName: string; body: string; createdAt: string };
+
+// يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور
+export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
+  const out: InboxItem[] = [];
+  // التعليقات
+  try {
+    const data = await sapi<any>(apiKey, 'GET', EP.comments);
+    const rows: any[] = data?.comments || data?.data || data?.posts || (Array.isArray(data) ? data : []);
+    for (const row of rows) {
+      // قد يكون العنصر تعليقاً مباشراً، أو منشوراً يحوي مصفوفة comments
+      const comments: any[] = Array.isArray(row.comments) ? row.comments : [row];
+      const rowPlatform = row.platform || row.account?.platform || '';
+      for (const c of comments) {
+        const body = c.text || c.body || c.message || c.comment || '';
+        if (!body && !c.id) continue;
+        out.push({
+          id: String(c.id || c.comment_id || c.interaction_id || ''),
+          platform: String(c.platform || rowPlatform || 'unknown'),
+          kind: (c.type === 'dm' || c.type === 'message') ? 'dm' : 'comment',
+          authorName: c.author?.name || c.author?.username || c.from || c.username || 'مستخدم',
+          body,
+          createdAt: toIso(c.created_at || c.created || c.timestamp),
+        });
+      }
+    }
+  } catch { /* لا تعليقات */ }
+  // المراجعات (Google Business/Facebook) — بادئة rv: لتوجيه الرد
+  try {
+    const rv = await sapi<any>(apiKey, 'GET', EP.reviews);
+    const rlist: any[] = rv?.reviews || rv?.data || (Array.isArray(rv) ? rv : []);
+    for (const r of rlist) {
+      const stars = r.rating || r.stars;
+      out.push({
+        id: `rv:${r.id || r.review_id || ''}`,
+        platform: String(r.platform || r.account?.platform || 'googlebusiness'),
+        kind: 'comment',
+        authorName: (r.author?.name || r.reviewer || r.name || 'مراجعة') + (stars ? ` (★${stars})` : ''),
+        body: r.text || r.comment || r.body || '',
+        createdAt: toIso(r.created_at || r.created || r.timestamp),
+      });
+    }
+  } catch { /* لا مراجعات */ }
+  return out;
+}
+
 export class SocialApiProvider implements PublishingProvider {
   private key: string;
   constructor(apiKey: string, private accounts: Record<string, string>) {
