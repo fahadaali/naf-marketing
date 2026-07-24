@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -160,17 +160,29 @@ export default function Analytics() {
         <div className="card">
           <h4 style={{ marginTop: 0 }}>أفضل المنشورات</h4>
           <table className="table">
-            <thead><tr><th>المنشور</th><th>المصدر</th><th>تفاعل</th><th>انطباعات</th></tr></thead>
+            <thead><tr><th>المنشور</th><th>المنصة</th><th>المصدر</th><th>تفاعل</th><th>انطباعات</th><th></th></tr></thead>
             <tbody>
               {(data?.topPosts || []).map((p: any, i: number) => (
                 <tr key={i}>
                   <td>{p.title}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <PlatformIcon platform={p.platform} size={18} /> {platformLabel(p.platform)}
+                    </span>
+                  </td>
                   <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
                   <td>{p.engagement}</td>
                   <td>{p.impressions}</td>
+                  <td>
+                    {p.external_url && (
+                      <a className="icon-btn" href={p.external_url} target="_blank" rel="noreferrer" title="فتح المنشور على المنصة">
+                        <ExternalLink size={15} />
+                      </a>
+                    )}
+                  </td>
                 </tr>
               ))}
-              {(data?.topPosts || []).length === 0 && <tr><td colSpan={4} className="muted">—</td></tr>}
+              {(data?.topPosts || []).length === 0 && <tr><td colSpan={6} className="muted">—</td></tr>}
             </tbody>
           </table>
         </div>

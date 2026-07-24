@@ -67,6 +67,7 @@ export type SocialApiPost = {
   reach: number;
   impressions: number;
   engagement: number;
+  externalUrl: string | null;
   metrics: any[];
 };
 
@@ -95,6 +96,7 @@ export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[
       reach: mapped.reach,
       impressions: mapped.impressions,
       engagement: mapped.engagement,
+      externalUrl: p.permalink || p.url || p.external_url || p.link || null,
       metrics: mapped.raw,
     });
   }
