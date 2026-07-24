@@ -11,11 +11,23 @@ const EP = {
   posts: '/posts', // GET قائمة المنشورات، POST نشر/جدولة
   post: (id: string) => `/posts/${id}`, // GET/DELETE منشور
   metrics: (id: string) => `/posts/${id}/metrics`, // GET مقاييس منشور
-  comments: '/inbox/comments', // GET التعليقات
-  replyComment: (id: string) => `/inbox/comments/${id}`, // POST رد على تعليق
+  comments: '/inbox/comments', // GET قائمة المنشورات التي عليها تعليقات (InboxPostRow)
+  postComments: (postId: string) => `/inbox/comments/${postId}`, // GET/POST تعليقات منشور معيّن، والرد عليها
   reviews: '/inbox/reviews', // GET المراجعات (Google Business/Facebook)
   replyReview: (id: string) => `/inbox/reviews/${id}`, // POST رد على مراجعة
 };
+
+// نفصل بين (معرّف المنشور | معرّف الحساب | معرّف التعليق) داخل provider_comment_id واحد
+// كي يتوفّر للرد كل ما يحتاجه SocialAPI: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
+const CID_SEP = '|';
+function encodeCid(postId: string, accountId: string, commentId: string): string {
+  return [postId, accountId, commentId].join(CID_SEP);
+}
+function decodeCid(cid: string): { postId: string; accountId: string; commentId: string } | null {
+  const parts = cid.split(CID_SEP);
+  if (parts.length !== 3) return null;
+  return { postId: parts[0], accountId: parts[1], commentId: parts[2] };
+}
 
 function toIso(v: unknown): string {
   if (v == null) return new Date().toISOString();
@@ -130,43 +142,62 @@ function mapMetrics(metricsObj: any): { reach: number; impressions: number; enga
 // عنصر صندوق وارد موحّد (تعليق/رسالة/مراجعة) مع منصّته
 export type InboxItem = { id: string; platform: string; kind: 'comment' | 'dm'; authorName: string; body: string; createdAt: string };
 
-// يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور
+// يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور.
+// خطوتان وفق توثيق SocialAPI:
+//   1) GET /inbox/comments        → قائمة المنشورات التي عليها تعليقات (InboxPostRow): {id, account_id, platform, ...}
+//   2) GET /inbox/comments/{postId}?account_id=…  → تعليقات ذلك المنشور فعلاً (CommentWithCapabilities):
+//      {text, author_name, author_username, platform_id, created_at, platform, ...}
 export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
   const out: InboxItem[] = [];
-  // التعليقات
+  // 1) المنشورات التي عليها تعليقات
+  let postRows: any[] = [];
   try {
     const data = await sapi<any>(apiKey, 'GET', EP.comments);
-    const rows: any[] = data?.comments || data?.data || data?.posts || (Array.isArray(data) ? data : []);
-    for (const row of rows) {
-      // قد يكون العنصر تعليقاً مباشراً، أو منشوراً يحوي مصفوفة comments
-      const comments: any[] = Array.isArray(row.comments) ? row.comments : [row];
-      const rowPlatform = row.platform || row.account?.platform || '';
+    postRows = data?.data || data?.comments || data?.posts || (Array.isArray(data) ? data : []);
+  } catch { /* لا منشورات عليها تعليقات */ }
+
+  for (const row of postRows) {
+    const postId = String(row.id || row.post_id || '');
+    const accountId = String(row.account_id || row.account?.id || '');
+    const rowPlatform = String(row.platform || row.account?.platform || 'unknown');
+    if (!postId) continue;
+    // 2) تعليقات هذا المنشور
+    try {
+      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      const cData = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
+      const comments: any[] = cData?.data || cData?.comments || (Array.isArray(cData) ? cData : []);
       for (const c of comments) {
+        const commentId = String(c.platform_id || c.id || c.comment_id || '');
         const body = c.text || c.body || c.message || c.comment || '';
-        if (!body && !c.id) continue;
+        if (!commentId && !body) continue;
         out.push({
-          id: String(c.id || c.comment_id || c.interaction_id || ''),
-          platform: String(c.platform || rowPlatform || 'unknown'),
-          kind: (c.type === 'dm' || c.type === 'message') ? 'dm' : 'comment',
-          authorName: c.author?.name || c.author?.username || c.from || c.username || 'مستخدم',
+          // نُرمّز (المنشور|الحساب|التعليق) كي يتوفّر للرد لاحقاً كل ما يحتاجه SocialAPI
+          id: encodeCid(postId, accountId, commentId),
+          platform: String(c.platform || rowPlatform),
+          kind: 'comment',
+          authorName: c.author_name || c.author_username || c.author?.name || c.author?.username || 'مستخدم',
           body,
           createdAt: toIso(c.created_at || c.created || c.timestamp),
         });
       }
-    }
-  } catch { /* لا تعليقات */ }
+    } catch { /* تعذّر جلب تعليقات هذا المنشور */ }
+  }
+
   // المراجعات (Google Business/Facebook) — بادئة rv: لتوجيه الرد
   try {
     const rv = await sapi<any>(apiKey, 'GET', EP.reviews);
-    const rlist: any[] = rv?.reviews || rv?.data || (Array.isArray(rv) ? rv : []);
+    const rlist: any[] = rv?.data || rv?.reviews || (Array.isArray(rv) ? rv : []);
     for (const r of rlist) {
       const stars = r.rating || r.stars;
+      const body = r.text || r.comment || r.body || r.content || '';
+      const rid = String(r.id || r.review_id || r.platform_id || '');
+      if (!rid && !body) continue;
       out.push({
-        id: `rv:${r.id || r.review_id || ''}`,
+        id: `rv:${rid}`,
         platform: String(r.platform || r.account?.platform || 'googlebusiness'),
         kind: 'comment',
-        authorName: (r.author?.name || r.reviewer || r.name || 'مراجعة') + (stars ? ` (★${stars})` : ''),
-        body: r.text || r.comment || r.body || '',
+        authorName: (r.author_name || r.author?.name || r.reviewer || r.name || 'مراجعة') + (stars ? ` (★${stars})` : ''),
+        body,
         createdAt: toIso(r.created_at || r.created || r.timestamp),
       });
     }
@@ -204,46 +235,38 @@ export class SocialApiProvider implements PublishingProvider {
   }
 
   async getComments(providerPostId: string): Promise<CommentItem[]> {
+    // تعليقات منشور معيّن — نستنتج الحساب من خريطة الربط (أول حساب مربوط)
+    const accountId = Object.values(this.accounts).filter(Boolean)[0] || '';
     const out: CommentItem[] = [];
-    // التعليقات العادية
     try {
-      const data = await sapi<any>(this.key, 'GET', `${EP.comments}?post_id=${encodeURIComponent(providerPostId)}`);
-      const list: any[] = data?.comments || data?.interactions || data?.data || (Array.isArray(data) ? data : []);
+      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+      const data = await sapi<any>(this.key, 'GET', `${EP.postComments(providerPostId)}${q}`);
+      const list: any[] = data?.data || data?.comments || (Array.isArray(data) ? data : []);
       for (const c of list) {
+        const commentId = String(c.platform_id || c.id || c.comment_id || '');
         out.push({
-          id: String(c.id || c.comment_id || c.interaction_id),
-          kind: (c.type === 'dm' || c.type === 'message') ? 'dm' : 'comment',
-          authorName: c.author?.name || c.author?.username || c.from || c.username || 'مستخدم',
+          id: encodeCid(providerPostId, accountId, commentId),
+          kind: 'comment',
+          authorName: c.author_name || c.author_username || c.author?.name || c.author?.username || 'مستخدم',
           body: c.text || c.message || c.comment || c.body || '',
           createdAt: toIso(c.created_at || c.created || c.timestamp),
         });
       }
     } catch { /* قد لا تتوفر تعليقات لهذا المنشور */ }
-    // المراجعات (Google Business/Facebook) — نميّزها ببادئة "rv:" لتوجيه الرد لاحقاً
-    try {
-      const rv = await sapi<any>(this.key, 'GET', `${EP.reviews}?post_id=${encodeURIComponent(providerPostId)}`);
-      const rlist: any[] = rv?.reviews || rv?.data || (Array.isArray(rv) ? rv : []);
-      for (const r of rlist) {
-        const stars = r.rating || r.stars;
-        out.push({
-          id: `rv:${r.id || r.review_id}`,
-          kind: 'comment',
-          authorName: (r.author?.name || r.reviewer || r.name || 'مراجعة') + (stars ? ` (★${stars})` : ''),
-          body: r.text || r.comment || r.body || '',
-          createdAt: toIso(r.created_at || r.created || r.timestamp),
-        });
-      }
-    } catch { /* لا مراجعات */ }
     return out;
   }
 
   async replyComment(_providerPostId: string, commentId: string, text: string): Promise<void> {
-    const account_id = Object.values(this.accounts).filter(Boolean)[0];
-    const payload = { text, ...(account_id ? { account_id } : {}) };
     if (commentId.startsWith('rv:')) {
-      await sapi(this.key, 'POST', EP.replyReview(commentId.slice(3)), payload); // رد على مراجعة
-    } else {
-      await sapi(this.key, 'POST', EP.replyComment(commentId), payload); // رد على تعليق
+      // رد على مراجعة
+      const account_id = Object.values(this.accounts).filter(Boolean)[0];
+      await sapi(this.key, 'POST', EP.replyReview(commentId.slice(3)), { text, ...(account_id ? { account_id } : {}) });
+      return;
     }
+    // رد على تعليق: POST /inbox/comments/{postId} بجسم {account_id, comment_id, text}
+    const dec = decodeCid(commentId);
+    if (!dec) throw new Error('تعذّر تحديد المنشور/الحساب للرد على هذا التعليق');
+    const account_id = dec.accountId || Object.values(this.accounts).filter(Boolean)[0] || '';
+    await sapi(this.key, 'POST', EP.postComments(dec.postId), { account_id, comment_id: dec.commentId, text });
   }
 }
