@@ -23,6 +23,7 @@ function XGlyph({ size = 16 }: { size?: number }) {
 
 export const PLATFORM_META: Record<string, PlatformMeta> = {
   linkedin: { label: 'لينكدإن', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
+  linkedin_page: { label: 'لينكدإن (صفحة)', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
   x: { label: 'إكس', color: '#000000', glyph: <XGlyph size={14} /> },
   instagram: {
     label: 'إنستغرام',
@@ -43,6 +44,7 @@ export const KNOWN_PLATFORMS = Object.keys(PLATFORM_META);
 // توجيهات افتراضية لكل منصة عند التوليد بالذكاء الاصطناعي (تُطابق الخادم)
 export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
   linkedin: 'محتوى مهني رصين يناسب لينكدإن والقطاع القانوني، بفقرات قصيرة ولغة موثوقة.',
+  linkedin_page: 'محتوى مهني رصين لصفحة منظمة على لينكدإن، بلغة مؤسسية موثوقة وفقرات قصيرة.',
   x: 'منشور موجز جداً يناسب منصة إكس (لا يتجاوز ٢٨٠ حرفاً)، مباشر وجذّاب، ويمكن إضافة وسم واحد أو اثنين.',
   instagram: 'أسلوب جذّاب بصرياً بسطور قصيرة وإيموجي مناسب باعتدال، مع وسوم (hashtags) ملائمة في النهاية.',
   snapchat: 'رسالة قصيرة عفوية ومباشرة تناسب سناب شات.',
