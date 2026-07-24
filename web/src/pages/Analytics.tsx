@@ -165,7 +165,7 @@ export default function Analytics() {
               {(data?.topPosts || []).map((p: any, i: number) => (
                 <tr key={i}>
                   <td>{p.title}</td>
-                  <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'Buffer'}</span></td>
+                  <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
                   <td>{p.engagement}</td>
                   <td>{p.impressions}</td>
                 </tr>
