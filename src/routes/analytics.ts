@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { pullAnalytics } from '../services/analytics';
+import { pullAnalytics, ingestExportVideos } from '../services/analytics';
 import { listStaleContent } from '../services/alerts';
+import { providerKey } from '../adapters';
+import { createAnalyticsExport, listAnalyticsExports, getAnalyticsExport, listSocialApiAccounts } from '../adapters/socialapi';
 
 export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -161,5 +163,53 @@ analyticsRoutes.post('/refresh', async (c) => {
     return c.json({ ok: true, captured });
   } catch (e: any) {
     return c.json({ error: `فشل سحب التحليلات: ${String(e?.message || e)}` }, 502);
+  }
+});
+
+// ===== تصدير التحليلات (Analytics Export) — تحليلات فيديو أعمق ليوتيوب/تيك توك =====
+// إنشاء تصدير لحساب مربوط (يستهلك رصيد تصدير حسب الخطة)
+analyticsRoutes.post('/export', async (c) => {
+  const token = providerKey(c.env, 'socialapi');
+  if (!token) return c.json({ error: 'التصدير متاح لمزوّد SocialAPI فقط' }, 400);
+  const { account_id } = await c.req.json<{ account_id: string }>();
+  if (!account_id) return c.json({ error: 'اختر حساباً' }, 400);
+  try {
+    const job = await createAnalyticsExport(token, account_id);
+    return c.json({ ok: true, job });
+  } catch (e: any) {
+    return c.json({ error: `تعذّر إنشاء التصدير: ${String(e?.message || e)}` }, 502);
+  }
+});
+
+// سرد مهام التصدير مع حالتها، والحسابات القابلة للتصدير (منصات فيديو)
+analyticsRoutes.get('/exports', async (c) => {
+  const token = providerKey(c.env, 'socialapi');
+  if (!token) return c.json({ exports: [], accounts: [] });
+  const VIDEO = new Set(['youtube', 'tiktok']);
+  let accounts: { id: string; platform: string; name: string }[] = [];
+  try {
+    accounts = (await listSocialApiAccounts(token)).filter((a) => VIDEO.has(a.platform));
+  } catch { /* تجاهل */ }
+  try {
+    return c.json({ exports: await listAnalyticsExports(token), accounts });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e), accounts }, 502);
+  }
+});
+
+// استيراد نتائج تصدير مكتمل إلى اللوحة
+analyticsRoutes.post('/exports/:id/ingest', async (c) => {
+  const token = providerKey(c.env, 'socialapi');
+  if (!token) return c.json({ error: 'التصدير متاح لمزوّد SocialAPI فقط' }, 400);
+  const id = c.req.param('id');
+  try {
+    const job = await getAnalyticsExport(token, id);
+    if (job.status !== 'completed' && job.status !== 'complete' && job.status !== 'done') {
+      return c.json({ ok: false, pending: true, status: job.status });
+    }
+    const imported = await ingestExportVideos(c.env, id);
+    return c.json({ ok: true, imported });
+  } catch (e: any) {
+    return c.json({ error: `تعذّر الاستيراد: ${String(e?.message || e)}` }, 502);
   }
 });

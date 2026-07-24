@@ -22,6 +22,9 @@ const EP = {
   conversationMessages: (id: string) => `/inbox/conversations/${id}/messages`, // POST إرسال رسالة
   mentions: '/inbox/mentions', // GET الإشارات
   replyMention: (id: string) => `/inbox/mentions/${id}/reply`, // POST رد على إشارة
+  exports: '/exports', // GET سرد، POST إنشاء تصدير تحليلات
+  exportItem: (id: string) => `/exports/${id}`, // GET حالة/نتيجة تصدير
+  exportVideos: (id: string) => `/exports/${id}/videos`, // GET فيديوهات تصدير مكتمل مع المقاييس
 };
 
 // نفصل بين (معرّف المنشور | معرّف الحساب | معرّف التعليق) داخل provider_comment_id واحد
@@ -153,7 +156,7 @@ export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[
 // يطابق مقاييس SocialAPI على reach/impressions/engagement، ويستخرج كل المقاييس الخام.
 // يدعم: كائن {likes, comments, …, extra:{view_count}}، أو مصفوفة [{name,value}].
 const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets']);
-function mapMetrics(metricsObj: any): { reach: number; impressions: number; engagement: number; raw: any[] } {
+export function mapMetrics(metricsObj: any): { reach: number; impressions: number; engagement: number; raw: any[] } {
   const entries: [string, number][] = [];
   if (Array.isArray(metricsObj)) {
     for (const m of metricsObj) entries.push([String(m.type || m.name || '').toLowerCase(), Number(m.value || 0)]);
@@ -387,6 +390,9 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
   // 5) الإشارات
   try { out.mentions = await sapi<any>(apiKey, 'GET', `${EP.mentions}?limit=5`); }
   catch (e: any) { out.mentions_error = String(e?.message || e); }
+  // 6.5) تصديرات التحليلات (قراءة مجانية — لتأكيد الشكل قبل استهلاك رصيد التصدير)
+  try { out.exports = await sapi<any>(apiKey, 'GET', EP.exports); }
+  catch (e: any) { out.exports_error = String(e?.message || e); }
   // 6) المحادثات (رسائل خاصة) لأول حساب
   try {
     const accts = await listSocialApiAccounts(apiKey);
@@ -398,6 +404,41 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
     }
   } catch (e: any) { out.conversations_error = String(e?.message || e); }
   return out;
+}
+
+// تصدير التحليلات (Analytics Export) — مهمة غير متزامنة لحساب مربوط تُرجع فيديوهاته مع مقاييسها.
+// خاضعة لحدود الخطة (المجانية: تصديران/شهر، ≤٣٠ فيديو، تهدئة ٧ أيام). أساساً ليوتيوب/تيك توك.
+export type ExportJob = { id: string; status: string; accountId?: string; platform?: string; progress?: number; videoCount?: number; createdAt?: string };
+
+function mapExportJob(j: any): ExportJob {
+  return {
+    id: String(j?.id || j?.export_id || ''),
+    status: String(j?.status || 'pending'),
+    accountId: j?.account_id ? String(j.account_id) : undefined,
+    platform: j?.platform ? String(j.platform) : undefined,
+    progress: typeof j?.progress === 'number' ? j.progress : undefined,
+    videoCount: typeof j?.video_count === 'number' ? j.video_count : (typeof j?.videos_count === 'number' ? j.videos_count : undefined),
+    createdAt: j?.created_at ? String(j.created_at) : undefined,
+  };
+}
+
+export async function createAnalyticsExport(apiKey: string, accountId: string): Promise<ExportJob> {
+  const d = await sapi<any>(apiKey, 'POST', EP.exports, { account_id: accountId });
+  return mapExportJob(d?.data || d);
+}
+export async function listAnalyticsExports(apiKey: string): Promise<ExportJob[]> {
+  const d = await sapi<any>(apiKey, 'GET', EP.exports);
+  const list: any[] = d?.data || d?.exports || (Array.isArray(d) ? d : []);
+  return list.map(mapExportJob);
+}
+export async function getAnalyticsExport(apiKey: string, id: string): Promise<ExportJob> {
+  const d = await sapi<any>(apiKey, 'GET', EP.exportItem(id));
+  return mapExportJob(d?.data || d);
+}
+// فيديو من تصدير مكتمل — نُعيده خاماً ويُخرَّط في طبقة التحليلات
+export async function getExportVideos(apiKey: string, id: string): Promise<any[]> {
+  const d = await sapi<any>(apiKey, 'GET', EP.exportVideos(id));
+  return d?.data || d?.videos || (Array.isArray(d) ? d : []);
 }
 
 // إدارة الويب هوكس — تسجيل/سرد/حذف نقطة استقبال أحداث الصندوق الفورية.
