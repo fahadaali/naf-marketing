@@ -114,6 +114,8 @@ export default function Analytics() {
         </div>
       </div>
 
+      <ReputationCard />
+
       <VideoAnalyticsExport onImported={load} />
 
       {/* المؤشرات — ديناميكية: كل مقاييس المنصات (المتشابهة مجمّعة). صفِّ بالمنصة لرؤية مقاييسها وحدها. */}
@@ -373,6 +375,72 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ===== السمعة: متوسط التقييم وتوزيع النجوم ومعدل الرد والاتجاه =====
+function ReputationCard() {
+  const [rep, setRep] = useState<any>(null);
+  useEffect(() => { api.get('/analytics/reputation').then(setRep).catch(() => {}); }, []);
+  if (!rep || !rep.totals?.count) return null;
+
+  const t = rep.totals;
+  const dist: any[] = rep.distribution || [];
+  const maxDist = Math.max(1, ...dist.map((d) => d.count || 0));
+  const trend: any[] = rep.trend || [];
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h4 style={{ marginTop: 0 }}>السمعة والتقييمات</h4>
+      <div className="grid cols-4" style={{ marginBottom: 14 }}>
+        <Stat label="متوسط التقييم" value={`${t.avg_rating} ★`} />
+        <Stat label="عدد التقييمات" value={t.count} />
+        <Stat label="تقييمات سلبية (≤٢)" value={t.negative} />
+        <Stat label="نسبة الرد على التقييمات" value={`${t.reply_rate}%`} />
+      </div>
+
+      <div className="grid cols-2">
+        <div>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>توزيع النجوم</div>
+          {[5, 4, 3, 2, 1].map((star) => {
+            const row = dist.find((d) => Number(d.rating) === star);
+            const n = row?.count || 0;
+            return (
+              <div key={star} style={{ marginBottom: 6 }}>
+                <div className="row" style={{ fontSize: 12 }}>
+                  <span>{star} ★</span>
+                  <div className="spacer" />
+                  <span className="muted">{n}</span>
+                </div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(n / maxDist) * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>اتجاه المتوسط الشهري</div>
+          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد بيانات كافية.</p>}
+          {trend.map((m) => (
+            <div key={m.month} style={{ marginBottom: 6 }}>
+              <div className="row" style={{ fontSize: 12 }}>
+                <span>{m.month}</span>
+                <div className="spacer" />
+                <span className="muted">{m.avg_rating} ★ · {m.count}</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+            معدل الرد على كل التفاعلات: <strong>{rep.engagement?.reply_rate}%</strong>
+            {' '}({rep.engagement?.replied} من {rep.engagement?.total})
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

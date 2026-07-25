@@ -136,7 +136,17 @@ export default function Comments() {
               <div className="row" style={{ marginBottom: 8 }}>
                 <PlatformIcon platform={c.platform} size={22} />
                 <div>
-                  <div style={{ fontWeight: 600 }}>{c.author_name}</div>
+                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {c.author_name}
+                    {c.rating != null && (
+                      <span
+                        className={`badge ${c.rating <= 2 ? 'red' : c.rating >= 4 ? 'green' : 'gray'}`}
+                        title={`تقييم ${c.rating} من ٥`}
+                      >
+                        {'★'.repeat(c.rating)}{'☆'.repeat(Math.max(0, 5 - c.rating))}
+                      </span>
+                    )}
+                  </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>
                     {c.is_hidden ? ' · (مخفي)' : ''}{c.post_title ? ` · ${c.post_title}` : ''}

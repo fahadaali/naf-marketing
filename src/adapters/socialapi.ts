@@ -196,6 +196,7 @@ export type InboxItem = {
   capabilities?: Record<string, boolean>;
   isHidden?: boolean;
   repliedBody?: string | null; // رد موجود مسبقاً على المنصة (للتقييمات)
+  rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
 };
 
 // يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور.
@@ -284,14 +285,17 @@ export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
         // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
         if (!body.trim()) continue;
         if (!rid) continue;
+        const starNum = Number(stars);
         out.push({
           id: `rv:${accountId}:${rid}`,
           platform: accPlatform,
           kind: 'review',
-          authorName: (r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة') + (stars != null ? ` (★${stars})` : ''),
+          // الاسم نظيف — التقييم يُخزَّن رقماً في حقل مستقل ويُعرض نجوماً في الواجهة
+          authorName: r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة',
           body,
           createdAt: toIso(r.created_at || r.updated_at || r.created || r.timestamp),
           repliedBody: r.reply?.text || null,
+          rating: Number.isFinite(starNum) && starNum > 0 ? starNum : null,
         });
       }
     }

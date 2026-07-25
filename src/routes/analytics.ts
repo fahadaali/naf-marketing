@@ -113,6 +113,53 @@ analyticsRoutes.get('/dashboard', async (c) => {
   });
 });
 
+// السمعة: متوسط التقييم وتوزيع النجوم ومعدل الرد والاتجاه الشهري ومعدل الاستجابة
+analyticsRoutes.get('/reputation', async (c) => {
+  const totals = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS count, ROUND(AVG(rating), 2) AS avg_rating,
+            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+            SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) AS negative
+     FROM platform_comments WHERE rating IS NOT NULL`,
+  ).first<{ count: number; avg_rating: number | null; replied: number; negative: number }>();
+
+  const distribution = await c.env.DB.prepare(
+    `SELECT rating, COUNT(*) AS count FROM platform_comments
+     WHERE rating IS NOT NULL GROUP BY rating ORDER BY rating DESC`,
+  ).all();
+
+  // اتجاه شهري لآخر ١٢ شهراً
+  const trend = await c.env.DB.prepare(
+    `SELECT substr(created_at, 1, 7) AS month, ROUND(AVG(rating), 2) AS avg_rating, COUNT(*) AS count
+     FROM platform_comments WHERE rating IS NOT NULL
+     GROUP BY month ORDER BY month DESC LIMIT 12`,
+  ).all();
+
+  // معدل الرد على كل التفاعلات (لا التقييمات وحدها)
+  const engagement = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied
+     FROM platform_comments`,
+  ).first<{ total: number; replied: number }>();
+
+  const t = totals || ({} as any);
+  const e = engagement || ({ total: 0, replied: 0 } as any);
+  return c.json({
+    totals: {
+      count: t.count || 0,
+      avg_rating: t.avg_rating || 0,
+      negative: t.negative || 0,
+      reply_rate: t.count > 0 ? Math.round((t.replied / t.count) * 100) : 0,
+    },
+    distribution: distribution.results,
+    trend: (trend.results as any[]).reverse(), // تصاعدياً للعرض
+    engagement: {
+      total: e.total || 0,
+      replied: e.replied || 0,
+      reply_rate: e.total > 0 ? Math.round((e.replied / e.total) * 100) : 0,
+    },
+  });
+});
+
 // لوحة أداء الفريق: إنتاجية الكتّاب وسرعة اعتماد المراجعين/المديرين
 analyticsRoutes.get('/performance', async (c) => {
   const writers = await c.env.DB.prepare(
