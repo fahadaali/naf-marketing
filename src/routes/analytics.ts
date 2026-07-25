@@ -160,6 +160,45 @@ analyticsRoutes.get('/reputation', async (c) => {
   });
 });
 
+// أفضل أوقات النشر — من الأداء الفعلي للمنشورات (متوسط التفاعل حسب اليوم والساعة).
+// التوقيت بتوقيت الرياض (UTC+3) لأن الجمهور محلي، وsent_at مخزّن UTC.
+analyticsRoutes.get('/best-times', async (c) => {
+  const platform = c.req.query('platform');
+  const where = ["a.sent_at IS NOT NULL", "a.engagement > 0"];
+  const binds: unknown[] = [];
+  if (platform) { where.push('a.platform = ?'); binds.push(platform); }
+  const clause = `WHERE ${where.join(' AND ')}`;
+
+  // نُزيح ٣ ساعات لتوقيت الرياض قبل استخراج اليوم/الساعة
+  const RIYADH = "datetime(a.sent_at, '+3 hours')";
+
+  const byDay = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%w', ${RIYADH}) AS INTEGER) AS day,
+            ROUND(AVG(a.engagement), 1) AS avg_engagement, COUNT(*) AS posts
+     FROM analytics_snapshots a ${clause}
+     GROUP BY day ORDER BY avg_engagement DESC`,
+  ).bind(...binds).all();
+
+  const byHour = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%H', ${RIYADH}) AS INTEGER) AS hour,
+            ROUND(AVG(a.engagement), 1) AS avg_engagement, COUNT(*) AS posts
+     FROM analytics_snapshots a ${clause}
+     GROUP BY hour ORDER BY avg_engagement DESC`,
+  ).bind(...binds).all();
+
+  const sample = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM analytics_snapshots a ${clause}`,
+  ).bind(...binds).first<{ n: number }>();
+
+  return c.json({
+    byDay: byDay.results,
+    byHour: byHour.results,
+    sample: sample?.n || 0,
+    // تحت هذا الحد لا تُعتمد التوصية إحصائياً
+    enough: (sample?.n || 0) >= 8,
+  });
+});
+
 // لوحة أداء الفريق: إنتاجية الكتّاب وسرعة اعتماد المراجعين/المديرين
 analyticsRoutes.get('/performance', async (c) => {
   const writers = await c.env.DB.prepare(

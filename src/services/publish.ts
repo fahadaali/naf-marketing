@@ -27,10 +27,10 @@ async function publishJobs(env: Env, jobs: Job[]): Promise<{ published: number; 
     if (lock.meta.changes === 0) continue; // التقطها عامل آخر أو نُشرت مسبقاً
 
     const variant = await env.DB.prepare(
-      'SELECT body_override, media_asset_id FROM post_variants WHERE post_id = ? AND platform = ?',
+      'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
     )
       .bind(job.post_id, job.platform)
-      .first<{ body_override: string | null; media_asset_id: string | null }>();
+      .first<{ body_override: string | null; media_asset_id: string | null; first_comment: string | null }>();
 
     // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
     const rawBody = variant?.body_override || job.body || '';
@@ -43,7 +43,12 @@ async function publishJobs(env: Env, jobs: Job[]): Promise<{ published: number; 
         : extractMediaIds(rawBody);
       const media = await loadMedia(env, assetIds);
 
-      const result = await provider.publish({ platforms: [job.platform], text, media });
+      const result = await provider.publish({
+        platforms: [job.platform],
+        text,
+        media,
+        firstComment: variant?.first_comment || undefined,
+      });
       await env.DB.prepare(
         "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = NULL WHERE id = ?",
       )

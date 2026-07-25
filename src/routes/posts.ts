@@ -304,16 +304,18 @@ postRoutes.post('/:id/action', async (c) => {
 postRoutes.put('/:id/variants/:platform', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const platform = c.req.param('platform');
-  const { body_override, media_asset_id } = await c.req.json<{
+  const { body_override, media_asset_id, first_comment } = await c.req.json<{
     body_override?: string;
     media_asset_id?: string;
+    first_comment?: string;
   }>();
   await c.env.DB.prepare(
-    `INSERT INTO post_variants (id, post_id, platform, body_override, media_asset_id)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override, media_asset_id = excluded.media_asset_id`,
+    `INSERT INTO post_variants (id, post_id, platform, body_override, media_asset_id, first_comment)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override,
+       media_asset_id = excluded.media_asset_id, first_comment = excluded.first_comment`,
   )
-    .bind(newId('var'), id, platform, body_override || null, media_asset_id || null)
+    .bind(newId('var'), id, platform, body_override || null, media_asset_id || null, first_comment || null)
     .run();
   return c.json({ ok: true });
 });

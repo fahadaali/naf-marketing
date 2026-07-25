@@ -114,6 +114,8 @@ export default function Analytics() {
         </div>
       </div>
 
+      <BestTimesCard platform={platform} />
+
       <ReputationCard />
 
       <VideoAnalyticsExport onImported={load} />
@@ -439,6 +441,83 @@ function ReputationCard() {
             معدل الرد على كل التفاعلات: <strong>{rep.engagement?.reply_rate}%</strong>
             {' '}({rep.engagement?.replied} من {rep.engagement?.total})
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== أفضل أوقات النشر — من الأداء الفعلي (بتوقيت الرياض) =====
+const DAY_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+function hourLabel(h: number): string {
+  const period = h < 12 ? 'ص' : 'م';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:00 ${period}`;
+}
+
+function BestTimesCard({ platform }: { platform: string }) {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    const q = platform ? `?platform=${encodeURIComponent(platform)}` : '';
+    api.get(`/analytics/best-times${q}`).then(setData).catch(() => {});
+  }, [platform]);
+  if (!data || !data.sample) return null;
+
+  const days: any[] = data.byDay || [];
+  const hours: any[] = data.byHour || [];
+  const maxDay = Math.max(1, ...days.map((d) => d.avg_engagement || 0));
+  const topHours = hours.slice(0, 5);
+  const maxHour = Math.max(1, ...topHours.map((h) => h.avg_engagement || 0));
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row">
+        <h4 style={{ marginTop: 0, marginBottom: 0 }}>أفضل أوقات النشر</h4>
+        <div className="spacer" />
+        <span className="muted" style={{ fontSize: 12 }}>
+          بتوقيت الرياض · من {data.sample} منشوراً
+        </span>
+      </div>
+      {!data.enough && (
+        <p className="muted" style={{ fontSize: 12 }}>
+          البيانات محدودة — التوصية تزداد دقّة كلما نُشر محتوى أكثر.
+        </p>
+      )}
+      <div className="grid cols-2" style={{ marginTop: 10 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>حسب اليوم</div>
+          {days.map((d) => (
+            <div key={d.day} style={{ marginBottom: 6 }}>
+              <div className="row" style={{ fontSize: 12 }}>
+                <span>{DAY_AR[d.day] || d.day}</span>
+                <div className="spacer" />
+                <span className="muted">{d.avg_engagement} تفاعل · {d.posts}</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(d.avg_engagement / maxDay) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>أفضل الساعات</div>
+          {topHours.map((h) => (
+            <div key={h.hour} style={{ marginBottom: 6 }}>
+              <div className="row" style={{ fontSize: 12 }}>
+                <span>{hourLabel(h.hour)}</span>
+                <div className="spacer" />
+                <span className="muted">{h.avg_engagement} تفاعل · {h.posts}</span>
+              </div>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${(h.avg_engagement / maxHour) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          {days[0] && topHours[0] && (
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              الأفضل: <strong>{DAY_AR[days[0].day]}</strong> عند <strong>{hourLabel(topHours[0].hour)}</strong>
+            </p>
+          )}
         </div>
       </div>
     </div>
