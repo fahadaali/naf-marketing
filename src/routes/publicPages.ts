@@ -117,7 +117,53 @@ publicRoutes.get('/', async (c) => {
   }));
 });
 
-// مقالة واحدة
+// تغذية RSS — لمجمّعات الأخبار وللاستهلاك الخارجي
+publicRoutes.get('/feed.xml', async (c) => {
+  const { base, path } = await publicSettings(c.env, c.req.url);
+  const name = await siteName(c.env);
+  const { results } = await c.env.DB.prepare(
+    `SELECT title, slug, excerpt, published_at FROM newsletters
+     WHERE web_published = 1 ORDER BY COALESCE(published_at, created_at) DESC LIMIT 30`,
+  ).all<Row>();
+
+  const items = results.map((r) => {
+    const link = articleUrl(base, path, r.slug);
+    return `<item><title>${escapeHtml(r.title)}</title><link>${escapeHtml(link)}</link>` +
+      `<guid isPermaLink="true">${escapeHtml(link)}</guid>` +
+      (r.excerpt ? `<description>${escapeHtml(r.excerpt)}</description>` : '') +
+      (r.published_at ? `<pubDate>${new Date(r.published_at).toUTCString()}</pubDate>` : '') +
+      `</item>`;
+  }).join('');
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>${escapeHtml(name)} — المقالات</title>
+<link>${escapeHtml(base + path)}</link>
+<description>${escapeHtml(`أحدث المقالات من ${name}`)}</description>
+<language>ar</language>
+${items}
+</channel></rss>`;
+  return new Response(xml, { headers: { 'content-type': 'application/rss+xml; charset=utf-8' } });
+});
+
+// تغذية JSON — ليعرض موقعكم الحالي «أحدث المقالات» بمقتطفات دون تكرار المحتوى
+publicRoutes.get('/feed.json', async (c) => {
+  const { base, path } = await publicSettings(c.env, c.req.url);
+  const { results } = await c.env.DB.prepare(
+    `SELECT title, slug, excerpt, published_at FROM newsletters
+     WHERE web_published = 1 ORDER BY COALESCE(published_at, created_at) DESC LIMIT 30`,
+  ).all<Row>();
+  const items = results.map((r) => ({
+    title: r.title,
+    url: articleUrl(base, path, r.slug),
+    excerpt: r.excerpt || '',
+    published_at: r.published_at,
+  }));
+  // مسموح للموقع الخارجي بقراءتها
+  return c.json({ items }, 200, { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' });
+});
+
+// مقالة واحدة (يُسجَّل بعد المسارات الثابتة كي لا يبتلعها)
 publicRoutes.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
   const row = await c.env.DB.prepare(

@@ -128,3 +128,46 @@ export function slugify(title: string): string {
     .slice(0, 80);
   return s || `article-${Date.now().toString(36)}`;
 }
+
+// ===== تحويل المقالة إلى منشورات تواصل =====
+// نفس المصدر يُصاغ لكل منصة بحدودها، مع رابط المقالة دائماً (يقود القارئ للموقع).
+
+const X_LIMIT = 275; // نترك هامشاً لحدّ ٢٨٠
+
+// يقسّم نصاً طويلاً إلى تغريدات متتابعة دون قطع الكلمات
+export function splitThread(text: string, limit = X_LIMIT): string[] {
+  const parts: string[] = [];
+  for (const para of String(text || '').split(/\n{2,}/)) {
+    let cur = '';
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      if ((cur + ' ' + word).trim().length > limit) {
+        if (cur.trim()) parts.push(cur.trim());
+        cur = word;
+      } else {
+        cur = (cur + ' ' + word).trim();
+      }
+    }
+    if (cur.trim()) parts.push(cur.trim());
+  }
+  return parts.filter(Boolean);
+}
+
+// سلسلة إكس: العنوان أولاً، ثم المحتوى مقسّماً، والرابط في آخر تغريدة
+export function toXThread(title: string, blocks: Block[], url: string, maxParts = 6): string[] {
+  const body = blocksToText(blocks);
+  const chunks = splitThread(body).slice(0, Math.max(1, maxParts - 1));
+  const head = splitThread(title, X_LIMIT)[0] || title.slice(0, X_LIMIT);
+  const thread = [head, ...chunks];
+  // نُلحق الرابط بآخر جزء إن اتسع، وإلا نضيفه جزءاً مستقلاً
+  const last = thread[thread.length - 1];
+  if ((last + '\n\n' + url).length <= X_LIMIT + 5) thread[thread.length - 1] = `${last}\n\n${url}`;
+  else thread.push(url);
+  return thread.map((t, i) => (thread.length > 1 ? `${i + 1}/${thread.length} ${t}` : t));
+}
+
+// لينكدإن: مقتطف مهني متوسط الطول مع دعوة لقراءة المقالة
+export function toLinkedInPost(title: string, blocks: Block[], url: string, excerpt?: string | null): string {
+  const body = (excerpt || blocksToText(blocks)).trim();
+  const trimmed = body.length > 900 ? `${body.slice(0, 900).replace(/\s+\S*$/, '')}…` : body;
+  return `${title}\n\n${trimmed}\n\nاقرأ المقالة كاملة:\n${url}`;
+}

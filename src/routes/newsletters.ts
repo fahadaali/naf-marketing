@@ -3,7 +3,11 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { getEmailProvider } from '../services/email';
 import { newId, nowIso } from '../util';
-import { parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl } from '../services/newsletter';
+import {
+  parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl,
+  toXThread, toLinkedInPost,
+} from '../services/newsletter';
+import { getProvider } from '../adapters';
 import { queueNewsletter, newsletterStats, sendQueuedBatch } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -138,4 +142,52 @@ newsletterRoutes.post('/:id/test', async (c) => {
   } catch (e: any) {
     return c.json({ error: `فشل الإرسال التجريبي: ${String(e?.message || e)}` }, 502);
   }
+});
+
+// معاينة صياغة المقالة لمنصات التواصل (قبل النشر)
+newsletterRoutes.get('/:id/social', async (c) => {
+  const row = await c.env.DB.prepare('SELECT * FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<any>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const { base, path } = await publicSettings(c.env, c.req.url);
+  const url = articleUrl(base, path, row.slug);
+  const blocks = parseBlocks(row.blocks_json);
+  return c.json({
+    url,
+    x: toXThread(row.title, blocks, url),
+    linkedin: toLinkedInPost(row.title, blocks, url, row.excerpt),
+  });
+});
+
+// نشر المقالة على منصات التواصل — تُصاغ لكل منصة بحدودها مع رابط المقالة
+newsletterRoutes.post('/:id/social', async (c) => {
+  const { platforms, text } = await c.req.json<{ platforms: string[]; text?: Record<string, string> }>();
+  if (!platforms?.length) return c.json({ error: 'اختر منصة واحدة على الأقل' }, 400);
+
+  const row = await c.env.DB.prepare('SELECT * FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<any>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  if (!row.web_published) return c.json({ error: 'انشر الصفحة العامة أولاً — المنشور يحتاج رابط المقالة' }, 400);
+
+  const { base, path } = await publicSettings(c.env, c.req.url);
+  const url = articleUrl(base, path, row.slug);
+  const blocks = parseBlocks(row.blocks_json);
+
+  const provider = await getProvider(c.env);
+  const results: { platform: string; ok: boolean; error?: string }[] = [];
+
+  for (const p of platforms) {
+    // نص مُخصّص من الواجهة إن وُجد، وإلا الصياغة التلقائية لكل منصة
+    const body = text?.[p]?.trim()
+      || (p === 'x' ? toXThread(row.title, blocks, url).join('\n\n') : toLinkedInPost(row.title, blocks, url, row.excerpt));
+    try {
+      await provider.publish({ platforms: [p], text: body });
+      results.push({ platform: p, ok: true });
+    } catch (e: any) {
+      results.push({ platform: p, ok: false, error: String(e?.message || e) });
+    }
+  }
+  return c.json({ ok: results.some((r) => r.ok), results });
 });

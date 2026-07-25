@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, Eye, Globe, Mail, Save, ExternalLink,
-  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick,
+  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 
@@ -95,6 +95,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState<any>(null);
+  const [social, setSocial] = useState<any>(null);
+  const [socialPick, setSocialPick] = useState<Record<string, boolean>>({ x: true, linkedin: true });
 
   function loadStats() {
     api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
@@ -150,6 +152,24 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       const r = await api.get(`/newsletters/${id}`);
       setNl(r.newsletter);
       loadStats();
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  async function loadSocial() {
+    try { await save(); setSocial(await api.get(`/newsletters/${id}/social`)); }
+    catch (e: any) { setMsg(e.message); }
+  }
+
+  async function publishSocial() {
+    const platforms = Object.keys(socialPick).filter((p) => socialPick[p]);
+    if (!platforms.length) return setMsg('اختر منصة واحدة على الأقل');
+    if (!confirm(`نشر المقالة على: ${platforms.join('، ')}؟`)) return;
+    try {
+      const d = await api.post(`/newsletters/${id}/social`, { platforms });
+      const okAll = d.results.filter((r: any) => r.ok).map((r: any) => r.platform);
+      const bad = d.results.filter((r: any) => !r.ok);
+      setMsg(bad.length ? `نُشر: ${okAll.join('، ') || 'لا شيء'} · فشل: ${bad.map((b: any) => b.platform + ' (' + b.error + ')').join('، ')}`
+                        : `نُشر على ${okAll.join('، ')}`);
     } catch (e: any) { setMsg(e.message); }
   }
 
@@ -223,6 +243,42 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               </a>
             )}
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
+          </div>
+
+          <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+            <div className="row" style={{ marginBottom: 6 }}>
+              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> النشر على التواصل</strong>
+              <div className="spacer" />
+              <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
+            </div>
+            {!nl.web_published && (
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>انشر الصفحة العامة أولاً — المنشور يحتاج رابط المقالة.</p>
+            )}
+            {nl.web_published && (
+              <>
+                <div className="row" style={{ gap: 12, marginBottom: 8 }}>
+                  {['x', 'linkedin'].map((p) => (
+                    <label key={p} className="muted" style={{ fontSize: 13, display: 'inline-flex', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!socialPick[p]}
+                             onChange={(e) => setSocialPick((v) => ({ ...v, [p]: e.target.checked }))} />
+                      {p === 'x' ? 'إكس (سلسلة)' : 'لينكدإن'}
+                    </label>
+                  ))}
+                  <div className="spacer" />
+                  <button className="btn sm" onClick={publishSocial}><Send size={13} /> نشر</button>
+                </div>
+                {social && (
+                  <div style={{ fontSize: 12 }}>
+                    <div className="muted" style={{ marginBottom: 4 }}>سلسلة إكس ({social.x?.length} تغريدة):</div>
+                    {(social.x || []).map((t: string, i: number) => (
+                      <div key={i} className="card" style={{ padding: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}>{t}</div>
+                    ))}
+                    <div className="muted" style={{ margin: '8px 0 4px' }}>لينكدإن:</div>
+                    <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.linkedin}</div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {stats && stats.total > 0 && (
