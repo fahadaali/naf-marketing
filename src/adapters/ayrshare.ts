@@ -17,7 +17,9 @@ export class AyrshareProvider implements PublishingProvider {
       post: input.text,
       platforms: input.platforms,
     };
-    if (input.mediaUrls?.length) body.mediaUrls = input.mediaUrls;
+    // Ayrshare يقبل روابط عامة فقط — نمرّر ما توفّر له رابط
+    const urls = (input.media || []).map((m) => m.url).filter((u): u is string => /^https?:\/\//.test(u || ''));
+    if (urls.length) body.mediaUrls = urls;
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
     const res = await fetch(`${this.baseUrl}/post`, {

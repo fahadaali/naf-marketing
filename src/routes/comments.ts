@@ -6,6 +6,7 @@ import type { ModerateAction } from '../adapters/provider';
 import { providerKey } from '../adapters';
 import { debugSocialApi } from '../adapters/socialapi';
 import { suggestReplies } from '../services/claude';
+import { htmlToText } from '../util';
 
 export const commentRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -72,18 +73,18 @@ commentRoutes.get('/debug', async (c) => {
 // اقتراحات ذكاء اصطناعي للرد (٣ مقترحات متنوّعة قصيرة)
 commentRoutes.post('/:id/suggest', async (c) => {
   const row = await c.env.DB.prepare(
-    `SELECT pc.body, pc.author_name, pc.platform, pc.kind, p.title AS post_title, p.body AS post_body
+    `SELECT pc.body, pc.author_name, pc.platform, pc.kind, pc.rating, p.title AS post_title, p.body AS post_body
      FROM platform_comments pc LEFT JOIN content_posts p ON p.id = pc.post_id
      WHERE pc.id = ?`,
   )
     .bind(c.req.param('id'))
-    .first<{ body: string; author_name: string; platform: string; kind: string; post_title: string | null; post_body: string | null }>();
+    .first<{ body: string; author_name: string; platform: string; kind: string; rating: number | null; post_title: string | null; post_body: string | null }>();
   if (!row) return c.json({ error: 'العنصر غير موجود' }, 404);
 
-  // نستخرج التقييم من الاسم إن كان تقييماً (مثال: "فلان (★4)")
-  const m = /★\s*(\d)/.exec(row.author_name || '');
-  const rating = m ? Number(m[1]) : null;
-  const postText = row.post_title ? [row.post_title, row.post_body].filter(Boolean).join('\n') : null;
+  // التقييم من عموده المخصّص، مع دعم السجلات القديمة التي ضُمّن فيها نصياً "(★4)"
+  const legacy = /★\s*(\d)/.exec(row.author_name || '');
+  const rating = row.rating ?? (legacy ? Number(legacy[1]) : null);
+  const postText = row.post_title ? [row.post_title, htmlToText(row.post_body || '')].filter(Boolean).join('\n') : null;
 
   try {
     const suggestions = await suggestReplies(c.env, {

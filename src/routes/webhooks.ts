@@ -21,7 +21,7 @@ async function setSetting(env: Env, key: string, value: string): Promise<void> {
 }
 
 // HMAC-SHA256 لجسم الطلب الخام، بصيغة "sha256=<hex>"، مع مقارنة ثابتة الزمن.
-async function verifySignature(secret: string, rawBody: string, header: string): Promise<boolean> {
+export async function verifySignature(secret: string, rawBody: string, header: string): Promise<boolean> {
   if (!header) return false;
   const key = await crypto.subtle.importKey(
     'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],

@@ -3,6 +3,7 @@ import type { ModerateAction } from '../adapters/provider';
 import { getProvider, providerKey } from '../adapters';
 import { listSocialApiInbox } from '../adapters/socialapi';
 import { newId } from '../util';
+import { notifyUsers, usersWithPermission } from './notify';
 
 async function providerName(env: Env): Promise<string> {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>();
@@ -28,6 +29,7 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
   ).run();
 
   let added = 0;
+  const fresh: typeof items = []; // الجديد فعلاً — للتنبيه على السلبي
   for (const it of items) {
     // نتجاهل ما لا نص له — بنفس شرط التنظيف أعلاه، وإلّا حُذف وأُعيدت إضافته كل دورة
     // فيتضخّم عدّاد «الجديد» بلا فائدة.
@@ -36,21 +38,47 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
     const res = await env.DB.prepare(
       `INSERT INTO platform_comments
          (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at,
-          capabilities_json, is_hidden, reply_body)
-       VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          capabilities_json, is_hidden, reply_body, rating)
+       VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(platform, provider_comment_id) DO UPDATE SET
          kind = excluded.kind, body = excluded.body, author_name = excluded.author_name,
          capabilities_json = excluded.capabilities_json, is_hidden = excluded.is_hidden,
+         rating = excluded.rating,
          reply_body = COALESCE(platform_comments.reply_body, excluded.reply_body)`,
     )
       .bind(
         newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt,
-        caps, it.isHidden ? 1 : 0, it.repliedBody || null,
+        caps, it.isHidden ? 1 : 0, it.repliedBody || null, it.rating ?? null,
       )
       .run();
-    if (res.meta.changes > 0) added++;
+    if (res.meta.changes > 0) {
+      added++;
+      // تنبيه فوري للتقييمات السلبية الجديدة (≤ نجمتين) — تحتاج رداً سريعاً
+      if (it.rating != null && it.rating <= 2) fresh.push(it);
+    }
   }
+
+  if (fresh.length) await notifyNegative(env, fresh);
   return added;
+}
+
+// يُشعِر مسؤولي التعليقات بالتفاعلات السلبية الجديدة فور رصدها
+async function notifyNegative(
+  env: Env,
+  items: { platform: string; authorName: string; body: string; rating?: number | null }[],
+): Promise<void> {
+  try {
+    const userIds = await usersWithPermission(env, 'comments.manage');
+    if (!userIds.length) return;
+    for (const it of items) {
+      await notifyUsers(env, userIds, {
+        type: 'negative_feedback',
+        title: `تقييم سلبي (${it.rating}★) على ${it.platform}`,
+        body: `${it.authorName}: ${String(it.body).slice(0, 160)}`,
+        link: '/comments',
+      });
+    }
+  } catch { /* التنبيه أفضل جهد — لا يُعطّل المزامنة */ }
 }
 
 // مزوّدون يعتمدون getComments لكل منشور نُشر عبر المنصة (Ayrshare/Mock)

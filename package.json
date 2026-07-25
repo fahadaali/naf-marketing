@@ -13,12 +13,15 @@
     "db:seed:local": "wrangler d1 execute naf_marketing --local --file=./migrations/9999_seed.sql",
     "db:seed:remote": "wrangler d1 execute naf_marketing --remote --file=./migrations/9999_seed.sql",
     "deploy": "npm run build && wrangler deploy",
-    "typecheck": "tsc --noEmit && npm --prefix web run typecheck"
+    "typecheck": "tsc --noEmit && npm --prefix web run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240605.0",
     "concurrently": "^8.2.2",
     "typescript": "^5.4.5",
+    "vitest": "^2.1.9",
     "wrangler": "^3.60.0"
   },
   "dependencies": {

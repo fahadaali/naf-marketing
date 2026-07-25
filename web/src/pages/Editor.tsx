@@ -51,6 +51,7 @@ export default function Editor() {
   const [syncingNotes, setSyncingNotes] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [variants, setVariants] = useState<Record<string, string>>({}); // نص مخصّص لكل منصة (فارغ = النص الأساسي)
+  const [firstComments, setFirstComments] = useState<Record<string, string>>({}); // أول تعليق لكل منصة
   const [savingVariant, setSavingVariant] = useState('');
   const [showVariants, setShowVariants] = useState(false);
   const [versions, setVersions] = useState<any[]>([]);
@@ -84,8 +85,13 @@ export default function Editor() {
     setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
     const vmap: Record<string, string> = {};
-    for (const v of d.variants || []) if (v.body_override) vmap[v.platform] = v.body_override;
+    const fcmap: Record<string, string> = {};
+    for (const v of d.variants || []) {
+      if (v.body_override) vmap[v.platform] = v.body_override;
+      if (v.first_comment) fcmap[v.platform] = v.first_comment;
+    }
     setVariants(vmap);
+    setFirstComments(fcmap);
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
   }
 
@@ -197,7 +203,10 @@ export default function Editor() {
     setSavingVariant(platform);
     setErr('');
     try {
-      await api.put(`/posts/${postId}/variants/${platform}`, { body_override: variants[platform]?.trim() || null });
+      await api.put(`/posts/${postId}/variants/${platform}`, {
+        body_override: variants[platform]?.trim() || null,
+        first_comment: firstComments[platform]?.trim() || null,
+      });
       setMsg(`حُفظ نص ${platformLabel(platform, platLabels)}`);
     } catch (e: any) {
       setErr(e.message);
@@ -383,7 +392,7 @@ export default function Editor() {
           {postId && platforms.length > 0 && can('draft.edit') && (
             <div className="card" style={{ marginBottom: 14 }}>
               <div className="row" style={{ cursor: 'pointer' }} onClick={() => setShowVariants((v) => !v)}>
-                <h4 style={{ margin: 0 }}>نصوص مخصّصة لكل منصة</h4>
+                <h4 style={{ margin: 0 }}>نصوص مخصّصة وأول تعليق لكل منصة</h4>
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
                   {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
@@ -392,7 +401,7 @@ export default function Editor() {
               {showVariants && (
                 <div style={{ marginTop: 10 }}>
                   <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-                    اترك الحقل فارغاً لاستخدام النص الأساسي. النص المخصّص يُنشر على منصته بدلاً منه.
+                    اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
                   </p>
                   {platforms.map((p) => (
                     <div key={p} style={{ marginBottom: 10 }}>
@@ -414,6 +423,13 @@ export default function Editor() {
                         placeholder="(يُستخدم النص الأساسي)"
                         value={variants[p] || ''}
                         onChange={(e) => setVariants((v) => ({ ...v, [p]: e.target.value }))}
+                      />
+                      <input
+                        className="input"
+                        style={{ marginTop: 6 }}
+                        placeholder="أول تعليق (اختياري) — للروابط والوسوم"
+                        value={firstComments[p] || ''}
+                        onChange={(e) => setFirstComments((v) => ({ ...v, [p]: e.target.value }))}
                       />
                     </div>
                   ))}

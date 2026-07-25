@@ -113,6 +113,92 @@ analyticsRoutes.get('/dashboard', async (c) => {
   });
 });
 
+// السمعة: متوسط التقييم وتوزيع النجوم ومعدل الرد والاتجاه الشهري ومعدل الاستجابة
+analyticsRoutes.get('/reputation', async (c) => {
+  const totals = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS count, ROUND(AVG(rating), 2) AS avg_rating,
+            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+            SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) AS negative
+     FROM platform_comments WHERE rating IS NOT NULL`,
+  ).first<{ count: number; avg_rating: number | null; replied: number; negative: number }>();
+
+  const distribution = await c.env.DB.prepare(
+    `SELECT rating, COUNT(*) AS count FROM platform_comments
+     WHERE rating IS NOT NULL GROUP BY rating ORDER BY rating DESC`,
+  ).all();
+
+  // اتجاه شهري لآخر ١٢ شهراً
+  const trend = await c.env.DB.prepare(
+    `SELECT substr(created_at, 1, 7) AS month, ROUND(AVG(rating), 2) AS avg_rating, COUNT(*) AS count
+     FROM platform_comments WHERE rating IS NOT NULL
+     GROUP BY month ORDER BY month DESC LIMIT 12`,
+  ).all();
+
+  // معدل الرد على كل التفاعلات (لا التقييمات وحدها)
+  const engagement = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied
+     FROM platform_comments`,
+  ).first<{ total: number; replied: number }>();
+
+  const t = totals || ({} as any);
+  const e = engagement || ({ total: 0, replied: 0 } as any);
+  return c.json({
+    totals: {
+      count: t.count || 0,
+      avg_rating: t.avg_rating || 0,
+      negative: t.negative || 0,
+      reply_rate: t.count > 0 ? Math.round((t.replied / t.count) * 100) : 0,
+    },
+    distribution: distribution.results,
+    trend: (trend.results as any[]).reverse(), // تصاعدياً للعرض
+    engagement: {
+      total: e.total || 0,
+      replied: e.replied || 0,
+      reply_rate: e.total > 0 ? Math.round((e.replied / e.total) * 100) : 0,
+    },
+  });
+});
+
+// أفضل أوقات النشر — من الأداء الفعلي للمنشورات (متوسط التفاعل حسب اليوم والساعة).
+// التوقيت بتوقيت الرياض (UTC+3) لأن الجمهور محلي، وsent_at مخزّن UTC.
+analyticsRoutes.get('/best-times', async (c) => {
+  const platform = c.req.query('platform');
+  const where = ["a.sent_at IS NOT NULL", "a.engagement > 0"];
+  const binds: unknown[] = [];
+  if (platform) { where.push('a.platform = ?'); binds.push(platform); }
+  const clause = `WHERE ${where.join(' AND ')}`;
+
+  // نُزيح ٣ ساعات لتوقيت الرياض قبل استخراج اليوم/الساعة
+  const RIYADH = "datetime(a.sent_at, '+3 hours')";
+
+  const byDay = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%w', ${RIYADH}) AS INTEGER) AS day,
+            ROUND(AVG(a.engagement), 1) AS avg_engagement, COUNT(*) AS posts
+     FROM analytics_snapshots a ${clause}
+     GROUP BY day ORDER BY avg_engagement DESC`,
+  ).bind(...binds).all();
+
+  const byHour = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%H', ${RIYADH}) AS INTEGER) AS hour,
+            ROUND(AVG(a.engagement), 1) AS avg_engagement, COUNT(*) AS posts
+     FROM analytics_snapshots a ${clause}
+     GROUP BY hour ORDER BY avg_engagement DESC`,
+  ).bind(...binds).all();
+
+  const sample = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM analytics_snapshots a ${clause}`,
+  ).bind(...binds).first<{ n: number }>();
+
+  return c.json({
+    byDay: byDay.results,
+    byHour: byHour.results,
+    sample: sample?.n || 0,
+    // تحت هذا الحد لا تُعتمد التوصية إحصائياً
+    enough: (sample?.n || 0) >= 8,
+  });
+});
+
 // لوحة أداء الفريق: إنتاجية الكتّاب وسرعة اعتماد المراجعين/المديرين
 analyticsRoutes.get('/performance', async (c) => {
   const writers = await c.env.DB.prepare(
