@@ -91,3 +91,17 @@ describe('blocksToText', () => {
     expect(t).not.toContain('تواصل');
   });
 });
+
+// حجم عيّنة اختبار العنوانين — يُحسب في الكود لأن تمرير معامل داخل LIMIT يُخطئ في D1
+function abSample(total: number, pct: number): number {
+  const p = Math.min(50, Math.max(5, pct || 20));
+  return Math.max(1, Math.floor((total * p) / 100));
+}
+
+describe('حجم عيّنة اختبار العنوانين', () => {
+  it('يحترم النسبة', () => expect(abSample(100, 20)).toBe(20));
+  it('لا يقلّ عن واحد', () => expect(abSample(3, 20)).toBe(1));
+  it('يحدّ النسبة بـ ٥٠٪', () => expect(abSample(100, 90)).toBe(50));
+  it('يرفع النسبة الصغيرة إلى الحد الأدنى', () => expect(abSample(100, 1)).toBe(5));
+  it('يستخدم الافتراضي عند الصفر', () => expect(abSample(100, 0)).toBe(20));
+});

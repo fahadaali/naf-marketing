@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { newId } from '../util';
 import { parseBlocks, renderBlocks, publicSettings, articleUrl, escapeHtml } from '../services/newsletter';
+import { sendWelcome } from '../services/newsletterSend';
 
 // الصفحات العامة (بلا مصادقة): المقالات، الاشتراك، إلغاء الاشتراك.
 // تُخدَّم HTML من الخادم كي تُفهرس وتظهر معاينتها عند المشاركة (وسوم OG).
@@ -235,6 +236,12 @@ publicRoutes.post('/subscribe', async (c) => {
   )
     .bind(newId('sub'), email, nameField || null, ip, newId('tok') + newId('tok'))
     .run();
+
+  // رسالة الترحيب في الخلفية — أفضل جهد فلا تؤخّر الرد ولا تُفشل الاشتراك
+  const row = await c.env.DB.prepare('SELECT token FROM subscribers WHERE email = ?')
+    .bind(email)
+    .first<{ token: string }>();
+  if (row?.token) c.executionCtx.waitUntil(sendWelcome(c.env, email, row.token, c.req.url).catch(() => {}));
 
   return page('تم تسجيل اشتراكك بنجاح. ستصلك مقالاتنا القادمة على بريدك.');
 });

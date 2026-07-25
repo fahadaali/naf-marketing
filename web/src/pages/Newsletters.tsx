@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, Eye, Globe, Mail, Save, ExternalLink,
-  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2,
+  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 
@@ -97,13 +97,17 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [stats, setStats] = useState<any>(null);
   const [social, setSocial] = useState<any>(null);
   const [socialPick, setSocialPick] = useState<Record<string, boolean>>({ x: true, linkedin: true });
+  const [ab, setAb] = useState<any>(null);
+  const [tags, setTags] = useState<string[]>([]);
 
   function loadStats() {
     api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
+    api.get(`/newsletters/${id}/ab`).then(setAb).catch(() => {});
   }
 
   useEffect(() => {
     loadStats();
+    api.get('/newsletters/meta/tags').then((d) => setTags(d.tags || [])).catch(() => {});
     api.get(`/newsletters/${id}`).then((d) => {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
@@ -173,6 +177,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     } catch (e: any) { setMsg(e.message); }
   }
 
+  async function decideAb(winner?: 'a' | 'b') {
+    try {
+      const d = await api.post(`/newsletters/${id}/ab/decide`, winner ? { winner } : {});
+      setMsg(`اعتُمد العنوان ${d.winner === 'b' ? '(ب)' : '(أ)'} لبقية القائمة`);
+      const r = await api.get(`/newsletters/${id}`);
+      setNl(r.newsletter);
+      loadStats();
+    } catch (e: any) { setMsg(e.message); }
+  }
+
   async function remove() {
     if (!confirm('حذف هذه النشرة نهائياً؟')) return;
     await api.del(`/newsletters/${id}`);
@@ -219,6 +233,23 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           <div className="field">
             <label>عنوان رسالة البريد</label>
             <input className="input" value={nl.subject || ''} onChange={(e) => field('subject', e.target.value)} placeholder="ما يظهر في صندوق الوارد" />
+          </div>
+          <div className="field">
+            <label>عنوان بديل للاختبار (اختياري)</label>
+            <input className="input" value={nl.subject_b || ''} onChange={(e) => field('subject_b', e.target.value)}
+                   placeholder="اتركه فارغاً لتعطيل اختبار العنوانين" />
+            {nl.subject_b && (
+              <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                تُرسل عيّنة {nl.ab_percent || 20}% بالعنوان البديل، ثم تعتمد الأفضل فتحاً.
+              </p>
+            )}
+          </div>
+          <div className="field">
+            <label>الشريحة المستهدفة</label>
+            <select className="select" value={nl.segment_tag || ''} onChange={(e) => field('segment_tag', e.target.value)}>
+              <option value="">كل المشتركين النشطين</option>
+              {tags.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           <div className="field">
             <label>نص المعاينة (preheader)</label>
@@ -280,6 +311,31 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               </>
             )}
           </div>
+
+          {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
+            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> اختبار العنوانين</strong>
+              <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
+                <div className="row">
+                  <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
+                  <span>{ab.a.open_rate}% ({ab.a.opened}/{ab.a.sent})</span>
+                </div>
+                <div className="row">
+                  <span className="muted">(ب) {nl.subject_b}</span><div className="spacer" />
+                  <span>{ab.b.open_rate}% ({ab.b.opened}/{ab.b.sent})</span>
+                </div>
+              </div>
+              {nl.ab_winner
+                ? <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                    اعتُمد العنوان {nl.ab_winner === 'b' ? '(ب)' : '(أ)'} لبقية القائمة.
+                  </p>
+                : <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                    <button className="btn sm" onClick={() => decideAb()}>اعتماد الأفضل آلياً</button>
+                    <button className="btn sm ghost" onClick={() => decideAb('a')}>أ</button>
+                    <button className="btn sm ghost" onClick={() => decideAb('b')}>ب</button>
+                  </div>}
+            </div>
+          )}
 
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>

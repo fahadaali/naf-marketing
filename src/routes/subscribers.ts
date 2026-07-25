@@ -95,6 +95,16 @@ subscriberRoutes.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// تعديل وسوم المشترك (الشرائح)
+subscriberRoutes.patch('/:id/tags', async (c) => {
+  const { tags } = await c.req.json<{ tags: string[] }>();
+  const clean = (tags || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 10);
+  await c.env.DB.prepare('UPDATE subscribers SET tags = ? WHERE id = ?')
+    .bind(clean.length ? JSON.stringify(clean) : null, c.req.param('id'))
+    .run();
+  return c.json({ ok: true });
+});
+
 subscriberRoutes.delete('/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM subscribers WHERE id = ?').bind(c.req.param('id')).run();
   return c.json({ ok: true });

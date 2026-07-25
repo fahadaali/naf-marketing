@@ -664,6 +664,11 @@ function NotificationSettings() {
   const [provider, setProvider] = useState('mock');
   const [from, setFrom] = useState('');
   const [staleDays, setStaleDays] = useState('3');
+  const [welcomeOn, setWelcomeOn] = useState(false);
+  const [welcomeSubject, setWelcomeSubject] = useState('');
+  const [welcomeBody, setWelcomeBody] = useState('');
+  const [siteUrl, setSiteUrl] = useState('');
+  const [articlePath, setArticlePath] = useState('');
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
@@ -671,12 +676,21 @@ function NotificationSettings() {
       setProvider(d.settings?.email_provider || 'mock');
       setFrom(d.settings?.email_from || '');
       setStaleDays(d.settings?.stale_alert_days || '3');
+      setWelcomeOn(d.settings?.welcome_enabled === '1');
+      setWelcomeSubject(d.settings?.welcome_subject || '');
+      setWelcomeBody(d.settings?.welcome_body || '');
+      setSiteUrl(d.settings?.public_site_url || '');
+      setArticlePath(d.settings?.public_article_path || '/articles');
     });
   }, []);
 
   async function save() {
     setMsg('');
-    await api.put('/settings', { email_provider: provider, email_from: from, stale_alert_days: staleDays });
+    await api.put('/settings', {
+      email_provider: provider, email_from: from, stale_alert_days: staleDays,
+      welcome_enabled: welcomeOn ? '1' : '0', welcome_subject: welcomeSubject, welcome_body: welcomeBody,
+      public_site_url: siteUrl.trim().replace(/\/$/, ''), public_article_path: articlePath.trim() || '/articles',
+    });
     setMsg('تم الحفظ');
   }
 
@@ -703,6 +717,39 @@ function NotificationSettings() {
       <p className="muted" style={{ fontSize: 12 }}>
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
       </p>
+
+      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 12, marginBottom: 12 }}>
+        <strong style={{ fontSize: 14 }}>النشرة والمقالات</strong>
+        <div className="grid cols-2" style={{ marginTop: 8 }}>
+          <div className="field">
+            <label>نطاق الموقع العام</label>
+            <input className="input" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} placeholder="https://naf.sa" />
+            <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+              اتركه فارغاً لاستخدام نطاق التطبيق. اضبطه بعد ربط النطاق ليظهر في روابط المقالات والرسائل.
+            </p>
+          </div>
+          <div className="field">
+            <label>مسار المقالات</label>
+            <input className="input" value={articlePath} onChange={(e) => setArticlePath(e.target.value)} placeholder="/articles" />
+          </div>
+        </div>
+        <label className="muted" style={{ fontSize: 13, display: 'inline-flex', gap: 6, cursor: 'pointer', marginTop: 6 }}>
+          <input type="checkbox" checked={welcomeOn} onChange={(e) => setWelcomeOn(e.target.checked)} />
+          إرسال رسالة ترحيب آلية عند الاشتراك
+        </label>
+        {welcomeOn && (
+          <div style={{ marginTop: 8 }}>
+            <div className="field">
+              <label>عنوان رسالة الترحيب</label>
+              <input className="input" value={welcomeSubject} onChange={(e) => setWelcomeSubject(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>نص الترحيب</label>
+              <textarea className="input" rows={3} value={welcomeBody} onChange={(e) => setWelcomeBody(e.target.value)} />
+            </div>
+          </div>
+        )}
+      </div>
       <div className="field" style={{ maxWidth: 240 }}>
         <label>تنبيه المحتوى المتأخر بعد (أيام)</label>
         <input

@@ -59,3 +59,4 @@ emailTrackRoutes.get('/c/:sendId', async (c) => {
   return c.redirect(dest.toString(), 302);
 });
 
+

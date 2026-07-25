@@ -11,7 +11,8 @@ import {
 const BATCH = 40;
 
 type NL = {
-  id: string; title: string; slug: string; subject: string | null;
+  id: string; title: string; slug: string; subject: string | null; subject_b: string | null;
+  ab_percent: number; ab_winner: string | null; segment_tag: string | null;
   preheader: string | null; blocks_json: string; cover_media_id: string | null;
 };
 
@@ -64,15 +65,39 @@ export async function queueNewsletter(env: Env, newsletterId: string): Promise<n
   if (nl.status === 'sending') throw new Error('النشرة قيد الإرسال بالفعل');
   if (nl.status === 'sent') throw new Error('أُرسلت هذه النشرة مسبقاً');
 
-  // صف واحد لكل مشترك نشط (UNIQUE يمنع التكرار عند إعادة المحاولة)
+  const meta = await env.DB.prepare(
+    'SELECT segment_tag, subject_b, ab_percent FROM newsletters WHERE id = ?',
+  ).bind(newsletterId).first<{ segment_tag: string | null; subject_b: string | null; ab_percent: number }>();
+
+  // الشريحة: وسم محدّد أو كل المشتركين النشطين
+  const tag = meta?.segment_tag?.trim();
+  const where = tag ? "status = 'active' AND tags LIKE ?" : "status = 'active'";
+  const binds: unknown[] = tag ? [newsletterId, `%"${tag}"%`] : [newsletterId];
+
+  // صف واحد لكل مشترك في الشريحة (UNIQUE يمنع التكرار عند إعادة المحاولة)
   await env.DB.prepare(
     `INSERT OR IGNORE INTO newsletter_sends (id, newsletter_id, subscriber_id)
-     SELECT lower(hex(randomblob(8))), ?, id FROM subscribers WHERE status = 'active'`,
-  ).bind(newsletterId).run();
+     SELECT lower(hex(randomblob(8))), ?, id FROM subscribers WHERE ${where}`,
+  ).bind(...binds).run();
 
   const n = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM newsletter_sends WHERE newsletter_id = ? AND status = 'queued'",
   ).bind(newsletterId).first<{ n: number }>();
+
+  // اختبار A/B: نُعيّن العنوان (ب) لعيّنة عشوائية.
+  // نحسب حجم العيّنة هنا لا داخل SQL — تمرير معامل داخل LIMIT يسبّب SQLITE_MISMATCH.
+  if (meta?.subject_b?.trim() && (n?.n || 0) > 1) {
+    const pct = Math.min(50, Math.max(5, meta.ab_percent || 20));
+    const sample = Math.max(1, Math.floor(((n?.n || 0) * pct) / 100));
+    await env.DB.prepare(
+      `UPDATE newsletter_sends SET variant = 'b'
+       WHERE id IN (
+         SELECT id FROM newsletter_sends
+         WHERE newsletter_id = ? AND status = 'queued'
+         ORDER BY random() LIMIT ${sample}
+       )`,
+    ).bind(newsletterId).run();
+  }
 
   if (!n?.n) throw new Error('لا يوجد مشتركون نشطون لإرسال النشرة إليهم');
 
@@ -90,16 +115,17 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
   if (!sending) return { sent: 0, failed: 0 };
 
   const nl = await env.DB.prepare(
-    'SELECT id, title, slug, subject, preheader, blocks_json, cover_media_id FROM newsletters WHERE id = ?',
+    `SELECT id, title, slug, subject, subject_b, ab_percent, ab_winner, segment_tag,
+            preheader, blocks_json, cover_media_id FROM newsletters WHERE id = ?`,
   ).bind(sending.id).first<NL>();
   if (!nl) return { sent: 0, failed: 0 };
 
   const { results: batch } = await env.DB.prepare(
-    `SELECT s.id AS send_id, sub.email, sub.token
+    `SELECT s.id AS send_id, s.variant, sub.email, sub.token
      FROM newsletter_sends s JOIN subscribers sub ON sub.id = s.subscriber_id
      WHERE s.newsletter_id = ? AND s.status = 'queued' AND sub.status = 'active'
      LIMIT ?`,
-  ).bind(nl.id, BATCH).all<{ send_id: string; email: string; token: string }>();
+  ).bind(nl.id, BATCH).all<{ send_id: string; variant: string; email: string; token: string }>();
 
   // لا مزيد من المشتركين → النشرة اكتملت
   if (!batch.length) {
@@ -114,7 +140,14 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
   const provider = await getEmailProvider(env);
   const contentHtml = renderBlocks(parseBlocks(nl.blocks_json), 'email', base);
   const aUrl = articleUrl(base, path, nl.slug);
-  const subject = nl.subject || nl.title;
+  const subjectA = nl.subject || nl.title;
+  const subjectB = nl.subject_b || subjectA;
+  // بعد حسم الاختبار يُستخدم العنوان الفائز للجميع
+  const pickSubject = (variant: string) => {
+    if (nl.ab_winner === 'a') return subjectA;
+    if (nl.ab_winner === 'b') return subjectB;
+    return variant === 'b' ? subjectB : subjectA;
+  };
 
   let sent = 0;
   let failed = 0;
@@ -129,7 +162,7 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
         articleUrl: aUrl,
         trackOpenUrl: `${base}/e/o/${row.send_id}.gif`,
       });
-      await provider.send(row.email, subject, html);
+      await provider.send(row.email, pickSubject(row.variant), html);
       await env.DB.prepare("UPDATE newsletter_sends SET status = 'sent', sent_at = ? WHERE id = ?")
         .bind(nowIso(), row.send_id)
         .run();
@@ -201,4 +234,65 @@ export async function syncNewsletterAnalytics(env: Env): Promise<number> {
     n++;
   }
   return n;
+}
+
+// ===== اختبار العنوانين (A/B) =====
+// يقارن معدل الفتح بين العنوانين على العيّنة، ويعتمد الأفضل لبقية القائمة.
+export async function abResults(env: Env, newsletterId: string) {
+  const { results } = await env.DB.prepare(
+    `SELECT variant,
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent,
+            SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened
+     FROM newsletter_sends WHERE newsletter_id = ? GROUP BY variant`,
+  ).bind(newsletterId).all<{ variant: string; total: number; sent: number; opened: number }>();
+
+  const pick = (v: string) => results.find((r) => r.variant === v) || { variant: v, total: 0, sent: 0, opened: 0 };
+  const a = pick('a');
+  const b = pick('b');
+  const rate = (r: { sent: number; opened: number }) => (r.sent > 0 ? Math.round((r.opened / r.sent) * 1000) / 10 : 0);
+  return { a: { ...a, open_rate: rate(a) }, b: { ...b, open_rate: rate(b) } };
+}
+
+// يعتمد العنوان الفائز يدوياً أو آلياً (الأعلى فتحاً)
+export async function decideAbWinner(env: Env, newsletterId: string, forced?: 'a' | 'b'): Promise<string> {
+  let winner = forced;
+  if (!winner) {
+    const r = await abResults(env, newsletterId);
+    if (r.a.sent < 5 && r.b.sent < 5) throw new Error('العيّنة صغيرة جداً للحسم — انتظر مزيداً من الفتحات');
+    winner = r.b.open_rate > r.a.open_rate ? 'b' : 'a';
+  }
+  await env.DB.prepare('UPDATE newsletters SET ab_winner = ?, updated_at = ? WHERE id = ?')
+    .bind(winner, nowIso(), newsletterId)
+    .run();
+  return winner;
+}
+
+// ===== رسالة الترحيب الآلية =====
+// تُرسل مرة واحدة عند اشتراك جديد — أفضل جهد فلا تُعطّل تسجيل الاشتراك.
+export async function sendWelcome(env: Env, email: string, token: string, requestUrl: string): Promise<void> {
+  const rows = await env.DB.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('welcome_enabled','welcome_subject','welcome_body','app_name')",
+  ).all<{ key: string; value: string }>();
+  const cfg: Record<string, string> = {};
+  for (const r of rows.results) cfg[r.key] = r.value || '';
+  if (cfg.welcome_enabled !== '1') return;
+
+  const { base, path } = await publicSettings(env, requestUrl);
+  const name = cfg.app_name || env.APP_NAME || 'شركة ناف القانونية';
+  const body = `<p style="margin:0 0 14px;line-height:1.9;font-size:16px;color:#1f2430">${escapeHtml(cfg.welcome_body || '')}</p>`;
+
+  const provider = await getEmailProvider(env);
+  await provider.send(
+    email,
+    cfg.welcome_subject || `أهلاً بك في نشرة ${name}`,
+    emailShell({
+      siteName: name,
+      preheader: cfg.welcome_body || '',
+      body,
+      unsubUrl: `${base}${path}/unsubscribe/${token}`,
+      articleUrl: `${base}${path}`,
+      trackOpenUrl: `${base}/e/o/welcome.gif`,
+    }),
+  );
 }

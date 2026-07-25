@@ -8,7 +8,7 @@ import {
   toXThread, toLinkedInPost,
 } from '../services/newsletter';
 import { getProvider } from '../adapters';
-import { queueNewsletter, newsletterStats, sendQueuedBatch } from '../services/newsletterSend';
+import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -62,7 +62,8 @@ newsletterRoutes.post('/', async (c) => {
 newsletterRoutes.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json<Record<string, unknown>>();
-  const allowed = ['title', 'subject', 'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at'];
+  const allowed = ['title', 'subject', 'subject_b', 'ab_percent', 'segment_tag',
+    'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at'];
   const sets: string[] = [];
   const binds: unknown[] = [];
 
@@ -190,4 +191,32 @@ newsletterRoutes.post('/:id/social', async (c) => {
     }
   }
   return c.json({ ok: results.some((r) => r.ok), results });
+});
+
+// نتائج اختبار العنوانين
+newsletterRoutes.get('/:id/ab', async (c) => {
+  return c.json(await abResults(c.env, c.req.param('id')));
+});
+
+// اعتماد العنوان الفائز (يدوياً أو آلياً بالأعلى فتحاً)
+newsletterRoutes.post('/:id/ab/decide', async (c) => {
+  const body = await c.req.json<{ winner?: 'a' | 'b' }>().catch(() => ({} as any));
+  try {
+    const winner = await decideAbWinner(c.env, c.req.param('id'), body.winner);
+    return c.json({ ok: true, winner });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 400);
+  }
+});
+
+// الوسوم المتاحة للشرائح (من بيانات المشتركين الفعلية)
+newsletterRoutes.get('/meta/tags', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT tags FROM subscribers WHERE tags IS NOT NULL AND tags != ''",
+  ).all<{ tags: string }>();
+  const set = new Set<string>();
+  for (const r of results) {
+    try { for (const t of JSON.parse(r.tags) || []) if (t) set.add(String(t)); } catch { /* وسم تالف */ }
+  }
+  return c.json({ tags: [...set].sort() });
 });
