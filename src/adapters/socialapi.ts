@@ -456,6 +456,11 @@ export async function listSocialApiWebhooks(apiKey: string): Promise<any[]> {
   const data = await sapi<any>(apiKey, 'GET', '/webhooks');
   return data?.data || data?.webhooks || (Array.isArray(data) ? data : []);
 }
+// استهلاك الحصة مقابل حدود الخطة (القيمة -1 تعني بلا حد)
+export async function socialApiUsage(apiKey: string): Promise<any> {
+  return sapi<any>(apiKey, 'GET', '/usage');
+}
+
 export async function deleteSocialApiWebhook(apiKey: string, id: string): Promise<void> {
   try { await sapi(apiKey, 'DELETE', `/webhooks/${id}`); } catch { /* غير حرِج */ }
 }

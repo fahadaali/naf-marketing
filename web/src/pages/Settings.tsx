@@ -410,6 +410,7 @@ function Platforms() {
         </div>
       )}
 
+      {provider === 'socialapi' && <IntegrationHealth />}
       {provider === 'socialapi' && <SocialApiWebhook />}
 
       {msg && <p className="ok">{msg}</p>}
@@ -829,6 +830,88 @@ function Integrations() {
         </div>
         <button className="btn ghost" onClick={runReport} disabled={!status?.mgmt_set}>رفع التقرير الآن إلى بيسكامب</button>
         <a className="btn ghost" href={`/api/basecamp/report/download?period=${reportPeriod}&format=${reportFormat}`}>تنزيل التقرير (معاينة)</a>
+      </div>
+    </div>
+  );
+}
+
+/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة ===== */
+function IntegrationHealth() {
+  const [h, setH] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+
+  function load() {
+    setBusy(true);
+    api.get('/socialapi/health').then(setH).catch(() => setH(null)).finally(() => setBusy(false));
+  }
+  useEffect(load, []);
+
+  if (!h?.configured) return null;
+  const L = h.local || {};
+  const mapping: Record<string, string> = h.mapping || {};
+  const mappedIds = new Set(Object.values(mapping).filter(Boolean));
+  const fmt = (t: string | null) => (t ? formatRiyadh(t) : '—');
+  const quota = (used: number, limit: number) => (limit === -1 ? `${used} / بلا حد` : `${used} / ${limit}`);
+
+  return (
+    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <strong style={{ fontSize: 14 }}>صحّة التكامل</strong>
+        <div className="spacer" />
+        <button className="btn ghost sm" onClick={load} disabled={busy}>{busy ? 'جارٍ…' : 'تحديث'}</button>
+      </div>
+
+      {/* الحسابات وحالة ربطها بمنصات المنصة */}
+      {h.accounts_error ? (
+        <p className="err" style={{ fontSize: 12 }}>تعذّر جلب الحسابات: {h.accounts_error}</p>
+      ) : (
+        <div style={{ marginBottom: 10 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>الحسابات المربوطة لدى المزوّد</div>
+          {(h.accounts || []).map((a: any) => (
+            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 3 }}>
+              <PlatformIcon platform={a.platform} size={16} />
+              <span>{platformLabel(a.platform)}</span>
+              <span className="muted">{a.name}</span>
+              <div className="spacer" />
+              <span className={`badge ${mappedIds.has(a.id) ? 'green' : 'gray'}`}>
+                {mappedIds.has(a.id) ? 'مربوط بمنصة' : 'غير مربوط'}
+              </span>
+            </div>
+          ))}
+          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد حسابات.</p>}
+        </div>
+      )}
+
+      {/* الحصة */}
+      {h.usage && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          الحصة: منشورات {quota(h.usage.posts_used, h.usage.posts_limit)} ·
+          {' '}تفاعلات {quota(h.usage.interactions_used, h.usage.interactions_limit)} ·
+          {' '}علامات {quota(h.usage.brands_used, h.usage.brands_limit)}
+        </div>
+      )}
+      {h.usage_error && <p className="muted" style={{ fontSize: 12 }}>تعذّر جلب الحصة.</p>}
+
+      {/* الويب هوك */}
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        الاستقبال الفوري:{' '}
+        {(h.webhooks || []).length > 0
+          ? <span className="badge green">مفعّل ({h.webhooks.length})</span>
+          : <span className="badge gray">غير مسجّل</span>}
+      </div>
+
+      {/* حالة المزامنة المحلية */}
+      <div style={{ fontSize: 12, display: 'grid', gap: 3 }}>
+        <div className="row"><span className="muted">آخر سحب تحليلات</span><div className="spacer" /><span>{fmt(L.analytics_last)} ({L.analytics_count})</span></div>
+        <div className="row"><span className="muted">آخر عنصر في الصندوق</span><div className="spacer" /><span>{fmt(L.inbox_last)} ({L.inbox_count})</span></div>
+        <div className="row">
+          <span className="muted">مواعيد النشر</span>
+          <div className="spacer" />
+          <span>
+            {L.schedules_pending} بانتظار
+            {L.schedules_failed > 0 && <span className="badge red" style={{ marginRight: 6 }}>{L.schedules_failed} فاشل</span>}
+          </span>
+        </div>
       </div>
     </div>
   );
