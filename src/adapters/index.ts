@@ -44,11 +44,11 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
       try { accounts = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
       return new SocialApiProvider(key, accounts);
     }
-    // case 'zernio': return new ZernioProvider(key);
-    // case 'late':   return new LateProvider(key);
     case 'mock':
-    default:
       return new MockProvider();
+    default:
+      // مزوّد غير معروف في الإعدادات — لا نسقط بصمت إلى التجريبي كي لا يظن المستخدم أنه ينشر فعلياً
+      throw new Error(`مزوّد غير مدعوم: ${name} — اختر مزوّداً مدعوماً من الإعدادات ← المنصات والمزوّد`);
   }
 }
 

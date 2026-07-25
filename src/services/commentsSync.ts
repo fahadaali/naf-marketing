@@ -29,7 +29,9 @@ async function syncSocialApiInbox(env: Env): Promise<number> {
 
   let added = 0;
   for (const it of items) {
-    if (!it.id) continue;
+    // نتجاهل ما لا نص له — بنفس شرط التنظيف أعلاه، وإلّا حُذف وأُعيدت إضافته كل دورة
+    // فيتضخّم عدّاد «الجديد» بلا فائدة.
+    if (!it.id || !it.body?.trim()) continue;
     const caps = it.capabilities ? JSON.stringify(it.capabilities) : null;
     const res = await env.DB.prepare(
       `INSERT INTO platform_comments
