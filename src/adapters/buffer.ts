@@ -147,10 +147,10 @@ export class BufferProvider implements PublishingProvider {
     const modeClause = input.scheduleAt
       ? `mode: customScheduled, dueAt: ${JSON.stringify(input.scheduleAt)}`
       : 'mode: shareNow';
-    // AssetInput.image نوعه ImageAssetInput (كائن فيه url) — لا نصّ
-    const assetsClause = input.mediaUrls?.length
-      ? `, assets: [{ image: { url: ${JSON.stringify(input.mediaUrls[0])} } }]`
-      : '';
+    // AssetInput.image نوعه ImageAssetInput (كائن فيه url) — لا نصّ.
+    // Buffer يجلب الوسيط برابط عام، فنمرّر ما توفّر له رابط مطلق فقط.
+    const firstUrl = (input.media || []).map((m) => m.url).find((u) => /^https?:\/\//.test(u || ''));
+    const assetsClause = firstUrl ? `, assets: [{ image: { url: ${JSON.stringify(firstUrl)} } }]` : '';
 
     let lastId = '';
     for (const channelId of channelIds) {

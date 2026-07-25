@@ -22,6 +22,7 @@ const EP = {
   conversationMessages: (id: string) => `/inbox/conversations/${id}/messages`, // POST إرسال رسالة
   mentions: '/inbox/mentions', // GET الإشارات
   replyMention: (id: string) => `/inbox/mentions/${id}/reply`, // POST رد على إشارة
+  media: '/media', // POST رفع وسيط من الخادم، GET سرد
   exports: '/exports', // GET سرد، POST إنشاء تصدير تحليلات
   exportItem: (id: string) => `/exports/${id}`, // GET حالة/نتيجة تصدير
   exportVideos: (id: string) => `/exports/${id}/videos`, // GET فيديوهات تصدير مكتمل مع المقاييس
@@ -461,13 +462,40 @@ export class SocialApiProvider implements PublishingProvider {
     this.key = (apiKey || '').trim();
   }
 
+  // يرفع وسيطاً إلى SocialAPI ويُعيد media_id (التوثيق: الرابط العام الخام داخل media_ids يُتجاهل،
+  // فالرفع أولاً إلزامي). نستخدم multipart لأن المسار يقبل ملفاً مباشرة من الخادم.
+  private async uploadMedia(m: { data?: ArrayBuffer; mimeType: string; filename: string }): Promise<string> {
+    if (!m.data) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
+    const form = new FormData();
+    form.append('file', new Blob([m.data], { type: m.mimeType || 'application/octet-stream' }), m.filename || 'media');
+    const res = await fetch(`${BASE}${EP.media}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.key}` }, // بلا content-type — يضبطه FormData مع الحدود
+      body: form,
+    });
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
+    if (!res.ok) throw new Error(`فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${data?.error?.message || data?.message || text.slice(0, 140)}`);
+    const id = data?.id || data?.media_id || data?.data?.id;
+    if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
+    return String(id);
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     const accountIds = input.platforms.map((p) => this.accounts[p]).filter(Boolean);
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
     }
-    // جسم النشر وفق التوثيق: { text, targets:[{account_id}], scheduled_at? } — والنشر الفوري يحتاج publish_now
+    // جسم النشر وفق التوثيق: { text, targets:[{account_id}], media_ids?, scheduled_at? }
+    // والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
+    if (input.media?.length) {
+      const mediaIds: string[] = [];
+      for (const m of input.media) mediaIds.push(await this.uploadMedia(m));
+      if (mediaIds.length) body.media_ids = mediaIds;
+    }
+    if (input.firstComment?.trim()) body.first_comment = input.firstComment.trim();
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
     else body.publish_now = true;
     const data = await sapi<any>(this.key, 'POST', EP.posts, body);

@@ -1,10 +1,20 @@
 // طبقة النشر المجرّدة — واجهة محايدة للمزوّد.
 // أي مزوّد (Zernio / Late / Ayrshare ...) ينفّذ هذه الواجهة، ويبقى بقية الكود محايداً.
 
+// وسيط مرفق بالنشر — نُمرّر البايتات لأن مسار /api/media محمي بالمصادقة،
+// فلا يستطيع المزوّد جلبه برابط. المزوّدون الذين يقبلون روابط عامة يستخدمون url.
+export interface PublishMedia {
+  data?: ArrayBuffer;
+  mimeType: string;
+  filename: string;
+  url?: string; // رابط عام إن توفّر (لمزوّدين يقبلون الروابط مثل Buffer)
+}
+
 export interface PublishInput {
   platforms: string[];
   text: string;
-  mediaUrls?: string[];
+  media?: PublishMedia[];
+  firstComment?: string; // أول تعليق يُنشر بعد المنشور (روابط/وسوم)
   scheduleAt?: string; // ISO 8601, UTC
 }
 
