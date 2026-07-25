@@ -44,5 +44,6 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'permissions.manage': 'تعديل الصلاحيات',
   'settings.manage': 'إدارة الإعدادات',
   'comments.manage': 'إدارة التعليقات والرسائل المباشرة',
+  'newsletter.manage': 'إدارة النشرات البريدية والمشتركين',
   'audit.view': 'عرض سجل التدقيق',
 };

@@ -17,6 +17,8 @@ import {
   Scale,
   Search,
   ShieldCheck,
+  Mails,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
@@ -73,6 +75,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
     { to: '/analytics', label: 'التحليلات', icon: <BarChart3 size={sz} />, show: can('analytics.view') },
     { to: '/comments', label: 'التعليقات والرسائل', icon: <MessageCircle size={sz} />, show: can('comments.manage') },
+    { to: '/newsletters', label: 'النشرات والمقالات', icon: <Mails size={sz} />, show: can('newsletter.manage') },
+    { to: '/subscribers', label: 'المشتركون', icon: <Users size={sz} />, show: can('newsletter.manage') },
     { to: '/audit', label: 'سجل التدقيق', icon: <ShieldCheck size={sz} />, show: can('audit.view') },
     {
       to: '/settings',
