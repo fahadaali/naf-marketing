@@ -12,6 +12,8 @@ import News from './pages/News';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Comments from './pages/Comments';
+import Newsletters from './pages/Newsletters';
+import Subscribers from './pages/Subscribers';
 import Search from './pages/Search';
 import Audit from './pages/Audit';
 
@@ -37,6 +39,8 @@ export default function App() {
       <Route path="/news" element={<Protected><News /></Protected>} />
       <Route path="/analytics" element={<Protected><Analytics /></Protected>} />
       <Route path="/comments" element={<Protected><Comments /></Protected>} />
+      <Route path="/newsletters" element={<Protected><Newsletters /></Protected>} />
+      <Route path="/subscribers" element={<Protected><Subscribers /></Protected>} />
       <Route path="/search" element={<Protected><Search /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="/audit" element={<Protected><Audit /></Protected>} />

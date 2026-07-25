@@ -19,6 +19,9 @@ import { auditRoutes } from './routes/audit';
 import { bufferRoutes } from './routes/buffer';
 import { socialApiRoutes } from './routes/socialapi';
 import { webhookRoutes } from './routes/webhooks';
+import { newsletterRoutes } from './routes/newsletters';
+import { subscriberRoutes } from './routes/subscribers';
+import { publicRoutes } from './routes/publicPages';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -43,10 +46,16 @@ api.route('/audit', auditRoutes);
 api.route('/buffer', bufferRoutes);
 api.route('/socialapi', socialApiRoutes);
 api.route('/webhooks', webhookRoutes);
+api.route('/newsletters', newsletterRoutes);
+api.route('/subscribers', subscriberRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 
 app.route('/api', api);
+
+// الصفحات العامة (مقالات/اشتراك/إلغاء) — تُسجَّل قبل خدمة الواجهة كي تُخدَّم من الخادم.
+// المسار قابل للتغيير لاحقاً بربط النطاق دون تعديل الكود.
+app.route('/articles', publicRoutes);
 
 // كل ما عدا /api يُخدَم من أصول React (SPA). not_found_handling = single-page-application
 app.all('*', async (c) => {
