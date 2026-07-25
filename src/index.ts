@@ -22,6 +22,7 @@ import { webhookRoutes } from './routes/webhooks';
 import { newsletterRoutes } from './routes/newsletters';
 import { subscriberRoutes } from './routes/subscribers';
 import { publicRoutes } from './routes/publicPages';
+import { emailTrackRoutes } from './routes/emailTracking';
 import { handleScheduled } from './cron';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -57,6 +58,9 @@ app.route('/api', api);
 // المسار قابل للتغيير لاحقاً بربط النطاق دون تعديل الكود.
 app.route('/articles', publicRoutes);
 
+// تتبّع البريد (بكسل الفتح وتحويل النقر) — عام، يفتحه عميل البريد
+app.route('/e', emailTrackRoutes);
+
 // كل ما عدا /api يُخدَم من أصول React (SPA). not_found_handling = single-page-application
 app.all('*', async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
@@ -64,7 +68,9 @@ app.all('*', async (c) => {
 
 export default {
   fetch: app.fetch,
-  scheduled: async (event: ScheduledController, env: Env, ctx: ExecutionContext) => {
-    ctx.waitUntil(handleScheduled(event, env));
+  // ننتظر المهام فعلياً بدل ctx.waitUntil: عمر استدعاء Cron هو عمر هذا الوعد،
+  // وتركه معلّقاً يعرّض المهام للإلغاء قبل اكتمالها (نشر/إرسال/مزامنة).
+  scheduled: async (event: ScheduledController, env: Env, _ctx: ExecutionContext) => {
+    await handleScheduled(event, env);
   },
 };

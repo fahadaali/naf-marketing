@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
+import { getEmailProvider } from '../services/email';
 import { newId, nowIso } from '../util';
 import { parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl } from '../services/newsletter';
+import { queueNewsletter, newsletterStats, sendQueuedBatch } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -99,4 +101,41 @@ newsletterRoutes.get('/:id/preview', async (c) => {
     html: renderBlocks(parseBlocks(row.blocks_json), 'email', base),
     text: blocksToText(parseBlocks(row.blocks_json)),
   });
+});
+
+// إحصاءات الإرسال (مُسلَّم/فتح/نقر)
+newsletterRoutes.get('/:id/stats', async (c) => {
+  const s = await newsletterStats(c.env, c.req.param('id'));
+  return c.json({ stats: s || {} });
+});
+
+// بدء الإرسال — يُدرج صفاً لكل مشترك نشط، ثم يرسل الدفعات عبر Cron
+newsletterRoutes.post('/:id/send', async (c) => {
+  try {
+    const queued = await queueNewsletter(c.env, c.req.param('id'));
+    // نبدأ الدفعة الأولى فوراً كي يرى المستخدم تقدّماً مباشرة
+    c.executionCtx.waitUntil(sendQueuedBatch(c.env, c.req.url).catch(() => {}));
+    return c.json({ ok: true, queued });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 400);
+  }
+});
+
+// إرسال تجريبي لبريد واحد قبل الإرسال الجماعي
+newsletterRoutes.post('/:id/test', async (c) => {
+  const { email } = await c.req.json<{ email: string }>();
+  if (!email?.trim()) return c.json({ error: 'أدخل بريداً للاختبار' }, 400);
+  const row = await c.env.DB.prepare('SELECT * FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id'))
+    .first<any>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  try {
+    const { base } = await publicSettings(c.env, c.req.url);
+    const provider = await getEmailProvider(c.env);
+    const html = renderBlocks(parseBlocks(row.blocks_json), 'email', base);
+    await provider.send(email.trim(), `[اختبار] ${row.subject || row.title}`, html);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: `فشل الإرسال التجريبي: ${String(e?.message || e)}` }, 502);
+  }
 });

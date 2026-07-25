@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, Eye, Globe, Mail, Save, ExternalLink,
-  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus,
+  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 
@@ -94,8 +94,14 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [preview, setPreview] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [stats, setStats] = useState<any>(null);
+
+  function loadStats() {
+    api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
+  }
 
   useEffect(() => {
+    loadStats();
     api.get(`/newsletters/${id}`).then((d) => {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
@@ -128,6 +134,25 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     } catch (e: any) { setMsg(e.message); }
   }
 
+  async function sendTest() {
+    const email = prompt('بريد الاختبار:');
+    if (!email?.trim()) return;
+    try { await save(); await api.post(`/newsletters/${id}/test`, { email: email.trim() }); setMsg('أُرسلت رسالة الاختبار'); }
+    catch (e: any) { setMsg(e.message); }
+  }
+
+  async function sendAll() {
+    if (!confirm('إرسال النشرة لكل المشتركين النشطين؟ لا يمكن التراجع.')) return;
+    try {
+      await save();
+      const d = await api.post(`/newsletters/${id}/send`);
+      setMsg(`بدأ الإرسال إلى ${d.queued} مشترك — يكتمل تدريجياً`);
+      const r = await api.get(`/newsletters/${id}`);
+      setNl(r.newsletter);
+      loadStats();
+    } catch (e: any) { setMsg(e.message); }
+  }
+
   async function remove() {
     if (!confirm('حذف هذه النشرة نهائياً؟')) return;
     await api.del(`/newsletters/${id}`);
@@ -155,7 +180,11 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={showPreview}><Eye size={15} /> معاينة البريد</button>
+        <button className="btn ghost" onClick={showPreview}><Eye size={15} /> معاينة</button>
+        <button className="btn ghost" onClick={sendTest}><Mail size={15} /> اختبار</button>
+        {['draft', 'scheduled'].includes(nl.status) && (
+          <button className="btn" onClick={sendAll}><Send size={15} /> إرسال للمشتركين</button>
+        )}
         <button className="btn" disabled={saving} onClick={() => save()}><Save size={15} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
 
@@ -195,6 +224,20 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             )}
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
           </div>
+
+          {stats && stats.total > 0 && (
+            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> نتائج الإرسال</strong>
+              <div style={{ fontSize: 12, display: 'grid', gap: 3, marginTop: 8 }}>
+                <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
+                <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
+                <div className="row"><span className="muted">نُقر فيها</span><div className="spacer" /><span>{stats.clicked} ({pct(stats.clicked, stats.sent)}%)</span></div>
+                {stats.queued > 0 && <div className="row"><span className="muted">بانتظار الإرسال</span><div className="spacer" /><span>{stats.queued}</span></div>}
+                {stats.failed > 0 && <div className="row"><span className="muted">فشل</span><div className="spacer" /><span className="badge red">{stats.failed}</span></div>}
+              </div>
+              <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={loadStats}>تحديث النتائج</button>
+            </div>
+          )}
 
           <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={14} /> حذف النشرة</button>
         </div>
@@ -242,6 +285,10 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       )}
     </div>
   );
+}
+
+function pct(n: number, d: number): number {
+  return d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
 }
 
 function blockLabel(t: string): string {
