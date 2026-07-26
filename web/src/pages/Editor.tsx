@@ -894,7 +894,7 @@ function KBModal({
         <>
           <div className="field">
             <label>اختر ملفاً من مركز المعرفة</label>
-            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا توجد ملفات.</p>}
               {files.map((f) => (
                 <div

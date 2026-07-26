@@ -340,7 +340,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
               <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> نتائج الإرسال</strong>
-              <div style={{ fontSize: 12, display: 'grid', gap: 3, marginTop: 8 }}>
+              <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
                 <div className="row"><span className="muted">نُقر فيها</span><div className="spacer" /><span>{stats.clicked} ({pct(stats.clicked, stats.sent)}%)</span></div>
@@ -390,7 +390,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
           <div
-            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 10, marginTop: 10, maxWidth: 640 }}
+            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 'var(--radius)', marginTop: 10, maxWidth: 640 }}
             dangerouslySetInnerHTML={{ __html: preview }}
           />
         </div>

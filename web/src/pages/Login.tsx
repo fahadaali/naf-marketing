@@ -41,7 +41,7 @@ export default function Login() {
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <div className="brand-mark" style={{ width: 52, height: 52, borderRadius: 13 }}>
+          <div className="brand-mark" style={{ width: 52, height: 52, borderRadius: 'calc(var(--radius) + 4px)' }}>
             <Scale size={28} />
           </div>
           <h1>منصة ناف للتسويق</h1>

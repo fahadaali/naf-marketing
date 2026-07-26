@@ -60,7 +60,7 @@ export default function Campaigns() {
           <div className="row" style={{ fontSize: 13, marginBottom: 8 }}>
             <span className="muted">المنصات:</span>
             {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
-              <span key={p} className="row" style={{ gap: 5 }}>
+              <span key={p} className="row" style={{ gap: 4 }}>
                 <PlatformIcon platform={p} size={18} /> {platformLabel(p)}
               </span>
             ))}

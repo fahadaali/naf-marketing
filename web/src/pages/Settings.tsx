@@ -915,7 +915,7 @@ function IntegrationHealth() {
         <div style={{ marginBottom: 10 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>الحسابات المربوطة لدى المزوّد</div>
           {(h.accounts || []).map((a: any) => (
-            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 3 }}>
+            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 4 }}>
               <PlatformIcon platform={a.platform} size={16} />
               <span>{platformLabel(a.platform)}</span>
               <span className="muted">{a.name}</span>
@@ -948,7 +948,7 @@ function IntegrationHealth() {
       </div>
 
       {/* حالة المزامنة المحلية */}
-      <div style={{ fontSize: 12, display: 'grid', gap: 3 }}>
+      <div style={{ fontSize: 12, display: 'grid', gap: 4 }}>
         <div className="row"><span className="muted">آخر سحب تحليلات</span><div className="spacer" /><span>{fmt(L.analytics_last)} ({L.analytics_count})</span></div>
         <div className="row"><span className="muted">آخر عنصر في الصندوق</span><div className="spacer" /><span>{fmt(L.inbox_last)} ({L.inbox_count})</span></div>
         <div className="row">

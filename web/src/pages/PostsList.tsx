@@ -573,7 +573,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <p className="ok">جاهز للاستيراد: {items.length} عنصراً</p>
-          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
             {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
             {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و{items.length - 20} غيرها</div>}
           </div>
