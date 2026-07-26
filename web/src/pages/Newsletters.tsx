@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Plus, Trash2, ArrowUp, ArrowDown, Eye, Globe, Mail, Save, ExternalLink,
+  Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -210,7 +210,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
-        <button className="btn ghost sm" onClick={onBack}>← رجوع</button>
+        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={14} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}

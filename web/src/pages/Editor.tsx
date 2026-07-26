@@ -13,6 +13,7 @@ import {
   PenLine,
   BookOpen,
   ImagePlus,
+  Paperclip,
   Wand2,
   Image as ImageIcon,
   Video,
@@ -302,7 +303,7 @@ export default function Editor() {
                 </button>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
-                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك 📎 في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={13} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
               </p>
             </div>
           )}
