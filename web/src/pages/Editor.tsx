@@ -492,7 +492,7 @@ export default function Editor() {
             <div className="card" style={{ marginBottom: notes.length ? 14 : 0 }}>
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
-                <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
+                <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
                   <div>{a.actor_name} → <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
@@ -517,7 +517,7 @@ export default function Editor() {
                 </button>
               </div>
               {notes.map((n) => (
-                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
+                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
                   <div><strong>{n.author_name || 'بيسكامب'}</strong></div>
                   <div className="muted">{n.body}</div>
                   <div className="muted">{formatRiyadh(n.created_at)}</div>

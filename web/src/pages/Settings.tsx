@@ -956,7 +956,7 @@ function IntegrationHealth() {
           <div className="spacer" />
           <span>
             {L.schedules_pending} بانتظار
-            {L.schedules_failed > 0 && <span className="badge red" style={{ marginRight: 6 }}>{L.schedules_failed} فاشل</span>}
+            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}>{L.schedules_failed} فاشل</span>}
           </span>
         </div>
       </div>

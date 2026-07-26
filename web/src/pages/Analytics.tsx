@@ -201,9 +201,9 @@ export default function Analytics() {
           <h4 style={{ marginTop: 0 }}>حالة خط الإنتاج</h4>
           <div className="row">
             {(data?.pipeline || []).map((s: any) => (
-              <div key={s.status} style={{ marginLeft: 12 }}>
+              <div key={s.status} style={{ marginInlineEnd: 12 }}>
                 <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABELS[s.status] || s.status}</span>
-                <strong style={{ marginRight: 6 }}>{s.count}</strong>
+                <strong style={{ marginInlineStart: 6 }}>{s.count}</strong>
               </div>
             ))}
           </div>
@@ -335,7 +335,7 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
-        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginLeft: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
+        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
       </div>

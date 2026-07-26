@@ -119,7 +119,7 @@ a:hover { text-decoration: underline; }
 
 /* ===== الإشعارات ===== */
 .notif-dot {
-  position: absolute; top: -3px; left: -3px; min-width: 16px; height: 16px; padding: 0 4px;
+  position: absolute; top: -3px; inset-inline-end: -3px; min-width: 16px; height: 16px; padding: 0 4px;
   background: var(--destructive); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700;
   display: grid; place-items: center; line-height: 1;
 }
@@ -185,7 +185,7 @@ a:hover { text-decoration: underline; }
 
 /* ===== الجداول ===== */
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.table th, .table td { padding: 12px 14px; text-align: right; }
+.table th, .table td { padding: 12px 14px; text-align: start; }
 .table th {
   color: var(--muted-foreground); font-weight: 600; font-size: 12px;
   text-transform: none; border-bottom: 1px solid var(--border);
@@ -233,7 +233,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .rte-toolbar button:hover { background: var(--card); color: var(--foreground); border-color: var(--border); }
 .rte {
   min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 8px 8px;
-  padding: 16px; background: var(--background); direction: rtl; text-align: right;
+  padding: 16px; background: var(--background); direction: rtl; text-align: start;
   outline: none; font-size: 15px; line-height: 1.8; color: var(--foreground);
 }
 .rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 15%, transparent); }
@@ -311,7 +311,7 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .seg button.on .count-pill { background: color-mix(in oklab, var(--primary) 16%, transparent); color: var(--primary); }
 .suggest-chip {
-  display: inline-flex; align-items: flex-start; gap: 6px; text-align: right; width: 100%;
+  display: inline-flex; align-items: flex-start; gap: 6px; text-align: start; width: 100%;
   border: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 40%, transparent);
   color: var(--foreground); font-family: inherit; font-size: 13px; line-height: 1.5;
   padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background 0.12s, border-color 0.12s;
@@ -324,7 +324,7 @@ h3, h4 { letter-spacing: -0.01em; }
   box-shadow: var(--shadow-lg); padding: 6px; min-width: 180px;
 }
 .menu button {
-  display: flex; align-items: center; gap: 8px; width: 100%; text-align: right;
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: start;
   background: transparent; border: none; color: var(--foreground); font-family: inherit;
   font-size: 14px; padding: 8px 10px; border-radius: var(--radius); cursor: pointer;
 }
@@ -382,7 +382,7 @@ h3, h4 { letter-spacing: -0.01em; }
   padding: 8px 12px; font-size: 12.5px; font-weight: 500; color: var(--foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.media-card { display: flex; align-items: center; gap: 12px; padding: 12px; text-align: right; }
+.media-card { display: flex; align-items: center; gap: 12px; padding: 12px; text-align: start; }
 .media-card .media-cap { padding: 0; }
 .media-ic {
   flex-shrink: 0; width: 46px; height: 46px; border-radius: var(--radius); display: grid; place-items: center;
@@ -428,7 +428,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .dp-presets { display: flex; flex-direction: column; gap: 4px; border-inline-end: 1px solid var(--border); padding-inline-end: 10px; }
 .dp-presets button {
   background: transparent; border: none; color: var(--foreground); font-family: inherit; font-size: 13px;
-  text-align: right; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; white-space: nowrap;
+  text-align: start; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; white-space: nowrap;
 }
 .dp-presets button:hover { background: var(--accent); }
 .dp-cal { width: 252px; }
@@ -472,3 +472,12 @@ h3, h4 { letter-spacing: -0.01em; }
   .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
   .content { padding: 18px; }
 }
+
+/* ===== الاتجاهية: قلب الأيقونات الاتجاهية في RTL =====
+   تُقلب الأيقونات التي تدلّ على اتجاه أفقي فقط.
+   لا تُقلب الشعارات ولا الساعات ولا علامات الصح. */
+[dir='rtl'] .lucide-send,
+[dir='rtl'] .lucide-log-out,
+[dir='rtl'] .lucide-log-in,
+[dir='rtl'] .lucide-external-link,
+[dir='rtl'] .lucide-reply { transform: scaleX(-1); }

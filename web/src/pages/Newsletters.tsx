@@ -262,7 +262,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> الصفحة العامة</strong>
+              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
               <button className="btn sm ghost" disabled={saving} onClick={() => save({ web_published: nl.web_published ? 0 : 1 })}>
                 {nl.web_published ? 'إلغاء النشر' : 'نشر الصفحة'}
@@ -278,7 +278,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> النشر على التواصل</strong>
+              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
               <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
             </div>
@@ -314,7 +314,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> اختبار العنوانين</strong>
+              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
                   <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
@@ -339,7 +339,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> نتائج الإرسال</strong>
+              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
@@ -385,7 +385,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {preview && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="row">
-            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginLeft: 4 }} /> معاينة البريد</h4>
+            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
