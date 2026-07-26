@@ -39,11 +39,10 @@
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  font-family: 'IBM Plex Sans Arabic', 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   background: var(--background);
   color: var(--foreground);
   direction: rtl;
-  line-height: 1.6;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -82,7 +81,7 @@ a:hover { text-decoration: underline; }
 .brand-mark {
   width: 36px; height: 36px; border-radius: 9px;
   background: linear-gradient(135deg, var(--primary), hsl(var(--purple)));
-  color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 17px;
+  color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 17px;
   box-shadow: 0 4px 12px color-mix(in oklab, var(--primary) 35%, transparent);
 }
 .brand-text { line-height: 1.2; }
