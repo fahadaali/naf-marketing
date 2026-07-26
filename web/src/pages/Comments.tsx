@@ -224,7 +224,7 @@ export default function Comments() {
             </div>
           );
         })}
-        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا توجد عناصر بعد — جرّب «جلب الآن».</p>}
+        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.</p>}
       </div>
     </div>
   );

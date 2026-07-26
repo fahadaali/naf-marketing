@@ -30,8 +30,8 @@ export const api = {
 // ===== ثوابت العرض =====
 export const STATUS_LABELS: Record<string, string> = {
   draft: 'مسودة',
-  pending_marketing: 'بانتظار مراجعة التسويق',
-  pending_gm: 'بانتظار اعتماد المدير العام',
+  pending_marketing: 'بانتظار المراجعة',
+  pending_gm: 'بانتظار الاعتماد',
   approved: 'معتمد',
   scheduled: 'مجدول',
   late: 'متأخر',

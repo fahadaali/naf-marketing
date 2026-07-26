@@ -49,7 +49,7 @@ export default function Search() {
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
               </button>
             ))}
-            {posts.length === 0 && <p className="muted">لا نتائج</p>}
+            {posts.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}
           </div>
           <div className="card">
             <h3 style={{ marginTop: 0 }}>الأخبار ({news.length})</h3>
@@ -59,7 +59,7 @@ export default function Search() {
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: n.snippet }} />
               </div>
             ))}
-            {news.length === 0 && <p className="muted">لا نتائج</p>}
+            {news.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}
           </div>
         </div>
       )}

@@ -125,7 +125,7 @@ export default function Subscribers() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={6} className="muted">لا يوجد مشتركون بعد.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={6} className="muted">لا مشتركين بعد. أضف أول مشترك أو استورد قائمة.</td></tr>}
           </tbody>
         </table>
       </div>

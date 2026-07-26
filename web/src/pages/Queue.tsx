@@ -39,7 +39,7 @@ export default function Queue() {
               </tr>
             ))}
             {posts.length === 0 && (
-              <tr><td colSpan={5} className="muted" style={{ textAlign: 'center' }}>لا يوجد محتوى بانتظار الاعتماد</td></tr>
+              <tr><td colSpan={5} className="muted" style={{ textAlign: 'center' }}>لا محتوى بانتظار الاعتماد. الطابور فارغ.</td></tr>
             )}
           </tbody>
         </table>

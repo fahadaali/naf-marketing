@@ -348,7 +348,7 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
             تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى 30 فيديو، تهدئة 7 أيام).
           </p>
           {accounts.length === 0 ? (
-            <p className="muted" style={{ fontSize: 13 }}>لا توجد حسابات فيديو مربوطة (يوتيوب/تيك توك).</p>
+            <p className="muted" style={{ fontSize: 13 }}>لا حسابات فيديو مربوطة. اربط يوتيوب أو تيك توك من الإعدادات.</p>
           ) : (
             <div className="row" style={{ gap: 8, marginBottom: 12 }}>
               <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>

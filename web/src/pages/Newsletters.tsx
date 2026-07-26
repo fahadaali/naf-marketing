@@ -75,7 +75,7 @@ export default function Newsletters() {
                 <td><button className="btn sm" onClick={() => setOpenId(n.id)}>فتح</button></td>
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={6} className="muted">لا توجد نشرات بعد — ابدأ بواحدة.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={6} className="muted">لم تُنشئ أي نشرة بعد. ابدأ بأول نشرة.</td></tr>}
           </tbody>
         </table>
       </div>

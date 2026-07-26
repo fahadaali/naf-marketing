@@ -36,6 +36,15 @@ import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 
+/* رسالة النجاح تحمل اسم الإجراء نفسه، على صيغة «تم + المصدر»
+   من naf-terms.md §4. الزر الذي يقول «رفض» ينتج «تم الرفض». */
+const ACTION_DONE: Record<string, string> = {
+  submit: 'تم الإرسال للمراجعة',
+  approve: 'تم الاعتماد',
+  reject: 'تم الرفض',
+  archive: 'تمت الأرشفة',
+};
+
 export default function Editor() {
   const { id } = useParams();
   const [sp] = useSearchParams();
@@ -153,6 +162,8 @@ export default function Editor() {
     }
   }
 
+  // رسالة النجاح تسمّي الإجراء ولا تكون عامة — naf-terms §4:
+  // «لا: تمت العملية بنجاح — عامة ولا تخبر بشيء».
   async function doAction(action: string, note?: string) {
     setErr(''); setMsg('');
     try {
@@ -162,7 +173,7 @@ export default function Editor() {
       const d = await api.post(`/posts/${pid}/action`, { action, note });
       setStatus(d.status);
       await loadPost(pid);
-      setMsg('تم تنفيذ الإجراء');
+      setMsg(ACTION_DONE[action] || 'تم الحفظ');
     } catch (e: any) {
       setErr(e.message);
     }
@@ -212,7 +223,7 @@ export default function Editor() {
         body_override: variants[platform]?.trim() || null,
         first_comment: firstComments[platform]?.trim() || null,
       });
-      setMsg(`حُفظ نص ${platformLabel(platform, platLabels)}`);
+      setMsg('تم الحفظ');
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -606,7 +617,7 @@ export default function Editor() {
   );
 }
 
-const SCHED_STATUS: Record<string, string> = { pending: 'معلّق', processing: 'قيد النشر', published: 'منشور', failed: 'فشل' };
+const SCHED_STATUS: Record<string, string> = { pending: 'معلّق', processing: 'قيد النشر', published: 'منشور', failed: 'فاشل' };
 
 function AIModal({ platforms, tones, onClose, onResult }: { platforms: string[]; tones: Tone[]; onClose: () => void; onResult: (t: string) => void }) {
   const [topic, setTopic] = useState('');
@@ -900,7 +911,7 @@ function KBModal({
           <div className="field">
             <label>اختر ملفاً من مركز المعرفة</label>
             <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-              {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا توجد ملفات.</p>}
+              {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا مرفقات في هذا المحتوى. أضف أول مرفق.</p>}
               {files.map((f) => (
                 <div
                   key={`${f.type}-${f.id}`}
@@ -983,7 +994,7 @@ function VersionsModal({
             </div>
           </div>
         ))}
-        {versions.length === 0 && <p className="muted">لا توجد نسخ سابقة بعد</p>}
+        {versions.length === 0 && <p className="muted">لا نسخ سابقة بعد. تُحفظ نسخة مع كل تعديل.</p>}
       </div>
     </Modal>
   );
@@ -1012,7 +1023,7 @@ function TemplatesModal({
   async function saveCurrent() {
     setErr(''); setMsg('');
     if (!name.trim()) return setErr('أدخل اسماً للقالب');
-    if (!currentBody.trim()) return setErr('لا يوجد محتوى لحفظه كقالب');
+    if (!currentBody.trim()) return setErr('اكتب المحتوى أولاً ثم احفظه كقالب');
     try {
       await api.post('/templates', { name: name.trim(), body: currentBody });
       setName(''); setMsg('تم حفظ القالب'); load();
@@ -1053,7 +1064,7 @@ function TemplatesModal({
               <button className="btn danger sm" onClick={() => remove(t.id)}><Trash2 size={20} /></button>
             </div>
           ))}
-          {templates.length === 0 && <p className="muted">لا توجد قوالب محفوظة بعد</p>}
+          {templates.length === 0 && <p className="muted">لا قوالب محفوظة بعد. احفظ المحتوى الحالي كقالب.</p>}
         </div>
       </div>
     </Modal>

@@ -64,7 +64,7 @@ export default function NotificationBell() {
                 <div className="muted" style={{ fontSize: 11 }}>{formatRiyadh(n.created_at)}</div>
               </button>
             ))}
-            {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا توجد إشعارات</p>}
+            {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا إشعارات جديدة.</p>}
           </div>
         </div>
       )}

@@ -366,7 +366,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
               </td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا يوجد محتوى مطابق</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -453,7 +453,7 @@ function GanttView({ rows, navigate }: any) {
     })
     .sort((a: any, b: any) => a._s - b._s);
 
-  if (items.length === 0) return <div className="card muted" style={{ textAlign: 'center' }}>لا يوجد محتوى لعرضه على المخطط الزمني</div>;
+  if (items.length === 0) return <div className="card muted" style={{ textAlign: 'center' }}>لا محتوى مجدول لعرضه على المخطّط الزمني. جدوِل أول محتوى.</div>;
 
   const min = Math.min(...items.map((i: any) => i._s));
   const max = Math.max(...items.map((i: any) => i._e), Date.now());

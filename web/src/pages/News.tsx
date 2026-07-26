@@ -26,7 +26,7 @@ export default function News() {
       if (failed.length) {
         setMsg(`أُضيف ${isolate(d.added)} خبراً. تعذّر جلب ${isolate(failed.length)} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
       } else if (d.added === 0) {
-        setMsg('لا توجد أخبار جديدة (كل العناصر مجلوبة مسبقاً).');
+        setMsg('لا أخبار جديدة — كل العناصر مجلوبة مسبقاً.');
       } else {
         setMsg(`تم جلب ${isolate(d.added)} خبراً جديداً`);
       }
@@ -93,7 +93,7 @@ export default function News() {
             </div>
           </div>
         ))}
-        {news.length === 0 && <p className="muted">لا توجد أخبار — أضِف خلاصات RSS من الإعدادات ثم حدّث.</p>}
+        {news.length === 0 && <p className="muted">لا أخبار بعد. أضِف خلاصة RSS من الإعدادات ثم حدّث.</p>}
       </div>
     </div>
   );

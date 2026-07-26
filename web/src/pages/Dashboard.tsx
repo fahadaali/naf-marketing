@@ -71,7 +71,7 @@ export default function Dashboard() {
               </tr>
             ))}
             {posts.length === 0 && (
-              <tr><td colSpan={4} className="muted" style={{ textAlign: 'center' }}>لا يوجد محتوى بعد</td></tr>
+              <tr><td colSpan={4} className="muted" style={{ textAlign: 'center' }}>لم تُنشئ أي محتوى بعد. ابدأ بأول محتوى.</td></tr>
             )}
           </tbody>
         </table>

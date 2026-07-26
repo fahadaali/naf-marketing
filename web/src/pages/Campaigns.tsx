@@ -52,7 +52,7 @@ export default function Campaigns() {
             </div>
           </button>
         ))}
-        {campaigns.length === 0 && <p className="muted">لا توجد حملات بعد</p>}
+        {campaigns.length === 0 && <p className="muted">لم تُنشئ أي حملة بعد. ابدأ بأول حملة.</p>}
       </div>
 
       {selected && (

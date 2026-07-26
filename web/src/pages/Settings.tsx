@@ -202,7 +202,7 @@ function Feeds() {
               <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={20} /></button></td>
             </tr>
           ))}
-          {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا توجد خلاصات</td></tr>}
+          {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا خلاصات بعد. أضِف أول خلاصة RSS.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -268,7 +268,7 @@ function Platforms() {
     try {
       const d = await api.get(cfg.endpoint);
       setAcctList(d.profiles || []);
-      if (!d.profiles?.length) setAcctMsg('لا توجد حسابات مربوطة بعد.');
+      if (!d.profiles?.length) setAcctMsg('لا حسابات مربوطة بعد. اربط حساباً من لوحة المزوّد.');
     } catch (e: any) {
       setAcctMsg(e.message || 'تعذّر جلب الحسابات');
     } finally {
@@ -923,7 +923,7 @@ function IntegrationHealth() {
               <ConnectionBadge kind="linked" on={mappedIds.has(a.id)} />
             </div>
           ))}
-          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد حسابات.</p>}
+          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا حسابات مربوطة بعد.</p>}
         </div>
       )}
 
