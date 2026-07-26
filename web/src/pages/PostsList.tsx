@@ -21,11 +21,12 @@ function riyadhYMD(iso: string): string {
 
 const SOURCE: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
 const TYPE: Record<string, string> = { text: 'نص', image: 'صورة', video: 'فيديو' };
-const BADGE_HSL: Record<string, string> = {
+// لون شريط مخطّط جانت — رمز كامل لا مكوّنات hsl.
+const BADGE_COLOR: Record<string, string> = {
   gray: 'var(--muted-foreground)', blue: 'var(--info)', amber: 'var(--warning)',
-  green: 'var(--success)', red: 'var(--destructive)', purple: 'var(--purple)',
+  green: 'var(--success)', red: 'var(--destructive)', purple: 'var(--chart-4)',
 };
-const statusColor = (st: string) => `hsl(${BADGE_HSL[STATUS_BADGE[st]] || 'var(--muted-foreground)'})`;
+const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--muted-foreground)';
 
 function stripHtml(s: string) {
   return (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
