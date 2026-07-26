@@ -9,7 +9,7 @@
 
 /* رموز ناف كاملة تأتي من naf-theme.css أعلاه.
    ما يبقى هنا: رموز لا مقابل لها في السجلّ (عائلة *-soft والأرجواني)،
-   ورمز الظل الذي تستهلكه أنماط محلية حتى دفعة الظلال. */
+   والظلال الملوّنة بلون العلامة. */
 
 :root,
 :root[data-theme='light'] {
@@ -20,7 +20,6 @@
   --info-soft: 214 95% 95%;
   --purple: 262 70% 55%;
   --purple-soft: 262 80% 96%;
-  --shadow-color: 240 30% 20%;
 }
 
 :root[data-theme='dark'] {
@@ -31,7 +30,6 @@
   --info-soft: 217 50% 18%;
   --purple: 262 75% 68%;
   --purple-soft: 262 40% 20%;
-  --shadow-color: 240 60% 2%;
 }
 
 * { box-sizing: border-box; }
@@ -135,7 +133,7 @@ a:hover { text-decoration: underline; }
 .card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 20px;
-  box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.04);
+  box-shadow: var(--shadow-xs);
 }
 .grid { display: grid; gap: 18px; }
 .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
@@ -238,7 +236,7 @@ h3, h4 { letter-spacing: -0.01em; }
   padding: 16px; background: var(--background); direction: rtl; text-align: right;
   outline: none; font-size: 15px; line-height: 1.8; color: var(--foreground);
 }
-.rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 12%, transparent); }
+.rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 15%, transparent); }
 .rte:empty:before { content: attr(data-placeholder); color: var(--muted-foreground); }
 .rte h2 { font-size: 20px; }
 .rte blockquote { border-inline-start: 3px solid var(--primary); margin: 8px 0; padding-inline-start: 12px; color: var(--muted-foreground); }
@@ -254,7 +252,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .auth-card {
   background: var(--card); padding: 36px; border-radius: calc(var(--radius) + 8px); width: 400px;
   border: 1px solid var(--border);
-  box-shadow: 0 20px 50px hsl(var(--shadow-color) / 0.15), 0 1px 0 color-mix(in oklab, var(--foreground) 2%, transparent) inset;
+  box-shadow: var(--shadow-xl);
 }
 .auth-brand { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 22px; }
 .auth-card h1 { font-size: 22px; text-align: center; margin: 0; }
@@ -289,7 +287,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .modal {
   background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px); padding: 24px;
   width: 100%; max-width: 560px; max-height: 90vh; overflow: auto;
-  box-shadow: 0 24px 60px hsl(var(--shadow-color) / 0.25);
+  box-shadow: var(--shadow-xl);
   animation: pop .14s ease;
 }
 .modal h3 { margin: 0; font-size: 18px; }
@@ -305,7 +303,7 @@ h3, h4 { letter-spacing: -0.01em; }
   color: var(--muted-foreground); font-family: inherit; font-size: 13px; font-weight: 600;
   padding: 6px 12px; border-radius: var(--radius); cursor: pointer;
 }
-.seg button.on { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.1); }
+.seg button.on { background: var(--card); color: var(--foreground); box-shadow: var(--shadow-sm); }
 .count-pill {
   display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
   padding: 0 4px; border-radius: var(--radius); background: color-mix(in oklab, var(--muted-foreground) 18%, transparent);
@@ -323,7 +321,7 @@ h3, h4 { letter-spacing: -0.01em; }
 /* ===== قائمة منسدلة ===== */
 .menu {
   background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 10px 30px hsl(var(--shadow-color) / 0.18); padding: 6px; min-width: 180px;
+  box-shadow: var(--shadow-lg); padding: 6px; min-width: 180px;
 }
 .menu button {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: right;
@@ -364,7 +362,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .gantt-bar {
   position: absolute; top: 8px; height: 22px; border-radius: var(--radius); display: flex; align-items: center;
   padding: 0 8px; color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; cursor: pointer;
-  box-shadow: 0 1px 2px hsl(var(--shadow-color) / 0.15);
+  box-shadow: var(--shadow-sm);
 }
 .gantt-head { display: flex; background: color-mix(in oklab, var(--muted) 50%, transparent); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
 .gantt-tick { position: absolute; top: 0; bottom: 0; border-inline-start: 1px dashed var(--border); font-size: 10px; color: var(--muted-foreground); padding: 4px 4px 0; }
@@ -378,7 +376,7 @@ h3, h4 { letter-spacing: -0.01em; }
   background: var(--card); transition: border-color .12s, box-shadow .12s; text-align: center;
   user-select: none;
 }
-.media-embed:hover { border-color: var(--primary); box-shadow: 0 4px 14px hsl(var(--shadow-color) / 0.12); }
+.media-embed:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
 .media-thumb { display: block; width: 100%; max-height: 240px; object-fit: cover; background: #0b0b0f; }
 .media-cap {
   padding: 8px 12px; font-size: 12.5px; font-weight: 500; color: var(--foreground);
@@ -405,7 +403,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .mv-box {
   background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px);
   max-width: 920px; width: 100%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;
-  box-shadow: 0 24px 70px rgba(0,0,0,.5); animation: pop .14s ease;
+  box-shadow: var(--shadow-2xl); animation: pop .14s ease;
 }
 .mv-head { padding: 12px 18px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
 .mv-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #0b0b0f; min-height: 220px; }
@@ -424,7 +422,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .dp-trigger .ph { color: var(--muted-foreground); }
 .dp-pop {
   background: var(--popover); border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px);
-  box-shadow: 0 12px 34px hsl(var(--shadow-color) / 0.2); padding: 12px; display: flex; gap: 12px;
+  box-shadow: var(--shadow-lg); padding: 12px; display: flex; gap: 12px;
 }
 .dp-inline { display: flex; gap: 12px; }
 .dp-presets { display: flex; flex-direction: column; gap: 4px; border-inline-end: 1px solid var(--border); padding-inline-end: 10px; }
