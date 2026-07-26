@@ -8,6 +8,18 @@ import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
 
+/* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
+   لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
+   وموضعه واحد. أي تغيير هناك يُنسخ هنا، وإلا كذبت المعاينة على المحرّر.
+   استثناء قوالب البريد — CLAUDE.md §1. */
+const EMAIL_PREVIEW = {
+  background: '#E8EBED',
+  card: '#FFFFFF',
+  foreground: '#333333',
+  radius: '12px',
+  fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
+} as const;
+
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
 type Block =
@@ -386,13 +398,27 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
-          {/* استثناء مقصود: هذه معاينة لرسالة بريد، وألوانها تطابق قالب البريد
-              في newsletterSend.ts حرفياً. لو تبعت ثيم المنصة لأظهرت المعاينة
-              شيئاً غير ما يصل المشترك. عملاء البريد لا يدعمون رموز CSS. */}
-          <div
-            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 'var(--radius)', marginTop: 10, maxWidth: 640 }}
-            dangerouslySetInnerHTML={{ __html: preview }}
-          />
+          {/* استثناء مقصود — CLAUDE.md §1: هذه معاينة لرسالة بريد، فتحمل
+              قيم القالب الحرفية لا رموز الثيم. معاينة تتبع ثيم المنصة تُري
+              المحرّر شيئاً لا يصل المشترك أبداً.
+              القيم من EMAIL_PREVIEW أدناه، وهي نسخة طبق الأصل من
+              src/services/emailTheme.ts — الملف الذي يبني الرسالة فعلاً.
+              كانت هذه الكتلة تخالف ما تدّعيه: زاوية var(--radius) بدل 12px،
+              وبلا خلفية الصفحة، ولون متن مختلف. */}
+          <div style={{ background: EMAIL_PREVIEW.background, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
+            <div
+              style={{
+                background: EMAIL_PREVIEW.card,
+                color: EMAIL_PREVIEW.foreground,
+                fontFamily: EMAIL_PREVIEW.fontStack,
+                padding: 28,
+                borderRadius: EMAIL_PREVIEW.radius,
+                maxWidth: 640,
+                margin: '0 auto',
+              }}
+              dangerouslySetInnerHTML={{ __html: preview }}
+            />
+          </div>
         </div>
       )}
     </div>

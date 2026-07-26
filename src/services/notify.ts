@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { newId } from '../util';
 import { getEmailProvider } from './email';
+import { EMAIL } from './emailTheme';
 import { escapeHtml } from './newsletter';
 
 type NotifyInput = { type: string; title: string; body?: string; link?: string };
@@ -23,10 +24,10 @@ export async function notifyUsers(env: Env, userIds: string[], input: NotifyInpu
       .bind(...userIds)
       .all<{ email: string }>();
     // العنوان والنص يأتيان من محتوى يكتبه المستخدم — يُهرَّبان قبل الحقن.
-    // القيم الخام هنا بالضرورة: عملاء البريد لا يدعمون رموز CSS — CLAUDE.md §1.
+    // القيم من emailTheme.ts — ملف قيم البريد الوحيد (CLAUDE.md §1).
     const html =
-      `<div dir="rtl" style="font-family:system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif;` +
-      `color:#1f2430;line-height:1.9">` +
+      `<div dir="rtl" style="font-family:${EMAIL.fontStack};` +
+      `color:${EMAIL.foreground};line-height:1.9">` +
       `<h3 style="margin:0 0 8px;font-size:18px">${escapeHtml(input.title)}</h3>` +
       `<p style="margin:0;font-size:15px">${escapeHtml(input.body || '')}</p></div>`;
     for (const r of results) {
