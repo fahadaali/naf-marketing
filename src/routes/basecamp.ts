@@ -13,6 +13,14 @@ import { buildReportWorkbook, uploadWeeklyReport, uploadMonthlyReport, sheetsToC
 import { resyncAll, syncCardComments, syncCardCommentsForPost } from '../services/basecampSync';
 import { logAudit } from '../services/audit';
 
+// أيقونة CircleCheck من Lucide حرفياً — الصفحة HTML خام من الخادم لا React،
+// فلا سبيل لاستيراد المكوّن. المسارات منسوخة من lucide-static بلا تعديل.
+const CHECK_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" ' +
+  'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+  'stroke-linejoin="round" aria-hidden="true">' +
+  '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+
 export const basecampRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // مخطط OAuth (عام قبل المصادقة كي يعمل تدفّق المتصفح) — للحصول على refresh token أول مرة.
@@ -33,15 +41,27 @@ basecampRoutes.get('/oauth/callback', async (c) => {
       .join('');
     // صفحة تعرض refresh token ومعرّفات الحسابات لنسخها إلى Secrets/الإعدادات (تُعرض مرة واحدة).
     return c.html(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
-<style>body{font-family:system-ui;max-width:680px;margin:40px auto;padding:0 20px;line-height:1.8}
-code{background:#f1f1f4;padding:2px 6px;border-radius:6px;word-break:break-all}
-.box{background:#f7f7f9;border:1px solid #e2e2e8;border-radius:12px;padding:16px;margin:14px 0}</style></head>
-<body><h2>تم ربط بيسكامب ✅</h2>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تم ربط بيسكامب</title>
+<link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg">
+<link rel="stylesheet" href="/naf-public.css">
+<style>
+  /* الرموز كلها من /naf-public.css المولَّد من naf-theme.css في السجلّ. */
+  body { font-family: var(--font-sans); background: var(--background); color: var(--foreground);
+         max-width:680px; margin:40px auto; padding:0 20px; line-height:1.8; }
+  h2 { display:flex; align-items:center; gap:8px; }
+  h2 svg { color: var(--success); flex-shrink:0; }
+  code { background: var(--muted); color: var(--foreground); padding:2px 6px;
+         border-radius: var(--radius); word-break:break-all; }
+  .box { background: var(--card); border:1px solid var(--border);
+         border-radius: calc(var(--radius) + 4px); padding:16px; margin:14px 0; }
+</style></head>
+<body><h2>${CHECK_ICON}تم ربط بيسكامب</h2>
 <p>انسخ القيم التالية إلى Cloudflare Secrets والإعدادات، ثم أغلق هذه الصفحة:</p>
 <div class="box"><b>BASECAMP_REFRESH_TOKEN</b> (سرّ):<br><code>${data.refresh_token || '(غير متوفر)'}</code></div>
 <div class="box"><b>الحسابات المتاحة</b> (استخدم معرّف الحساب في الإعدادات):<ul>${accounts || '<li>لا يوجد</li>'}</ul></div>
 <p class="box">اضبط السرّ: <code>wrangler secret put BASECAMP_REFRESH_TOKEN</code><br>
-ثم ضع معرّف الحساب والمشروع في: الإعدادات ← التكاملات.</p>
+ثم ضع معرّف الحساب والمشروع في الإعدادات، قسم التكاملات.</p>
 </body></html>`);
   } catch (e: any) {
     return c.text(`فشل: ${e.message}`, 502);

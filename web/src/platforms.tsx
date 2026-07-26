@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, Star } from 'lucide-react';
+import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, MapPin } from 'lucide-react';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
 // المنصات المعروفة لها أيقونات وألوان رسمية؛ المنصات المخصّصة تأخذ أيقونة عامة.
@@ -27,7 +27,8 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
   linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
   linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
   x: { label: 'إكس', color: 'var(--brand-x)', glyph: <XGlyph size={14} /> },
-  google: { label: 'نشاطي التجاري (Google)', color: 'var(--brand-google)', glyph: <Star size={g(14)} /> },
+  // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
+  google: { label: 'نشاطي التجاري (Google)', color: 'var(--brand-google)', glyph: <MapPin size={g(14)} /> },
   instagram: {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',

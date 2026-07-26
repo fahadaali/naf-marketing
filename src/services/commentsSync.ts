@@ -73,7 +73,7 @@ async function notifyNegative(
     for (const it of items) {
       await notifyUsers(env, userIds, {
         type: 'negative_feedback',
-        title: `تقييم سلبي (${it.rating}★) على ${it.platform}`,
+        title: `تقييم سلبي (${it.rating} من 5) على ${it.platform}`,
         body: `${it.authorName}: ${String(it.body).slice(0, 160)}`,
         link: '/comments',
       });

@@ -4,6 +4,8 @@ import {
   Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
+import { DeliveryBadge } from '../components/StateBadge';
+import StatusBadge from '../components/StatusBadge';
 
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
@@ -15,12 +17,6 @@ type Block =
   | { type: 'quote'; text: string; cite?: string }
   | { type: 'divider' };
 
-const STATUS_AR: Record<string, string> = {
-  draft: 'مسودة', scheduled: 'مجدولة', sending: 'قيد الإرسال', sent: 'أُرسلت', archived: 'مؤرشفة',
-};
-const STATUS_BADGE_NL: Record<string, string> = {
-  draft: 'gray', scheduled: 'blue', sending: 'blue', sent: 'green', archived: 'gray',
-};
 
 export default function Newsletters() {
   const [list, setList] = useState<any[]>([]);
@@ -71,8 +67,8 @@ export default function Newsletters() {
             {list.map((n) => (
               <tr key={n.id}>
                 <td>{n.title}</td>
-                <td><span className={`badge ${STATUS_BADGE_NL[n.status] || 'gray'}`}>{STATUS_AR[n.status] || n.status}</span></td>
-                <td>{n.web_published ? <span className="badge green">منشورة</span> : <span className="badge gray">غير منشورة</span>}</td>
+                <td><DeliveryBadge state={n.status} /></td>
+                <td><StatusBadge status={n.web_published ? 'published' : 'draft'} /></td>
                 <td>{n.sent_count || 0}</td>
                 <td className="muted">{formatRiyadh(n.updated_at)}</td>
                 <td><button className="btn sm" onClick={() => setOpenId(n.id)}>فتح</button></td>

@@ -51,7 +51,7 @@ userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
 
   if (body.role_name && roles.includes(body.role_name)) {
     await c.env.DB.prepare('UPDATE users SET role_name = ? WHERE id = ?').bind(body.role_name, id).run();
-    changes.push(`الدور → ${body.role_name}`);
+    changes.push(`الدور: ${body.role_name}`);
   }
   if (typeof body.is_active === 'boolean') {
     await c.env.DB.prepare('UPDATE users SET is_active = ? WHERE id = ?')

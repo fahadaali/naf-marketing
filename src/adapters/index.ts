@@ -48,7 +48,7 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
       return new MockProvider();
     default:
       // مزوّد غير معروف في الإعدادات — لا نسقط بصمت إلى التجريبي كي لا يظن المستخدم أنه ينشر فعلياً
-      throw new Error(`مزوّد غير مدعوم: ${name} — اختر مزوّداً مدعوماً من الإعدادات ← المنصات والمزوّد`);
+      throw new Error(`مزوّد غير مدعوم: ${name} — اختر مزوّداً مدعوماً من الإعدادات، قسم المنصات والمزوّد`);
   }
 }
 

@@ -494,7 +494,7 @@ export class SocialApiProvider implements PublishingProvider {
   async publish(input: PublishInput): Promise<PublishResult> {
     const accountIds = input.platforms.map((p) => this.accounts[p]).filter(Boolean);
     if (!accountIds.length) {
-      throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
+      throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
     // جسم النشر وفق التوثيق: { text, targets:[{account_id}], media_ids?, scheduled_at? }
     // والنشر الفوري يحتاج publish_now

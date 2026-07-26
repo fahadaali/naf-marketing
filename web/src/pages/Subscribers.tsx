@@ -1,14 +1,9 @@
 import { formatNumber } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { Plus, Upload, Trash2, UserMinus, UserCheck, Search } from 'lucide-react';
+import { Plus, Upload, Trash2, UserMinus, RotateCcw, Search } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
+import { SubscriptionBadge } from '../components/StateBadge';
 
-const STATUS_AR: Record<string, string> = {
-  active: 'نشط', unsubscribed: 'ألغى الاشتراك', bounced: 'مرتدّ', pending: 'بانتظار التأكيد',
-};
-const STATUS_BADGE: Record<string, string> = {
-  active: 'green', unsubscribed: 'gray', bounced: 'red', pending: 'blue',
-};
 const SOURCE_AR: Record<string, string> = {
   article_page: 'صفحة مقالة', manual: 'إضافة يدوية', import: 'استيراد',
 };
@@ -119,13 +114,13 @@ export default function Subscribers() {
               <tr key={s.id}>
                 <td>{s.email}</td>
                 <td>{s.name || '—'}</td>
-                <td><span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_AR[s.status] || s.status}</span></td>
+                <td><SubscriptionBadge state={s.status} /></td>
                 <td className="muted">{SOURCE_AR[s.consent_source] || s.consent_source || '—'}</td>
                 <td className="muted">{s.consent_at ? formatRiyadh(s.consent_at) : '—'}</td>
                 <td>
                   {s.status === 'active'
                     ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={13} /></button>
-                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><UserCheck size={13} /></button>}
+                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={13} /></button>}
                   <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
                 </td>
               </tr>

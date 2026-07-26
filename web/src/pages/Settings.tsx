@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { ConnectionBadge } from '../components/StateBadge';
 import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -74,7 +75,7 @@ function Users() {
                   {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </td>
-              <td><span className={`badge ${u.is_active ? 'green' : 'red'}`}>{u.is_active ? 'نشط' : 'معطّل'}</span></td>
+              <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
               <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
             </tr>
           ))}
@@ -332,7 +333,7 @@ function Platforms() {
                 <PlatformIcon platform={p} size={26} />
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{PLATFORM_META[p].label}</span>
                 <div className="spacer" />
-                <span className={`badge ${on ? 'green' : 'gray'}`}>{on ? 'مفعّلة' : 'معطّلة'}</span>
+                <ConnectionBadge kind="enabled" on={on} />
               </button>
             );
           })}
@@ -818,9 +819,7 @@ function Integrations() {
       <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 16 }}>
         <div className="row">
           <span>حالة الاتصال بالمفاتيح السرية:</span>
-          <span className={`badge ${status?.configured ? 'green' : 'red'}`}>
-            {status?.configured ? 'مضبوطة' : 'غير مضبوطة'}
-          </span>
+          <ConnectionBadge kind="configured" on={!!status?.configured} />
         </div>
         {!status?.configured && (
           <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
@@ -920,9 +919,7 @@ function IntegrationHealth() {
               <span>{platformLabel(a.platform)}</span>
               <span className="muted">{a.name}</span>
               <div className="spacer" />
-              <span className={`badge ${mappedIds.has(a.id) ? 'green' : 'gray'}`}>
-                {mappedIds.has(a.id) ? 'مربوط بمنصة' : 'غير مربوط'}
-              </span>
+              <ConnectionBadge kind="linked" on={mappedIds.has(a.id)} />
             </div>
           ))}
           {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد حسابات.</p>}
@@ -943,8 +940,7 @@ function IntegrationHealth() {
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         الاستقبال الفوري:{' '}
         {(h.webhooks || []).length > 0
-          ? <span className="badge green">مفعّل ({h.webhooks.length})</span>
-          : <span className="badge gray">غير مسجّل</span>}
+          ? <ConnectionBadge kind="enabled" on /> : <ConnectionBadge kind="enabled" on={false} />}
       </div>
 
       {/* حالة المزامنة المحلية */}

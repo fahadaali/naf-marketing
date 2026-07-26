@@ -83,7 +83,7 @@ async function buildDescription(env: Env, body: string): Promise<string> {
     let replacement: string;
     const sgid = b.id ? await ensureMediaSgid(env, b.id) : null;
     if (sgid) replacement = `<bc-attachment sgid="${sgid}" caption="${b.name}"></bc-attachment>`;
-    else replacement = `<div>📎 وسيط مرفق: ${b.name || ''}</div>`;
+    else replacement = `<div>مرفق: ${b.name || ''}</div>`;
     html = html.replace(b.token, replacement);
   }
   return html || '<div></div>';

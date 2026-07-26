@@ -260,7 +260,7 @@ publicRoutes.post('/subscribe', async (c) => {
     .first<{ token: string }>();
   if (row?.token) c.executionCtx.waitUntil(sendWelcome(c.env, email, row.token, c.req.url).catch(() => {}));
 
-  return page('تم تسجيل اشتراكك بنجاح. ستصلك مقالاتنا القادمة على بريدك.');
+  return page('تم الاشتراك. ستصلك مقالاتنا القادمة على بريدك.');
 });
 
 // إلغاء الاشتراك بنقرة واحدة (رابط في كل رسالة — مطلب نظامي)
