@@ -1,3 +1,4 @@
+import { formatNumber } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
@@ -83,7 +84,7 @@ const STATUS_ORDER = ['draft', 'pending_marketing', 'pending_gm', 'scheduled', '
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? value.toLocaleString('ar-EG') : value}</div>
+      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
       <div className="label">{label}</div>
     </div>
   );

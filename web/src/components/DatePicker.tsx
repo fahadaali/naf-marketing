@@ -9,14 +9,14 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseYMD = (s: string) => (s ? new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10))) : null);
 const WEEK = ['أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت'];
-const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('ar', { month: 'long' }).format(new Date(2021, i, 1)));
+const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long' }).format(new Date(2021, i, 1)));
 
 function monthLabel(d: Date) {
-  return new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric' }).format(d);
+  return new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(d);
 }
 function fmtAr(s: string) {
   const d = parseYMD(s);
-  return d ? new Intl.DateTimeFormat('ar', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
+  return d ? new Intl.DateTimeFormat('ar-u-nu-latn', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
 }
 
 // شبكة التقويم مع أوضاع: أيام / أشهر / سنوات
@@ -169,7 +169,7 @@ export function DateTimePicker({
   if (inline) return <div className="dp-inline">{panel}</div>;
 
   const label = value
-    ? new Intl.DateTimeFormat('ar', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(`${value}:00`))
+    ? new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(`${value}:00`))
     : 'اختر التاريخ والوقت';
 
   return (

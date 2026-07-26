@@ -81,6 +81,6 @@ function buildMonth(cursor: Date, schedules: any[]) {
   for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, other: false, events: byDay[d] || [] });
   while (cells.length % 7 !== 0) cells.push({ day: '', other: true, events: [] });
 
-  const monthLabel = new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric' }).format(first);
+  const monthLabel = new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(first);
   return { cells, monthLabel };
 }

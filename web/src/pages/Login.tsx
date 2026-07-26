@@ -41,7 +41,7 @@ export default function Login() {
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <NafLogo variant="mark" className="h-14" />
+          <NafLogo variant="mark" className="h-20" />
           <h1>منصة ناف للتسويق</h1>
         </div>
         <p className="sub">

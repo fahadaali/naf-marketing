@@ -1,3 +1,4 @@
+import { formatNumber } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -152,7 +153,7 @@ export default function Analytics() {
                 <PlatformIcon platform={p.platform} size={20} />
                 <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
-                <span className="muted">{(p.impressions || 0).toLocaleString('ar-EG')} انطباع</span>
+                <span className="muted"><bdi>{formatNumber(p.impressions || 0)}</bdi> انطباع</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(p.impressions / maxImp) * 100}%` }} />
@@ -217,7 +218,7 @@ export default function Analytics() {
               <div className="row" style={{ fontSize: 13 }}>
                 <span>{c.name}</span>
                 <div className="spacer" />
-                <span className="muted">{(c.impressions || 0).toLocaleString('ar-EG')} انطباع · {(c.engagement || 0).toLocaleString('ar-EG')} تفاعل</span>
+                <span className="muted"><bdi>{formatNumber(c.impressions || 0)}</bdi> انطباع · <bdi>{formatNumber(c.engagement || 0)}</bdi> تفاعل</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(c.impressions / maxCampImp) * 100}%` }} />
@@ -286,7 +287,7 @@ export default function Analytics() {
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? value.toLocaleString('ar-EG') : value}</div>
+      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
       <div className="label">{label}</div>
     </div>
   );
@@ -449,10 +450,9 @@ function ReputationCard() {
 
 // ===== أفضل أوقات النشر — من الأداء الفعلي (بتوقيت الرياض) =====
 const DAY_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+// الوقت بنظام ٢٤ ساعة مع عزل اتجاهي — قاعدة التنسيق في naf-terms
 function hourLabel(h: number): string {
-  const period = h < 12 ? 'ص' : 'م';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:00 ${period}`;
+  return `\u2068${String(h).padStart(2, '0')}:00\u2069`;
 }
 
 function BestTimesCard({ platform }: { platform: string }) {

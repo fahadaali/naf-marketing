@@ -94,7 +94,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <NafLogo variant="mark" className="h-9" />
+          <NafLogo variant="mark" className="h-12 shrink-0" />
           <div className="brand-text">
             <b>منصة ناف</b>
             <small>لإدارة التسويق</small>

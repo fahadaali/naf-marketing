@@ -1,3 +1,4 @@
+import { formatNumber } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Plus, Upload, Trash2, UserMinus, UserCheck, Search } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -140,7 +141,7 @@ export default function Subscribers() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="card stat">
-      <div className="num">{value.toLocaleString('ar-EG')}</div>
+      <div className="num">{formatNumber(value)}</div>
       <div className="label">{label}</div>
     </div>
   );

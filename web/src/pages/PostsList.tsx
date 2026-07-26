@@ -459,7 +459,7 @@ function GanttView({ rows, navigate }: any) {
   const step = Math.max(1, Math.ceil(days / 8));
   for (let d = 0; d <= days; d += step) {
     const t = min + d * 24 * 3600 * 1000;
-    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
+    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
   }
   const todayLeft = pct(Date.now());
 
