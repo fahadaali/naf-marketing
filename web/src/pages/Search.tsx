@@ -34,7 +34,7 @@ export default function Search() {
 
       <form className="row" onSubmit={submit} style={{ marginBottom: 20, maxWidth: 480 }}>
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="اكتب كلمات البحث…" />
-        <button className="btn"><SearchIcon size={15} /> بحث</button>
+        <button className="btn"><SearchIcon size={20} /> بحث</button>
       </form>
 
       {loading && <p className="muted">جارٍ البحث…</p>}

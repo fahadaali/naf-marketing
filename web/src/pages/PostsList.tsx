@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, Download,
-  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
+  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, FileOutput,
+  FolderInput, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
@@ -252,16 +252,16 @@ export default function ContentManagement() {
 
         <div className="row" style={{ marginTop: 12 }}>
           <div className="seg">
-            <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}><Table2 size={15} /> جدول</button>
-            <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}><LayoutGrid size={15} /> كانبان</button>
-            <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={15} /> جانت</button>
+            <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}><Table2 size={20} /> جدول</button>
+            <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}><LayoutGrid size={20} /> كانبان</button>
+            <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
           </div>
           <div className="spacer" />
           <span className="muted" style={{ fontSize: 13 }}>{filtered.length} عنصر</span>
-          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={15} /> استيراد</button>}
+          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={20} /> استيراد</button>}
           <Popover
             render={({ toggle }) => (
-              <button className="btn ghost sm" onClick={toggle}><Download size={15} /> تصدير <ChevronDown size={14} /></button>
+              <button className="btn ghost sm" onClick={toggle}><FileOutput size={20} /> تصدير <ChevronDown size={20} /></button>
             )}
           >
             {({ close }) => (
@@ -272,20 +272,20 @@ export default function ContentManagement() {
               </div>
             )}
           </Popover>
-          {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={15} /> محتوى جديد</button>}
+          {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={20} /> محتوى جديد</button>}
         </div>
       </div>
 
       {/* شريط الإجراءات المجمّعة */}
       {sel.size > 0 && (
         <div className="bulkbar">
-          <CheckSquare size={17} />
+          <CheckSquare size={16} />
           <span>محدّد: {sel.size}</span>
           <div className="spacer" />
-          {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={14} /> نقل إلى حملة</button>}
-          <button className="btn ghost sm" onClick={() => doExport('csv')}><Download size={14} /> تصدير المحدد</button>
-          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={14} /> حذف</button>
-          <button className="btn ghost sm" onClick={() => setSel(new Set())}><X size={14} /> إلغاء</button>
+          {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={20} /> نقل إلى حملة</button>}
+          <button className="btn ghost sm" onClick={() => doExport('csv')}><FileOutput size={20} /> تصدير المحدد</button>
+          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={20} /> حذف</button>
+          <button className="btn ghost sm" onClick={() => setSel(new Set())}>إلغاء</button>
         </div>
       )}
 
@@ -323,7 +323,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
       <span className="row" style={{ gap: 4, display: 'inline-flex' }}>
         {label}
         <ArrowUpDown
-          size={12}
+          size={16}
           style={{ opacity: sortKey === k ? 1 : 0.35, transform: sortKey === k && sortDir === 'asc' ? 'rotate(180deg)' : 'none' }}
         />
       </span>
@@ -357,7 +357,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
               <td className="muted">{p.author_name}</td>
               <td className="muted">{formatRiyadh(p.updated_at)}</td>
               <td onClick={(e) => e.stopPropagation()}>
-                {canDelete(p) && <button className="btn danger sm" title="حذف" onClick={() => onDelete(p.id)}><Trash2 size={14} /></button>}
+                {canDelete(p) && <button className="btn danger sm" title="حذف" onClick={() => onDelete(p.id)}><Trash2 size={20} /></button>}
               </td>
             </tr>
           ))}
@@ -396,7 +396,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={14} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
           <div
@@ -480,7 +480,7 @@ function GanttView({ rows, navigate }: any) {
         return (
           <div className="gantt-row" key={p.id}>
             <div className="gantt-label" title={p.title}>
-              <StatusBadge status={st} size={11} iconOnly />
+              <StatusBadge status={st} size={16} iconOnly />
               {p.title}
             </div>
             <div className="gantt-track">
@@ -570,7 +570,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
         تُنشأ العناصر كمسودات.
       </p>
       <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-      <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={15} /> اختيار ملف</button>
+      <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={20} /> اختيار ملف</button>
 
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>

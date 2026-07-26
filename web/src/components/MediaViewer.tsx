@@ -26,10 +26,10 @@ export function MediaViewer({ media, onClose }: { media: MediaInfo; onClose: () 
         <div className="mv-body">{body}</div>
         <div className="mv-bar">
           <a className="btn" href={`${url}?download=1`} download={name}>
-            <Download size={16} /> تنزيل
+            <Download size={20} /> تنزيل
           </a>
           <button className="btn ghost" onClick={onClose}>
-            <X size={16} /> إغلاق
+            <X size={20} /> إغلاق
           </button>
         </div>
       </div>

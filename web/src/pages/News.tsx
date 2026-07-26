@@ -61,7 +61,7 @@ export default function News() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        {can('settings.manage') && <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> تحديث الآن</button>}
+        {can('settings.manage') && <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> تحديث الآن</button>}
       </div>
 
       <div className="grid cols-2">
@@ -80,11 +80,11 @@ export default function News() {
               ) : can('draft.edit') ? (
                 <>
                   <button className="btn ghost sm" disabled={!!busy} onClick={() => toDraft(n, false)}>
-                    <FilePlus2 size={15} /> تحويل إلى مسودة
+                    <FilePlus2 size={20} /> تحويل إلى مسودة
                   </button>
                   {can('ai.generate') && (
                     <button className="btn gold sm" disabled={busy === n.id} onClick={() => toDraft(n, true)}>
-                      <Sparkles size={15} /> {busy === n.id ? '…' : 'صياغة ثم تحويل'}
+                      <Sparkles size={20} /> {busy === n.id ? '…' : 'صياغة ثم تحويل'}
                     </button>
                   )}
                 </>

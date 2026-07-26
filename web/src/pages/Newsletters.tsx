@@ -55,7 +55,7 @@ export default function Newsletters() {
         </div>
         <div className="spacer" />
         {msg && <span className="err">{msg}</span>}
-        <button className="btn" onClick={create}><Plus size={15} /> نشرة جديدة</button>
+        <button className="btn" onClick={create}><Plus size={20} /> نشرة جديدة</button>
       </div>
 
       <div className="card">
@@ -206,16 +206,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
-        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={14} /> رجوع</button>
+        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={20} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={showPreview}><Eye size={15} /> معاينة</button>
-        <button className="btn ghost" onClick={sendTest}><Mail size={15} /> اختبار</button>
+        <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
+        <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
         {['draft', 'scheduled'].includes(nl.status) && (
-          <button className="btn" onClick={sendAll}><Send size={15} /> إرسال للمشتركين</button>
+          <button className="btn" onClick={sendAll}><Send size={20} /> إرسال للمشتركين</button>
         )}
-        <button className="btn" disabled={saving} onClick={() => save()}><Save size={15} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
+        <button className="btn" disabled={saving} onClick={() => save()}><Save size={20} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
 
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
@@ -258,7 +258,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
+              <strong style={{ fontSize: 14 }}><Globe size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
               <button className="btn sm ghost" disabled={saving} onClick={() => save({ web_published: nl.web_published ? 0 : 1 })}>
                 {nl.web_published ? 'إلغاء النشر' : 'نشر الصفحة'}
@@ -266,7 +266,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
             {nl.web_published && publicUrl && (
               <a className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }} href={publicUrl} target="_blank" rel="noreferrer">
-                <ExternalLink size={12} style={{ verticalAlign: -2 }} /> {publicUrl}
+                <ExternalLink size={16} style={{ verticalAlign: -2 }} /> {publicUrl}
               </a>
             )}
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
@@ -274,7 +274,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
+              <strong style={{ fontSize: 14 }}><Share2 size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
               <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
             </div>
@@ -292,7 +292,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                     </label>
                   ))}
                   <div className="spacer" />
-                  <button className="btn sm" onClick={publishSocial}><Send size={13} /> نشر</button>
+                  <button className="btn sm" onClick={publishSocial}><Send size={20} /> نشر</button>
                 </div>
                 {social && (
                   <div style={{ fontSize: 12 }}>
@@ -310,7 +310,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
+              <strong style={{ fontSize: 14 }}><FlaskConical size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
                   <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
@@ -335,7 +335,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
+              <strong style={{ fontSize: 14 }}><MousePointerClick size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
@@ -347,19 +347,19 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           )}
 
-          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={14} /> حذف النشرة</button>
+          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={20} /> حذف النشرة</button>
         </div>
 
         {/* المحتوى */}
         <div className="card">
           <h4 style={{ marginTop: 0 }}>المحتوى</h4>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={14} /> عنوان</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={14} /> فقرة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={14} /> صورة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={14} /> زر</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={14} /> اقتباس</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={14} /> فاصل</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={20} /> عنوان</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={20} /> فقرة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={20} /> صورة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={20} /> زر</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={20} /> اقتباس</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={20} /> فاصل</button>
           </div>
 
           {blocks.map((b, i) => (
@@ -367,9 +367,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               <div className="row" style={{ marginBottom: 6 }}>
                 <span className="muted" style={{ fontSize: 12 }}>{blockLabel(b.type)}</span>
                 <div className="spacer" />
-                <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={13} /></button>
-                <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={13} /></button>
-                <button className="btn sm ghost" onClick={() => del(i)} title="حذف"><Trash2 size={13} /></button>
+                <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={20} /></button>
+                <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={20} /></button>
+                <button className="btn sm ghost" onClick={() => del(i)} title="حذف"><Trash2 size={20} /></button>
               </div>
               <BlockFields block={b} onChange={(patch) => upd(i, patch)} />
             </div>
@@ -381,7 +381,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {preview && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="row">
-            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
+            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>

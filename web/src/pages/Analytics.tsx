@@ -1,7 +1,7 @@
 import { formatNumber } from '../lib/format';
 import { RatingValue } from '../components/Rating';
 import { useEffect, useState, type ReactNode } from 'react';
-import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
+import { RefreshCw, TriangleAlert, ExternalLink, FileOutput } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
@@ -83,7 +83,7 @@ export default function Analytics() {
         <h1 className="page-title">التحليلات</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> سحب التحليلات</button>
+        <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> سحب التحليلات</button>
       </div>
 
       {/* الفلاتر */}
@@ -152,7 +152,7 @@ export default function Analytics() {
           {(data?.byPlatform || []).map((p: any) => (
             <div key={p.platform} style={{ marginBottom: 10 }}>
               <div className="row" style={{ fontSize: 13 }}>
-                <PlatformIcon platform={p.platform} size={20} />
+                <PlatformIcon platform={p.platform} size={16} />
                 <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{formatNumber(p.impressions || 0)}</bdi> انطباع</span>
@@ -180,13 +180,13 @@ export default function Analytics() {
                 >
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      {p.external_url && <ExternalLink size={13} style={{ opacity: 0.55, flexShrink: 0 }} />}
+                      {p.external_url && <ExternalLink size={16} style={{ opacity: 0.55, flexShrink: 0 }} />}
                       {p.title}
                     </span>
                   </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <PlatformIcon platform={p.platform} size={18} /> {platformLabel(p.platform)}
+                      <PlatformIcon platform={p.platform} size={16} /> {platformLabel(p.platform)}
                     </span>
                   </td>
                   <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
@@ -234,7 +234,7 @@ export default function Analytics() {
       {/* تنبيهات المحتوى المتأخر */}
       {alerts.length > 0 && (
         <div className="card" style={{ marginTop: 16, borderColor: 'var(--warning)' }}>
-          <h4 style={{ marginTop: 0 }} className="row"><AlertTriangle size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
+          <h4 style={{ marginTop: 0 }} className="row"><TriangleAlert size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
           <table className="table">
             <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
             <tbody>
@@ -338,7 +338,7 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
-        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
+        <h4 style={{ margin: 0 }}><FileOutput size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
       </div>
@@ -354,8 +354,8 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
               <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{platformLabel(a.platform)} — {a.name}</option>)}
               </select>
-              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileDown size={14} /> إنشاء تصدير</button>
-              <button className="btn sm ghost" onClick={load}><RefreshCw size={14} /> تحديث الحالة</button>
+              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileOutput size={20} /> إنشاء تصدير</button>
+              <button className="btn sm ghost" onClick={load}><RefreshCw size={20} /> تحديث الحالة</button>
             </div>
           )}
           {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
@@ -414,7 +414,7 @@ function ReputationCard() {
             return (
               <div key={star} style={{ marginBottom: 6 }}>
                 <div className="row" style={{ fontSize: 12 }}>
-                  <span><RatingValue value={star} size={12} /></span>
+                  <span><RatingValue value={star} size={16} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
                 </div>
@@ -433,7 +433,7 @@ function ReputationCard() {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
-                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
+                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={16} /> · <bdi>{m.count}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />

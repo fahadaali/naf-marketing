@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronLeft, CalendarDays, Clock } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Calendar, Clock } from 'lucide-react';
 import { Popover } from './Popover';
 
 // منتقي تواريخ عصري (شبكة تقويم) — نطاق «من/إلى» ومنتقي تاريخ+وقت.
@@ -54,9 +54,9 @@ function CalGrid({
   return (
     <div className="dp-cal">
       <div className="dp-head">
-        <button type="button" className="dp-nav" onClick={prev}><ChevronRight size={16} /></button>
+        <button type="button" className="dp-nav" onClick={prev}><ChevronRight size={20} /></button>
         <button type="button" className="dp-title" onClick={cycle}>{title}</button>
-        <button type="button" className="dp-nav" onClick={next}><ChevronLeft size={16} /></button>
+        <button type="button" className="dp-nav" onClick={next}><ChevronLeft size={20} /></button>
       </div>
 
       {mode === 'days' && (
@@ -111,7 +111,7 @@ export function DateRangePicker({
     <Popover
       render={({ toggle }) => (
         <div className="dp-trigger" onClick={toggle}>
-          <CalendarDays size={16} />
+          <Calendar size={16} />
           {from && to ? <span>{fmtAr(from)} — {fmtAr(to)}</span> : from ? <span>{fmtAr(from)} — …</span> : <span className="ph">{placeholder}</span>}
         </div>
       )}
@@ -176,7 +176,7 @@ export function DateTimePicker({
     <Popover
       render={({ toggle }) => (
         <div className="dp-trigger" onClick={toggle}>
-          <CalendarDays size={16} />
+          <Calendar size={16} />
           <span className={value ? '' : 'ph'}>{label}</span>
         </div>
       )}

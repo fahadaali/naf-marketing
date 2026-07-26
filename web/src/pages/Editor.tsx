@@ -5,7 +5,7 @@ import {
   Save,
   Send,
   Check,
-  X,
+  CircleX,
   CalendarClock,
   Rocket,
   Archive,
@@ -19,7 +19,7 @@ import {
   Wand2,
   Image as ImageIcon,
   Video,
-  Loader2,
+  Loader,
   LayoutTemplate,
   History,
   RefreshCw,
@@ -280,33 +280,33 @@ export default function Editor() {
             <div className="field">
               <label>مصدر المحتوى</label>
               <div className="row">
-                <span className="badge gray"><PenLine size={13} /> يدوي (اكتب أدناه)</span>
+                <span className="badge gray"><PenLine size={16} /> يدوي (اكتب أدناه)</span>
                 {can('ai.generate') && (
                   <button className="btn gold sm" type="button" onClick={() => setShowAI(true)}>
-                    <Sparkles size={15} /> توليد بالذكاء الاصطناعي
+                    <Sparkles size={20} /> توليد بالذكاء الاصطناعي
                   </button>
                 )}
                 {can('ai.generate') && (
                   <button className="btn ghost sm" type="button" onClick={() => setShowKB(true)}>
-                    <BookOpen size={15} /> مركز المعرفة
+                    <BookOpen size={20} /> مركز المعرفة
                   </button>
                 )}
                 {can('ai.generate') && (
                   <button className="btn ghost sm" type="button" onClick={() => setShowMediaGen(true)}>
-                    <ImagePlus size={15} /> توليد من وسيط
+                    <ImagePlus size={20} /> توليد من وسيط
                   </button>
                 )}
                 {can('ai.generate') && (
                   <button className="btn ghost sm" type="button" onClick={() => setShowAIMedia(true)}>
-                    <Wand2 size={15} /> توليد صورة/فيديو بالذكاء الاصطناعي
+                    <Wand2 size={20} /> توليد صورة/فيديو بالذكاء الاصطناعي
                   </button>
                 )}
                 <button className="btn ghost sm" type="button" onClick={() => setShowTemplates(true)}>
-                  <LayoutTemplate size={15} /> القوالب
+                  <LayoutTemplate size={20} /> القوالب
                 </button>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
-                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={13} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
               </p>
             </div>
           )}
@@ -332,7 +332,7 @@ export default function Editor() {
           </div>
 
           {!readOnly && (
-            <button className="btn" onClick={save}><Save size={16} /> حفظ المسودة</button>
+            <button className="btn" onClick={save}><Save size={20} /> حفظ المسودة</button>
           )}
         </div>
 
@@ -363,31 +363,31 @@ export default function Editor() {
             <h4 style={{ marginTop: 0 }}>الإجراءات</h4>
             <div className="grid" style={{ gap: 8 }}>
               {['draft', 'rejected'].includes(status) && can('content.submit') && postId && (
-                <button className="btn" onClick={() => doAction('submit')}><Send size={16} /> إرسال للمراجعة</button>
+                <button className="btn" onClick={() => doAction('submit')}><Send size={20} /> إرسال للمراجعة</button>
               )}
               {status === 'pending_marketing' && can('content.review') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}><Check size={16} /> اعتماد التسويق</button>
-                  <button className="btn danger" onClick={() => setShowReject(true)}><X size={16} /> رفض</button>
+                  <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد التسويق</button>
+                  <button className="btn danger" onClick={() => setShowReject(true)}><CircleX size={20} /> رفض</button>
                 </>
               )}
               {status === 'pending_gm' && can('content.approve_final') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}><Check size={16} /> اعتماد نهائي</button>
-                  <button className="btn danger" onClick={() => setShowReject(true)}><X size={16} /> رفض</button>
+                  <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد نهائي</button>
+                  <button className="btn danger" onClick={() => setShowReject(true)}><CircleX size={20} /> رفض</button>
                 </>
               )}
               {['approved', 'scheduled'].includes(status) && can('content.schedule') && (
-                <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={16} /> جدولة النشر</button>
+                <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={20} /> جدولة النشر</button>
               )}
               {status === 'scheduled' && can('content.approve_final') && schedules.some((s) => ['pending', 'failed'].includes(s.status)) && (
-                <button className="btn success" onClick={publishNow}><Rocket size={16} /> نشر الآن</button>
+                <button className="btn success" onClick={publishNow}><Rocket size={20} /> نشر الآن</button>
               )}
               {status === 'published' && can('content.approve_final') && (
-                <button className="btn ghost" onClick={() => doAction('archive')}><Archive size={16} /> أرشفة</button>
+                <button className="btn ghost" onClick={() => doAction('archive')}><Archive size={20} /> أرشفة</button>
               )}
               {postId && (can('content.approve_final') || (['draft', 'rejected'].includes(status))) && (
-                <button className="btn danger" onClick={deletePost}><Trash2 size={16} /> حذف المحتوى</button>
+                <button className="btn danger" onClick={deletePost}><Trash2 size={20} /> حذف المحتوى</button>
               )}
             </div>
           </div>
@@ -410,7 +410,7 @@ export default function Editor() {
                   {platforms.map((p) => (
                     <div key={p} style={{ marginBottom: 10 }}>
                       <div className="row" style={{ marginBottom: 4 }}>
-                        <PlatformIcon platform={p} size={18} />
+                        <PlatformIcon platform={p} size={16} />
                         <span style={{ fontSize: 13 }}>{platformLabel(p, platLabels)}</span>
                         <div className="spacer" />
                         <button
@@ -450,7 +450,7 @@ export default function Editor() {
                 const late = ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now();
                 return (
                   <div key={s.id} className="row" style={{ fontSize: 13, marginBottom: 8 }}>
-                    <PlatformIcon platform={s.platform} size={20} />
+                    <PlatformIcon platform={s.platform} size={16} />
                     <span>{platformLabel(s.platform, platLabels)}</span>
                     <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
                     <div className="spacer" />
@@ -468,7 +468,7 @@ export default function Editor() {
                         title="إلغاء هذا الموعد"
                         onClick={() => cancelSchedule(s.id)}
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={20} />
                       </button>
                     )}
                   </div>
@@ -486,7 +486,7 @@ export default function Editor() {
                 <span className="muted" style={{ fontSize: 12 }}>{versions.length} نسخة</span>
               </div>
               <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
-                <History size={14} /> عرض واستعادة
+                <History size={20} /> عرض واستعادة
               </button>
             </div>
           )}
@@ -497,7 +497,7 @@ export default function Editor() {
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
                 <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={12} /> <StatusBadge status={a.to_status} /></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={16} /> <StatusBadge status={a.to_status} /></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
                 </div>
@@ -517,7 +517,7 @@ export default function Editor() {
                   disabled={syncingNotes}
                   title="تحديث التعليقات من بيسكامب الآن"
                 >
-                  <RefreshCw size={15} className={syncingNotes ? 'spin' : ''} />
+                  <RefreshCw size={20} className={syncingNotes ? 'spin' : ''} />
                 </button>
               </div>
               {notes.map((n) => (
@@ -657,7 +657,7 @@ function AIModal({ platforms, tones, onClose, onResult }: { platforms: string[];
       </div>
       {err && <p className="err">{err}</p>}
       <button className="btn gold" onClick={run} disabled={busy || !topic}>
-        <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد وحقن في المحرر'}
+        <Sparkles size={20} /> {busy ? 'جارٍ التوليد…' : 'توليد وحقن في المحرر'}
       </button>
     </Modal>
   );
@@ -706,7 +706,7 @@ function MediaGenModal({
         ارفع صورة أو ملف PDF ليحلّله Claude ويولّد منه منشوراً. الأنواع الأخرى (صوت/فيديو/وورد/إكسل) يُستفاد من اسمها كموضوع.
       </p>
       <label className="btn ghost" style={{ cursor: 'pointer' }}>
-        <ImagePlus size={15} /> {file ? file.name : 'اختيار وسيط'}
+        <ImagePlus size={20} /> {file ? file.name : 'اختيار وسيط'}
         <input type="file" hidden accept="image/*,application/pdf,audio/*,video/*,.doc,.docx,.xls,.xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
       </label>
       <div className="grid cols-3" style={{ marginTop: 14 }}>
@@ -733,7 +733,7 @@ function MediaGenModal({
       </div>
       {err && <p className="err">{err}</p>}
       <button className="btn gold" onClick={run} disabled={!file || !!busy}>
-        <Sparkles size={16} /> {busy || 'توليد وحقن في المحرر'}
+        <Sparkles size={20} /> {busy || 'توليد وحقن في المحرر'}
       </button>
     </Modal>
   );
@@ -794,10 +794,10 @@ function AIMediaModal({
     <Modal title="توليد صورة أو فيديو بالذكاء الاصطناعي" onClose={onClose}>
       <div className="row" style={{ marginBottom: 14 }}>
         <button type="button" className={`btn sm ${kind === 'image' ? '' : 'ghost'}`} onClick={() => setKind('image')}>
-          <ImageIcon size={15} /> صورة
+          <ImageIcon size={20} /> صورة
         </button>
         <button type="button" className={`btn sm ${kind === 'video' ? '' : 'ghost'}`} onClick={() => setKind('video')}>
-          <Video size={15} /> فيديو
+          <Video size={20} /> فيديو
         </button>
       </div>
       <div className="field">
@@ -812,11 +812,11 @@ function AIMediaModal({
       {err && <p className="err">{err}</p>}
       {busy && !err && (
         <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Loader2 size={15} className="spin" /> {status}
+          <Loader size={16} className="spin" /> {status}
         </p>
       )}
       <button className="btn gold" onClick={run} disabled={busy || !prompt.trim()}>
-        <Wand2 size={16} /> {busy ? 'جارٍ التوليد…' : `توليد ${kind === 'image' ? 'الصورة' : 'الفيديو'} وإدراجه`}
+        <Wand2 size={20} /> {busy ? 'جارٍ التوليد…' : `توليد ${kind === 'image' ? 'الصورة' : 'الفيديو'} وإدراجه`}
       </button>
     </Modal>
   );
@@ -888,7 +888,7 @@ function KBModal({
       {!loading && (!status?.configured || !status?.project_set) && (
         <div className="card" style={{ background: 'var(--warning-soft)' }}>
           <p style={{ margin: 0 }}>
-            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات<ChevronLeft size={13} style={{ verticalAlign: -2 }} />التكاملات</b> لضبط معرّف الحساب والمشروع،
+            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات<ChevronLeft size={16} style={{ verticalAlign: -2 }} />التكاملات</b> لضبط معرّف الحساب والمشروع،
             واضبط الأسرار عبر Cloudflare. عندها ستظهر ملفات «مركز المعرفة» هنا.
           </p>
         </div>
@@ -942,7 +942,7 @@ function KBModal({
           </div>
 
           <button className="btn gold" onClick={generate} disabled={busy || !selected}>
-            <Sparkles size={16} /> {busy ? 'جارٍ التوليد…' : 'توليد من الملف المختار'}
+            <Sparkles size={20} /> {busy ? 'جارٍ التوليد…' : 'توليد من الملف المختار'}
           </button>
         </>
       )}
@@ -977,7 +977,7 @@ function VersionsModal({
                 className="btn ghost sm"
                 onClick={() => { if (confirm('استعادة هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
               >
-                <History size={14} /> استعادة
+                <History size={20} /> استعادة
               </button>
             </div>
           </div>
@@ -1049,7 +1049,7 @@ function TemplatesModal({
               </div>
               <div className="spacer" />
               <button className="btn sm" onClick={() => onInsert(t.body)}>إدراج</button>
-              <button className="btn danger sm" onClick={() => remove(t.id)}><Trash2 size={13} /></button>
+              <button className="btn danger sm" onClick={() => remove(t.id)}><Trash2 size={20} /></button>
             </div>
           ))}
           {templates.length === 0 && <p className="muted">لا توجد قوالب محفوظة بعد</p>}
@@ -1101,7 +1101,7 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
         <div className="row">
           {platforms.map((p) => (
             <button key={p} type="button" className={`btn sm ${selected.includes(p) ? '' : 'ghost'}`} onClick={() => toggle(p)}>
-              <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
+              <PlatformIcon platform={p} size={20} /> {platformLabel(p)}
             </button>
           ))}
         </div>

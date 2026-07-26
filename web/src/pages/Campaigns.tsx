@@ -33,7 +33,7 @@ export default function Campaigns() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">الحملات</h1>
         <div className="spacer" />
-        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}><Plus size={16} /> حملة جديدة</button>}
+        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}><Plus size={20} /> حملة جديدة</button>}
       </div>
 
       <div className="grid cols-3">
@@ -48,7 +48,7 @@ export default function Campaigns() {
             <div className="row" style={{ fontSize: 12 }}>
               <span className="muted">{c.posts_count} منشور</span>
               <div className="spacer" />
-              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={12} /><bdi>{c.end_date || '؟'}</bdi></span>
+              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={16} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
           </div>
         ))}
@@ -62,7 +62,7 @@ export default function Campaigns() {
             <span className="muted">المنصات:</span>
             {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
               <span key={p} className="row" style={{ gap: 4 }}>
-                <PlatformIcon platform={p} size={18} /> {platformLabel(p)}
+                <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
               </span>
             ))}
             {(JSON.parse(selected.target_platforms || '[]') as string[]).length === 0 && <span>—</span>}
@@ -125,7 +125,7 @@ function NewCampaign({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           {avail.map((p) => (
             <button key={p} type="button" className={`btn sm ${platforms.includes(p) ? '' : 'ghost'}`}
               onClick={() => setPlatforms((s) => s.includes(p) ? s.filter((x) => x !== p) : [...s, p])}>
-              <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
+              <PlatformIcon platform={p} size={20} /> {platformLabel(p)}
             </button>
           ))}
         </div>

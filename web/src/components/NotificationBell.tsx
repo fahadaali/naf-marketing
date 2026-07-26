@@ -36,7 +36,7 @@ export default function NotificationBell() {
     <Popover
       render={({ toggle }) => (
         <button className="icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
-          <Bell size={17} />
+          <Bell size={20} />
           {unread > 0 && <span className="notif-dot">{unread > 9 ? '9+' : unread}</span>}
         </button>
       )}
@@ -47,7 +47,7 @@ export default function NotificationBell() {
             <strong style={{ fontSize: 14 }}>الإشعارات</strong>
             <div className="spacer" />
             {unread > 0 && (
-              <button className="btn ghost sm" onClick={markAll}><CheckCheck size={13} /> تعليم الكل</button>
+              <button className="btn ghost sm" onClick={markAll}><CheckCheck size={20} /> تعليم الكل</button>
             )}
           </div>
           <div style={{ maxHeight: 340, overflow: 'auto' }}>

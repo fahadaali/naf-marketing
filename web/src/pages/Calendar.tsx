@@ -21,9 +21,9 @@ export default function Calendar() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">التقويم</h1>
         <div className="spacer" />
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}><ChevronRight size={14} /> السابق</button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}><ChevronRight size={20} /> السابق</button>
         <strong style={{ minWidth: 140, textAlign: 'center' }}>{monthLabel}</strong>
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي <ChevronLeft size={14} /></button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي <ChevronLeft size={20} /></button>
       </div>
 
       <div className="card">

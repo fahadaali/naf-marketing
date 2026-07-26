@@ -1,8 +1,11 @@
 import {
+  Archive,
+  CalendarClock,
   CircleCheck,
   CircleSlash,
   CircleX,
   Clock,
+  FilePen,
   Link2,
   Link2Off,
   Loader,
@@ -26,12 +29,15 @@ const SUBSCRIPTION: Record<string, State> = {
   bounced: { label: 'مرتدّ', badge: 'red', icon: MailX },
 };
 
+/* «قيد الإرسال» و«أُرسلت» و«فاشل» من جدول الإرسال البريدي.
+   و«مسودة» و«مجدول» و«مؤرشف» من جدول دورة حياة المحتوى — النشرة تمرّ
+   بالحالتين، فالمصطلح والأيقونة واللون من الجدول الذي يخصّ كلاً منها. */
 const DELIVERY: Record<string, State> = {
-  draft: { label: 'مسودة', badge: 'gray', icon: CircleSlash },
-  scheduled: { label: 'مجدولة', badge: 'blue', icon: Clock },
+  draft: { label: 'مسودة', badge: 'gray', icon: FilePen },
+  scheduled: { label: 'مجدول', badge: 'blue', icon: CalendarClock },
   sending: { label: 'قيد الإرسال', badge: 'blue', icon: Loader },
   sent: { label: 'أُرسلت', badge: 'green', icon: MailCheck },
-  archived: { label: 'مؤرشفة', badge: 'gray', icon: CircleSlash },
+  archived: { label: 'مؤرشف', badge: 'gray', icon: Archive },
   failed: { label: 'فاشل', badge: 'red', icon: CircleX },
 };
 

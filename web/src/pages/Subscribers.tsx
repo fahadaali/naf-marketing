@@ -64,8 +64,8 @@ export default function Subscribers() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={() => setImporting((v) => !v)}><Upload size={15} /> استيراد</button>
-        <button className="btn" onClick={addOne}><Plus size={15} /> إضافة</button>
+        <button className="btn ghost" onClick={() => setImporting((v) => !v)}><Upload size={20} /> استيراد</button>
+        <button className="btn" onClick={addOne}><Plus size={20} /> إضافة</button>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
@@ -100,7 +100,7 @@ export default function Subscribers() {
           <div className="spacer" />
           <input className="input" style={{ maxWidth: 260 }} placeholder="بحث بالبريد أو الاسم…"
                  value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} />
-          <button className="btn ghost sm" onClick={load}><Search size={14} /></button>
+          <button className="btn ghost sm" onClick={load}><Search size={20} /></button>
         </div>
       </div>
 
@@ -119,9 +119,9 @@ export default function Subscribers() {
                 <td className="muted">{s.consent_at ? formatRiyadh(s.consent_at) : '—'}</td>
                 <td>
                   {s.status === 'active'
-                    ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={13} /></button>
-                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={13} /></button>}
-                  <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
+                    ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={20} /></button>
+                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={20} /></button>}
+                  <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={20} /></button>
                 </td>
               </tr>
             ))}

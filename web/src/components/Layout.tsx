@@ -4,7 +4,7 @@ import {
   LayoutDashboard,
   FileText,
   PenLine,
-  CalendarDays,
+  Calendar,
   Target,
   ListChecks,
   Newspaper,
@@ -49,7 +49,7 @@ function TopSearch() {
       style={{ position: 'relative', width: 280 }}
       onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}
     >
-      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'var(--muted-foreground)' }} />
+      <Search size={20} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'var(--muted-foreground)' }} />
       <input
         className="input"
         style={{ paddingInlineStart: 32, height: 34 }}
@@ -65,13 +65,13 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  const sz = 18;
+  const sz = 24; // مقاس التنقّل — naf-icons.md «المقاسات»
 
   const items: NavItem[] = [
     { to: '/', label: 'لوحة التحكم', icon: <LayoutDashboard size={sz} /> },
     { to: '/posts', label: 'إدارة المحتوى', icon: <FileText size={sz} /> },
     { to: '/editor', label: 'إنشاء محتوى', icon: <PenLine size={sz} />, show: can('draft.edit') },
-    { to: '/calendar', label: 'التقويم', icon: <CalendarDays size={sz} /> },
+    { to: '/calendar', label: 'التقويم', icon: <Calendar size={sz} /> },
     { to: '/campaigns', label: 'الحملات', icon: <Target size={sz} /> },
     { to: '/queue', label: 'طابور الاعتماد', icon: <ListChecks size={sz} />, show: can('content.review') },
     { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
@@ -128,7 +128,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={toggle}
               title={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
             >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <div className="avatar">{initials}</div>
             <div style={{ lineHeight: 1.35 }}>
@@ -145,7 +145,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 navigate('/login');
               }}
             >
-              <LogOut size={17} />
+              <LogOut size={20} />
             </button>
           </div>
         </header>

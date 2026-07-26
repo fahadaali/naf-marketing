@@ -84,14 +84,14 @@ const RichEditor = forwardRef<
   };
 
   const buttons: { icon: JSX.Element; cmd: string; arg?: string; title: string }[] = [
-    { icon: <Bold size={16} />, cmd: 'bold', title: 'غامق' },
-    { icon: <Italic size={16} />, cmd: 'italic', title: 'مائل' },
-    { icon: <Underline size={16} />, cmd: 'underline', title: 'تسطير' },
-    { icon: <Heading2 size={16} />, cmd: 'formatBlock', arg: 'H2', title: 'عنوان' },
-    { icon: <Quote size={16} />, cmd: 'formatBlock', arg: 'BLOCKQUOTE', title: 'اقتباس' },
-    { icon: <List size={16} />, cmd: 'insertUnorderedList', title: 'قائمة نقطية' },
-    { icon: <ListOrdered size={16} />, cmd: 'insertOrderedList', title: 'قائمة مرقمة' },
-    { icon: <RemoveFormatting size={16} />, cmd: 'removeFormat', title: 'إزالة التنسيق' },
+    { icon: <Bold size={20} />, cmd: 'bold', title: 'غامق' },
+    { icon: <Italic size={20} />, cmd: 'italic', title: 'مائل' },
+    { icon: <Underline size={20} />, cmd: 'underline', title: 'تسطير' },
+    { icon: <Heading2 size={20} />, cmd: 'formatBlock', arg: 'H2', title: 'عنوان' },
+    { icon: <Quote size={20} />, cmd: 'formatBlock', arg: 'BLOCKQUOTE', title: 'اقتباس' },
+    { icon: <List size={20} />, cmd: 'insertUnorderedList', title: 'قائمة نقطية' },
+    { icon: <ListOrdered size={20} />, cmd: 'insertOrderedList', title: 'قائمة مرقمة' },
+    { icon: <RemoveFormatting size={20} />, cmd: 'removeFormat', title: 'إزالة التنسيق' },
   ];
 
   return (
@@ -112,7 +112,7 @@ const RichEditor = forwardRef<
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => fileRef.current?.click()}
             >
-              <Paperclip size={16} />
+              <Paperclip size={20} />
             </button>
             <input
               ref={fileRef}
