@@ -131,9 +131,12 @@ a:hover { text-decoration: underline; }
 .btn.danger:hover { background: color-mix(in oklab, var(--destructive) 90%, transparent); }
 .btn.success { background: var(--success); color: var(--success-foreground); }
 .btn.success:hover { background: color-mix(in oklab, var(--success) 90%, transparent); }
-/* زر مميّز (ذكاء اصطناعي/إجراء خاص) — تدرّج أنيق */
-.btn.gold { background: linear-gradient(135deg, var(--primary), var(--chart-4)); color: var(--primary-foreground); }
-.btn.gold:hover { filter: brightness(1.07); }
+/* زر مميّز (ذكاء اصطناعي/إجراء خاص).
+   كان تدرّجاً يمزج --primary برمز مخطّطات --chart-4: معالجة بصرية غير
+   مسجّلة، ورموز chart-* للمخطّطات لا لعناصر الواجهة (CLAUDE.md §6).
+   صار الزر الأساسي نفسه؛ التمييز يأتي من الأيقونة والنص لا من لون ثانٍ. */
+.btn.gold { background: var(--primary); color: var(--primary-foreground); }
+.btn.gold:hover { background: color-mix(in oklab, var(--primary) 90%, transparent); }
 .btn.sm { padding: 6px 12px; font-size: 13px; border-radius: var(--radius); gap: 4px; }
 
 /* ===== الحقول ===== */
@@ -205,7 +208,7 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .rte-toolbar button:hover { background: var(--card); color: var(--foreground); border-color: var(--border); }
 .rte {
-  min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 8px 8px;
+  min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
   padding: 16px; background: var(--background); direction: rtl; text-align: start;
   outline: none; font-size: 15px; line-height: 1.8; color: var(--foreground);
 }
@@ -219,7 +222,7 @@ h3, h4 { letter-spacing: -0.01em; }
   display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px;
   background:
     radial-gradient(1200px 600px at 100% 0%, color-mix(in oklab, var(--primary) 12%, transparent), transparent 60%),
-    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--chart-4) 10%, transparent), transparent 55%),
+    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 55%),
     var(--background);
 }
 .auth-card {
@@ -436,7 +439,9 @@ h3, h4 { letter-spacing: -0.01em; }
 
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: var(--muted); border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), var(--chart-4)); border-radius: 999px; }
+/* كان تدرّجاً بزاوية 90deg — اتجاه فيزيائي لا ينقلب في RTL — ويمزج
+   رمز مخطّطات. صار لوناً واحداً من الرمز الأساسي. */
+.bar-fill { height: 8px; background: var(--primary); border-radius: 999px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 68px; padding: 16px 8px; }
