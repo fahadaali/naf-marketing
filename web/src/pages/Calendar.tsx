@@ -1,3 +1,4 @@
+import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatRiyadh } from '../api';
@@ -20,9 +21,9 @@ export default function Calendar() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">التقويم</h1>
         <div className="spacer" />
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}>‹ السابق</button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}><ChevronRight size={14} /> السابق</button>
         <strong style={{ minWidth: 140, textAlign: 'center' }}>{monthLabel}</strong>
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي ›</button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي <ChevronLeft size={14} /></button>
       </div>
 
       <div className="card">
@@ -81,6 +82,6 @@ function buildMonth(cursor: Date, schedules: any[]) {
   for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, other: false, events: byDay[d] || [] });
   while (cells.length % 7 !== 0) cells.push({ day: '', other: true, events: [] });
 
-  const monthLabel = new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric' }).format(first);
+  const monthLabel = new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(first);
   return { cells, monthLabel };
 }

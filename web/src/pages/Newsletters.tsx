@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Plus, Trash2, ArrowUp, ArrowDown, Eye, Globe, Mail, Save, ExternalLink,
+  Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
+import { DeliveryBadge } from '../components/StateBadge';
+import StatusBadge from '../components/StatusBadge';
 
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
@@ -15,12 +17,6 @@ type Block =
   | { type: 'quote'; text: string; cite?: string }
   | { type: 'divider' };
 
-const STATUS_AR: Record<string, string> = {
-  draft: 'مسودة', scheduled: 'مجدولة', sending: 'قيد الإرسال', sent: 'أُرسلت', archived: 'مؤرشفة',
-};
-const STATUS_BADGE_NL: Record<string, string> = {
-  draft: 'gray', scheduled: 'blue', sending: 'blue', sent: 'green', archived: 'gray',
-};
 
 export default function Newsletters() {
   const [list, setList] = useState<any[]>([]);
@@ -71,8 +67,8 @@ export default function Newsletters() {
             {list.map((n) => (
               <tr key={n.id}>
                 <td>{n.title}</td>
-                <td><span className={`badge ${STATUS_BADGE_NL[n.status] || 'gray'}`}>{STATUS_AR[n.status] || n.status}</span></td>
-                <td>{n.web_published ? <span className="badge green">منشورة</span> : <span className="badge gray">غير منشورة</span>}</td>
+                <td><DeliveryBadge state={n.status} /></td>
+                <td><StatusBadge status={n.web_published ? 'published' : 'draft'} /></td>
                 <td>{n.sent_count || 0}</td>
                 <td className="muted">{formatRiyadh(n.updated_at)}</td>
                 <td><button className="btn sm" onClick={() => setOpenId(n.id)}>فتح</button></td>
@@ -210,7 +206,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
-        <button className="btn ghost sm" onClick={onBack}>← رجوع</button>
+        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={14} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
@@ -260,9 +256,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <textarea className="input" rows={2} value={nl.excerpt || ''} onChange={(e) => field('excerpt', e.target.value)} />
           </div>
 
-          <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+          <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> الصفحة العامة</strong>
+              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
               <button className="btn sm ghost" disabled={saving} onClick={() => save({ web_published: nl.web_published ? 0 : 1 })}>
                 {nl.web_published ? 'إلغاء النشر' : 'نشر الصفحة'}
@@ -276,9 +272,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
           </div>
 
-          <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+          <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> النشر على التواصل</strong>
+              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
               <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
             </div>
@@ -313,8 +309,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
-            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> اختبار العنوانين</strong>
+            <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
+              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
                   <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
@@ -338,9 +334,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           )}
 
           {stats && stats.total > 0 && (
-            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> نتائج الإرسال</strong>
-              <div style={{ fontSize: 12, display: 'grid', gap: 3, marginTop: 8 }}>
+            <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
+              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
+              <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
                 <div className="row"><span className="muted">نُقر فيها</span><div className="spacer" /><span>{stats.clicked} ({pct(stats.clicked, stats.sent)}%)</span></div>
@@ -385,12 +381,15 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {preview && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="row">
-            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginLeft: 4 }} /> معاينة البريد</h4>
+            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
+          {/* استثناء مقصود: هذه معاينة لرسالة بريد، وألوانها تطابق قالب البريد
+              في newsletterSend.ts حرفياً. لو تبعت ثيم المنصة لأظهرت المعاينة
+              شيئاً غير ما يصل المشترك. عملاء البريد لا يدعمون رموز CSS. */}
           <div
-            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 10, marginTop: 10, maxWidth: 640 }}
+            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 'var(--radius)', marginTop: 10, maxWidth: 640 }}
             dangerouslySetInnerHTML={{ __html: preview }}
           />
         </div>

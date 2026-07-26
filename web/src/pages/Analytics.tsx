@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { formatNumber } from '../lib/format';
+import { RatingValue } from '../components/Rating';
+import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { api } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateRangePicker } from '../components/DatePicker';
 
@@ -152,14 +155,14 @@ export default function Analytics() {
                 <PlatformIcon platform={p.platform} size={20} />
                 <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
-                <span className="muted">{(p.impressions || 0).toLocaleString('ar-EG')} انطباع</span>
+                <span className="muted"><bdi>{formatNumber(p.impressions || 0)}</bdi> انطباع</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(p.impressions / maxImp) * 100}%` }} />
               </div>
             </div>
           ))}
-          {(data?.byPlatform || []).length === 0 && <p className="muted">لا توجد بيانات — اسحب التحليلات بعد نشر محتوى.</p>}
+          {(data?.byPlatform || []).length === 0 && <p className="muted">لا تحليلات بعد. انشر محتوى ثم اسحب التحليلات.</p>}
         </div>
 
         {/* أفضل المنشورات */}
@@ -201,9 +204,9 @@ export default function Analytics() {
           <h4 style={{ marginTop: 0 }}>حالة خط الإنتاج</h4>
           <div className="row">
             {(data?.pipeline || []).map((s: any) => (
-              <div key={s.status} style={{ marginLeft: 12 }}>
-                <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABELS[s.status] || s.status}</span>
-                <strong style={{ marginRight: 6 }}>{s.count}</strong>
+              <div key={s.status} style={{ marginInlineEnd: 12 }}>
+                <StatusBadge status={s.status} />
+                <strong style={{ marginInlineStart: 6 }}>{s.count}</strong>
               </div>
             ))}
           </div>
@@ -217,20 +220,20 @@ export default function Analytics() {
               <div className="row" style={{ fontSize: 13 }}>
                 <span>{c.name}</span>
                 <div className="spacer" />
-                <span className="muted">{(c.impressions || 0).toLocaleString('ar-EG')} انطباع · {(c.engagement || 0).toLocaleString('ar-EG')} تفاعل</span>
+                <span className="muted"><bdi>{formatNumber(c.impressions || 0)}</bdi> انطباع · <bdi>{formatNumber(c.engagement || 0)}</bdi> تفاعل</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(c.impressions / maxCampImp) * 100}%` }} />
               </div>
             </div>
           ))}
-          {(data?.campaigns || []).length === 0 && <p className="muted">لا توجد بيانات حملات بعد.</p>}
+          {(data?.campaigns || []).length === 0 && <p className="muted">لا حملة لها بيانات بعد. اربط المحتوى بحملة لتظهر هنا.</p>}
         </div>
       </div>
 
       {/* تنبيهات المحتوى المتأخر */}
       {alerts.length > 0 && (
-        <div className="card" style={{ marginTop: 16, borderColor: 'hsl(var(--warning, 38 92% 50%))' }}>
+        <div className="card" style={{ marginTop: 16, borderColor: 'var(--warning)' }}>
           <h4 style={{ marginTop: 0 }} className="row"><AlertTriangle size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
           <table className="table">
             <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
@@ -238,7 +241,7 @@ export default function Analytics() {
               {alerts.map((a) => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${a.id}`)}>
                   <td>{a.title}</td>
-                  <td><span className={`badge ${STATUS_BADGE[a.status] || 'gray'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
+                  <td><StatusBadge status={a.status} /></td>
                   <td>{a.days_stuck}</td>
                 </tr>
               ))}
@@ -263,7 +266,7 @@ export default function Analytics() {
               </div>
             </div>
           ))}
-          {(perf?.writers || []).length === 0 && <p className="muted">لا توجد بيانات بعد.</p>}
+          {(perf?.writers || []).length === 0 && <p className="muted">لا أداء مسجّل بعد. انشر محتوى ليظهر هنا.</p>}
         </div>
 
         <div className="card">
@@ -283,10 +286,10 @@ export default function Analytics() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
+function Stat({ label, value }: { label: string; value: number | string | ReactNode }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? value.toLocaleString('ar-EG') : value}</div>
+      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
       <div className="label">{label}</div>
     </div>
   );
@@ -335,14 +338,14 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
-        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginLeft: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
+        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
       </div>
       {open && (
         <div style={{ marginTop: 12 }}>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى ٣٠ فيديو، تهدئة ٧ أيام).
+            تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى 30 فيديو، تهدئة 7 أيام).
           </p>
           {accounts.length === 0 ? (
             <p className="muted" style={{ fontSize: 13 }}>لا توجد حسابات فيديو مربوطة (يوتيوب/تيك توك).</p>
@@ -396,9 +399,9 @@ function ReputationCard() {
     <div className="card" style={{ marginBottom: 16 }}>
       <h4 style={{ marginTop: 0 }}>السمعة والتقييمات</h4>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <Stat label="متوسط التقييم" value={`${t.avg_rating} ★`} />
+        <Stat label="متوسط التقييم" value={<RatingValue value={t.avg_rating} size={16} />} />
         <Stat label="عدد التقييمات" value={t.count} />
-        <Stat label="تقييمات سلبية (≤٢)" value={t.negative} />
+        <Stat label="تقييمات سلبية (≤2)" value={t.negative} />
         <Stat label="نسبة الرد على التقييمات" value={`${t.reply_rate}%`} />
       </div>
 
@@ -411,7 +414,7 @@ function ReputationCard() {
             return (
               <div key={star} style={{ marginBottom: 6 }}>
                 <div className="row" style={{ fontSize: 12 }}>
-                  <span>{star} ★</span>
+                  <span><RatingValue value={star} size={12} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
                 </div>
@@ -424,13 +427,13 @@ function ReputationCard() {
         </div>
         <div>
           <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>اتجاه المتوسط الشهري</div>
-          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد بيانات كافية.</p>}
+          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>التقييمات لا تكفي لرسم اتجاه بعد.</p>}
           {trend.map((m) => (
             <div key={m.month} style={{ marginBottom: 6 }}>
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
-                <span className="muted">{m.avg_rating} ★ · {m.count}</span>
+                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />
@@ -449,10 +452,9 @@ function ReputationCard() {
 
 // ===== أفضل أوقات النشر — من الأداء الفعلي (بتوقيت الرياض) =====
 const DAY_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+// الوقت بنظام ٢٤ ساعة مع عزل اتجاهي — قاعدة التنسيق في naf-terms
 function hourLabel(h: number): string {
-  const period = h < 12 ? 'ص' : 'م';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:00 ${period}`;
+  return `\u2068${String(h).padStart(2, '0')}:00\u2069`;
 }
 
 function BestTimesCard({ platform }: { platform: string }) {

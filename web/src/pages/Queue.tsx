@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
+import { api, formatRiyadh } from '../api';
+import StatusBadge from '../components/StatusBadge';
 
 // طابور الاعتماد — المنشورات بانتظار مراجعة/اعتماد.
 export default function Queue() {
@@ -32,7 +33,7 @@ export default function Queue() {
               <tr key={p.id}>
                 <td>{p.title}</td>
                 <td>{p.author_name}</td>
-                <td><span className={`badge ${STATUS_BADGE[p.status]}`}>{STATUS_LABELS[p.status]}</span></td>
+                <td><StatusBadge status={p.status} /></td>
                 <td className="muted">{formatRiyadh(p.updated_at)}</td>
                 <td><button className="btn sm" onClick={() => navigate(`/editor/${p.id}`)}>مراجعة</button></td>
               </tr>

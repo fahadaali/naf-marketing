@@ -78,6 +78,8 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       }
       case 'quote': {
         const st = inline
+          // border-right لا border-inline-start: عملاء البريد المكتبية لا تدعم
+          // الخصائص المنطقية. جهة RTL مكتوبة مباشرةً — استثناء CLAUDE.md §1.
           ? ' style="margin:18px 0;padding:12px 16px;border-right:3px solid #4f46e5;background:#f5f5ff;color:#374151"'
           : '';
         out.push(`<blockquote${st}>${escapeHtml(b.text)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);

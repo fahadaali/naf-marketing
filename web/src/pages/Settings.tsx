@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { ConnectionBadge } from '../components/StateBadge';
 import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -74,7 +75,7 @@ function Users() {
                   {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </td>
-              <td><span className={`badge ${u.is_active ? 'green' : 'red'}`}>{u.is_active ? 'نشط' : 'معطّل'}</span></td>
+              <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
               <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
             </tr>
           ))}
@@ -96,7 +97,7 @@ function NewUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => voi
     <Modal title="مستخدم جديد" onClose={onClose}>
       <div className="field"><label>الاسم</label><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
       <div className="field"><label>البريد</label><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-      <div className="field"><label>كلمة المرور (٨ أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+      <div className="field"><label>كلمة المرور (8 أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
       <div className="field">
         <label>الدور</label>
         <select className="select" value={f.role_name} onChange={(e) => setF({ ...f, role_name: e.target.value })}>
@@ -325,14 +326,14 @@ function Platforms() {
                 className="card"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer',
-                  borderColor: on ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                  background: on ? 'hsl(var(--primary-soft))' : 'hsl(var(--card))',
+                  borderColor: on ? 'var(--primary)' : 'var(--border)',
+                  background: on ? 'var(--primary-soft)' : 'var(--card)',
                 }}
               >
                 <PlatformIcon platform={p} size={26} />
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{PLATFORM_META[p].label}</span>
                 <div className="spacer" />
-                <span className={`badge ${on ? 'green' : 'gray'}`}>{on ? 'مفعّلة' : 'معطّلة'}</span>
+                <ConnectionBadge kind="enabled" on={on} />
               </button>
             );
           })}
@@ -375,7 +376,7 @@ function Platforms() {
       </div>
 
       {cfg && (
-        <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+        <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
           <div className="row" style={{ marginBottom: 8 }}>
             <strong style={{ fontSize: 14 }}>ربط حسابات {cfg.label}</strong>
             <div className="spacer" />
@@ -457,7 +458,7 @@ function SocialApiWebhook() {
   }
 
   return (
-    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+    <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
         <strong style={{ fontSize: 14 }}>الاستقبال الفوري (Webhook)</strong>
         <div className="spacer" />
@@ -522,7 +523,7 @@ function AITones() {
       </p>
 
       {tones.map((t, i) => (
-        <div className="card" key={i} style={{ marginBottom: 12, background: 'hsl(var(--muted) / 0.35)' }}>
+        <div className="card" key={i} style={{ marginBottom: 12, background: 'color-mix(in oklab, var(--muted) 35%, transparent)' }}>
           <div className="row" style={{ marginBottom: 8 }}>
             <div className="field" style={{ margin: 0, width: 220 }}>
               <label>الاسم المعروض</label>
@@ -718,7 +719,7 @@ function NotificationSettings() {
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
       </p>
 
-      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 12, marginBottom: 12 }}>
+      <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 12, marginBottom: 12 }}>
         <strong style={{ fontSize: 14 }}>النشرة والمقالات</strong>
         <div className="grid cols-2" style={{ marginTop: 8 }}>
           <div className="field">
@@ -815,12 +816,10 @@ function Integrations() {
         تُضبط عبر Cloudflare Secrets؛ هنا تضبط معرّف الحساب والمشروع فقط.
       </p>
 
-      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 16 }}>
+      <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 16 }}>
         <div className="row">
           <span>حالة الاتصال بالمفاتيح السرية:</span>
-          <span className={`badge ${status?.configured ? 'green' : 'red'}`}>
-            {status?.configured ? 'مضبوطة' : 'غير مضبوطة'}
-          </span>
+          <ConnectionBadge kind="configured" on={!!status?.configured} />
         </div>
         {!status?.configured && (
           <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
@@ -849,9 +848,9 @@ function Integrations() {
           الأعمدة حسب مرحلة الاعتماد، وتاريخ استحقاقها = تاريخ النشر، وتُسند لأعضاء المشروع.
           أسماء الأعمدة المتوقّعة (تُنشأ تلقائياً إن غابت): المسودات، بانتظار اعتماد قسم التسويق، بانتظار اعتماد المدير العام،
           معتمد، مجدول للنشر، منشور، مرفوض، مؤرشف.
-          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت ٩:٠٠م في مجلد «تقارير الأداء الأسبوعية (آلي)»،
+          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت 21:00 في مجلد «تقارير الأداء الأسبوعية (آلي)»،
           وتقرير شهري في اليوم الأول من كل شهر في مجلد «تقارير الأداء الشهرية (آلي)».
-          تعليقات بطاقات بيسكامب تُستورد تلقائياً كملاحظات على المحتوى المقابل (يظهر ذلك في صفحة تحرير المحتوى).
+          تعليقات بطاقات بيسكامب تُستورد تلقائياً كملاحظات على المحتوى المقابل (يظهر ذلك في صفحة تعديل المحتوى).
         </p>
       </div>
 
@@ -901,7 +900,7 @@ function IntegrationHealth() {
   const quota = (used: number, limit: number) => (limit === -1 ? `${used} / بلا حد` : `${used} / ${limit}`);
 
   return (
-    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+    <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
         <strong style={{ fontSize: 14 }}>صحّة التكامل</strong>
         <div className="spacer" />
@@ -915,14 +914,12 @@ function IntegrationHealth() {
         <div style={{ marginBottom: 10 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>الحسابات المربوطة لدى المزوّد</div>
           {(h.accounts || []).map((a: any) => (
-            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 3 }}>
+            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 4 }}>
               <PlatformIcon platform={a.platform} size={16} />
               <span>{platformLabel(a.platform)}</span>
               <span className="muted">{a.name}</span>
               <div className="spacer" />
-              <span className={`badge ${mappedIds.has(a.id) ? 'green' : 'gray'}`}>
-                {mappedIds.has(a.id) ? 'مربوط بمنصة' : 'غير مربوط'}
-              </span>
+              <ConnectionBadge kind="linked" on={mappedIds.has(a.id)} />
             </div>
           ))}
           {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد حسابات.</p>}
@@ -943,12 +940,11 @@ function IntegrationHealth() {
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         الاستقبال الفوري:{' '}
         {(h.webhooks || []).length > 0
-          ? <span className="badge green">مفعّل ({h.webhooks.length})</span>
-          : <span className="badge gray">غير مسجّل</span>}
+          ? <ConnectionBadge kind="enabled" on /> : <ConnectionBadge kind="enabled" on={false} />}
       </div>
 
       {/* حالة المزامنة المحلية */}
-      <div style={{ fontSize: 12, display: 'grid', gap: 3 }}>
+      <div style={{ fontSize: 12, display: 'grid', gap: 4 }}>
         <div className="row"><span className="muted">آخر سحب تحليلات</span><div className="spacer" /><span>{fmt(L.analytics_last)} ({L.analytics_count})</span></div>
         <div className="row"><span className="muted">آخر عنصر في الصندوق</span><div className="spacer" /><span>{fmt(L.inbox_last)} ({L.inbox_count})</span></div>
         <div className="row">
@@ -956,7 +952,7 @@ function IntegrationHealth() {
           <div className="spacer" />
           <span>
             {L.schedules_pending} بانتظار
-            {L.schedules_failed > 0 && <span className="badge red" style={{ marginRight: 6 }}>{L.schedules_failed} فاشل</span>}
+            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}>{L.schedules_failed} فاشل</span>}
           </span>
         </div>
       </div>

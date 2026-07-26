@@ -142,7 +142,7 @@ export class BufferProvider implements PublishingProvider {
   async publish(input: PublishInput): Promise<PublishResult> {
     const channelIds = input.platforms.map((p) => this.profiles[p]).filter(Boolean);
     if (!channelIds.length) {
-      throw new Error(`لا توجد قناة Buffer مربوطة للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات ← المنصات والمزوّد`);
+      throw new Error(`لا توجد قناة Buffer مربوطة للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
     const modeClause = input.scheduleAt
       ? `mode: customScheduled, dueAt: ${JSON.stringify(input.scheduleAt)}`

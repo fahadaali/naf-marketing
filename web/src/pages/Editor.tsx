@@ -13,6 +13,9 @@ import {
   PenLine,
   BookOpen,
   ImagePlus,
+  Paperclip,
+  ArrowLeft,
+  ChevronLeft,
   Wand2,
   Image as ImageIcon,
   Video,
@@ -21,7 +24,8 @@ import {
   History,
   RefreshCw,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
+import { api, formatRiyadh } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import RichEditor, { type RichEditorHandle } from '../components/RichEditor';
 import Modal from '../components/Modal';
@@ -251,15 +255,15 @@ export default function Editor() {
   return (
     <div>
       <div className="row" style={{ marginBottom: 12 }}>
-        <h1 className="page-title">{postId ? 'تحرير المحتوى' : 'محتوى جديد'}</h1>
-        <span className={`badge ${STATUS_BADGE[effStatus]}`}>{STATUS_LABELS[effStatus]}</span>
+        <h1 className="page-title">{postId ? 'تعديل المحتوى' : 'محتوى جديد'}</h1>
+        <StatusBadge status={effStatus} />
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
       </div>
 
       {status === 'rejected' && rejectReason && (
-        <div className="card" style={{ borderColor: 'var(--danger)', marginBottom: 14, background: '#fdf3f2' }}>
+        <div className="card" style={{ borderColor: 'var(--destructive)', marginBottom: 14, background: 'var(--destructive-soft)' }}>
           <strong className="err">سبب الرفض:</strong> {rejectReason}
         </div>
       )}
@@ -302,7 +306,7 @@ export default function Editor() {
                 </button>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
-                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك 📎 في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={13} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
               </p>
             </div>
           )}
@@ -482,7 +486,7 @@ export default function Editor() {
                 <span className="muted" style={{ fontSize: 12 }}>{versions.length} نسخة</span>
               </div>
               <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
-                <History size={14} /> عرض واسترجاع
+                <History size={14} /> عرض واستعادة
               </button>
             </div>
           )}
@@ -492,8 +496,8 @@ export default function Editor() {
             <div className="card" style={{ marginBottom: notes.length ? 14 : 0 }}>
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
-                <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
-                  <div>{a.actor_name} → <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
+                <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={12} /> <StatusBadge status={a.to_status} /></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
                 </div>
@@ -517,7 +521,7 @@ export default function Editor() {
                 </button>
               </div>
               {notes.map((n) => (
-                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderRight: '2px solid var(--border)', paddingRight: 8 }}>
+                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
                   <div><strong>{n.author_name || 'بيسكامب'}</strong></div>
                   <div className="muted">{n.body}</div>
                   <div className="muted">{formatRiyadh(n.created_at)}</div>
@@ -572,7 +576,7 @@ export default function Editor() {
             await api.post(`/posts/${postId}/versions/${vId}/restore`);
             setShowVersions(false);
             await loadPost(postId);
-            setMsg('تم استرجاع النسخة');
+            setMsg('تمت استعادة النسخة');
           }}
         />
       )}
@@ -882,9 +886,9 @@ function KBModal({
       {loading && <p className="muted">جارٍ التحميل…</p>}
 
       {!loading && (!status?.configured || !status?.project_set) && (
-        <div className="card" style={{ background: 'hsl(var(--warning-soft))' }}>
+        <div className="card" style={{ background: 'var(--warning-soft)' }}>
           <p style={{ margin: 0 }}>
-            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات ← التكاملات</b> لضبط معرّف الحساب والمشروع،
+            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات<ChevronLeft size={13} style={{ verticalAlign: -2 }} />التكاملات</b> لضبط معرّف الحساب والمشروع،
             واضبط الأسرار عبر Cloudflare. عندها ستظهر ملفات «مركز المعرفة» هنا.
           </p>
         </div>
@@ -894,7 +898,7 @@ function KBModal({
         <>
           <div className="field">
             <label>اختر ملفاً من مركز المعرفة</label>
-            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 8 }}>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا توجد ملفات.</p>}
               {files.map((f) => (
                 <div
@@ -903,8 +907,8 @@ function KBModal({
                   style={{
                     padding: '9px 12px',
                     cursor: 'pointer',
-                    borderBottom: '1px solid hsl(var(--border))',
-                    background: selected?.id === f.id && selected?.type === f.type ? 'hsl(var(--primary-soft))' : 'transparent',
+                    borderBottom: '1px solid var(--border)',
+                    background: selected?.id === f.id && selected?.type === f.type ? 'var(--primary-soft)' : 'transparent',
                   }}
                 >
                   <div style={{ fontSize: 14 }}>{f.title}</div>
@@ -948,7 +952,7 @@ function KBModal({
   );
 }
 
-// سجل نسخ المحتوى — استعراض واسترجاع نسخة سابقة
+// سجل نسخ المحتوى — استعراض واستعادة نسخة سابقة
 function VersionsModal({
   versions,
   onClose,
@@ -971,9 +975,9 @@ function VersionsModal({
               <div className="spacer" />
               <button
                 className="btn ghost sm"
-                onClick={() => { if (confirm('استرجاع هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
+                onClick={() => { if (confirm('استعادة هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
               >
-                <History size={14} /> استرجاع
+                <History size={14} /> استعادة
               </button>
             </div>
           </div>
@@ -1038,7 +1042,7 @@ function TemplatesModal({
         <label>القوالب المتاحة</label>
         <div style={{ maxHeight: 300, overflow: 'auto' }}>
           {templates.map((t) => (
-            <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid hsl(var(--border))' }}>
+            <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
                 <div className="muted" style={{ fontSize: 12 }}>{t.creator_name}</div>

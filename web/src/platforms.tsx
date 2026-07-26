@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
-import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, Star } from 'lucide-react';
+import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, MapPin } from 'lucide-react';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
 // المنصات المعروفة لها أيقونات وألوان رسمية؛ المنصات المخصّصة تأخذ أيقونة عامة.
+// ألوان العلامات من رموز --brand-* في ثيم ناف — استثناء منصوص عليه في CLAUDE.md §1،
+// ولا تُستعمل هذه الرموز لأي عنصر واجهة آخر.
 export type PlatformMeta = {
   label: string;
   color: string;        // اللون الرسمي (خلفية الأيقونة)
@@ -22,21 +24,22 @@ function XGlyph({ size = 16 }: { size?: number }) {
 }
 
 export const PLATFORM_META: Record<string, PlatformMeta> = {
-  linkedin: { label: 'لينكدإن', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
-  linkedin_page: { label: 'لينكدإن (صفحة)', color: '#0A66C2', glyph: <Linkedin size={g(15)} /> },
-  x: { label: 'إكس', color: '#000000', glyph: <XGlyph size={14} /> },
-  google: { label: 'نشاطي التجاري (Google)', color: '#4285F4', glyph: <Star size={g(14)} /> },
+  linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
+  linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
+  x: { label: 'إكس', color: 'var(--brand-x)', glyph: <XGlyph size={14} /> },
+  // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
+  google: { label: 'نشاطي التجاري (Google)', color: 'var(--brand-google)', glyph: <MapPin size={g(14)} /> },
   instagram: {
     label: 'إنستغرام',
-    color: '#DD2A7B',
-    gradient: 'linear-gradient(45deg,#F58529,#DD2A7B,#8134AF,#515BD4)',
+    color: 'var(--brand-instagram)',
+    gradient: 'var(--brand-instagram-gradient)',
     glyph: <Instagram size={g(15)} />,
   },
-  snapchat: { label: 'سناب شات', color: '#FFFC00', fg: '#111', glyph: <Ghost size={g(15)} /> },
-  tiktok: { label: 'تيك توك', color: '#010101', glyph: <Music2 size={g(14)} /> },
-  facebook: { label: 'فيسبوك', color: '#1877F2', glyph: <Facebook size={g(15)} /> },
-  youtube: { label: 'يوتيوب', color: '#FF0000', glyph: <Youtube size={g(15)} /> },
-  threads: { label: 'ثريدز', color: '#000000', glyph: <AtSign size={g(15)} /> },
+  snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: <Ghost size={g(15)} /> },
+  tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: <Music2 size={g(14)} /> },
+  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: <Facebook size={g(15)} /> },
+  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: <Youtube size={g(15)} /> },
+  threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: <AtSign size={g(15)} /> },
 };
 
 // المنصات المعروفة القابلة للإضافة من الإعدادات
@@ -69,7 +72,7 @@ export function normalizePlatform(key: string): string {
 export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
   linkedin: 'محتوى مهني رصين يناسب لينكدإن والقطاع القانوني، بفقرات قصيرة ولغة موثوقة.',
   linkedin_page: 'محتوى مهني رصين لصفحة منظمة على لينكدإن، بلغة مؤسسية موثوقة وفقرات قصيرة.',
-  x: 'منشور موجز جداً يناسب منصة إكس (لا يتجاوز ٢٨٠ حرفاً)، مباشر وجذّاب، ويمكن إضافة وسم واحد أو اثنين.',
+  x: 'منشور موجز جداً يناسب منصة إكس (لا يتجاوز 280 حرفاً)، مباشر وجذّاب، ويمكن إضافة وسم واحد أو اثنين.',
   instagram: 'أسلوب جذّاب بصرياً بسطور قصيرة وإيموجي مناسب باعتدال، مع وسوم (hashtags) ملائمة في النهاية.',
   snapchat: 'رسالة قصيرة عفوية ومباشرة تناسب سناب شات.',
   tiktok: 'نص قصير حيوي يناسب تيك توك مع دعوة واضحة للتفاعل.',
@@ -92,8 +95,11 @@ export function PlatformIcon({ platform, size = 24 }: { platform: string; size?:
     borderRadius: Math.round(size * 0.28),
     display: 'grid',
     placeItems: 'center',
+    // الأبيض جزء من علامة المنصة نفسها لا من ثيم ناف: الخلفية لون علامة
+    // ثابت في الوضعين، فرمز الثيم هنا ينقلب خطأً في الوضع الداكن.
+    // يقع ضمن استثناء ألوان العلامات الخارجية — CLAUDE.md §1.
     color: meta?.fg || '#fff',
-    background: meta?.gradient || meta?.color || 'hsl(var(--muted-foreground))',
+    background: meta?.gradient || meta?.color || 'var(--muted-foreground)',
     flexShrink: 0,
   };
   return <span style={style}>{meta?.glyph || <Globe size={Math.round(size * 0.62)} />}</span>;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, formatRiyadh } from '../api';
 
 const ACTION_LABELS: Record<string, string> = {
   login: 'تسجيل دخول',
@@ -14,14 +14,6 @@ const ACTION_LABELS: Record<string, string> = {
   basecamp_resync: 'إعادة مزامنة بيسكامب',
   report_run: 'توليد تقرير',
 };
-
-function formatRiyadh(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat('ar-SA-u-nu-latn', { timeZone: 'Asia/Riyadh', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
 
 // سجل التدقيق: من فعل ماذا ومتى — للمدير العام فقط
 export default function Audit() {
@@ -59,7 +51,7 @@ export default function Audit() {
           <div className="field" style={{ margin: 0, minWidth: 200 }}>
             <label>اسم الفاعل</label>
             <form onSubmit={(e) => { e.preventDefault(); load(); }}>
-              <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم المستخدم…" />
+              <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث باسم المستخدم…" />
             </form>
           </div>
           <button className="btn ghost" onClick={load}>بحث</button>

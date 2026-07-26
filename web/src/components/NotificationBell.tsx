@@ -55,7 +55,7 @@ export default function NotificationBell() {
               <div
                 key={n.id}
                 className="notif-item"
-                style={{ background: n.read_at ? 'transparent' : 'hsl(var(--primary-soft))' }}
+                style={{ background: n.read_at ? 'transparent' : 'var(--primary-soft)' }}
                 onClick={() => open(n, close)}
               >
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>

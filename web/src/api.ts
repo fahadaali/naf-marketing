@@ -1,3 +1,4 @@
+import { formatDate, formatTime } from './lib/format';
 // عميل API موحّد — كل النداءات تمر عبر Workers (لا مفاتيح في المتصفح).
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
@@ -42,8 +43,8 @@ export const STATUS_LABELS: Record<string, string> = {
 export const STATUS_BADGE: Record<string, string> = {
   draft: 'gray',
   pending_marketing: 'amber',
-  pending_gm: 'purple',
-  approved: 'blue',
+  pending_gm: 'amber',
+  approved: 'green',
   scheduled: 'blue',
   late: 'red',
   published: 'green',
@@ -68,13 +69,10 @@ export const ROLE_LABELS: Record<string, string> = {
 // تنسيق الوقت بتوقيت الرياض
 export function formatRiyadh(iso: string | null | undefined): string {
   if (!iso) return '—';
-  try {
-    return new Intl.DateTimeFormat('ar-SA-u-nu-latn', {
-      timeZone: 'Asia/Riyadh',
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  // إزاحة إلى توقيت الرياض (‏+3 ثابت بلا توقيت صيفي) ثم التنسيق بدوال naf-format
+  const riyadh = new Date(d.getTime() + (180 + d.getTimezoneOffset()) * 60_000);
+  // عزل اتجاهي (FSI…PDI) وإلا انقلب ترتيب التاريخ والوقت داخل النص العربي
+  return `\u2068${formatDate(riyadh)} ${formatTime(riyadh)}\u2069`;
 }

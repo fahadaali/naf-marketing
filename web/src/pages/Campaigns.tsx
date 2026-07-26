@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { Plus, ArrowLeft } from 'lucide-react';
+import { api } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -47,7 +48,7 @@ export default function Campaigns() {
             <div className="row" style={{ fontSize: 12 }}>
               <span className="muted">{c.posts_count} منشور</span>
               <div className="spacer" />
-              <span className="muted">{c.start_date || '؟'} ← {c.end_date || '؟'}</span>
+              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={12} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
           </div>
         ))}
@@ -60,7 +61,7 @@ export default function Campaigns() {
           <div className="row" style={{ fontSize: 13, marginBottom: 8 }}>
             <span className="muted">المنصات:</span>
             {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
-              <span key={p} className="row" style={{ gap: 5 }}>
+              <span key={p} className="row" style={{ gap: 4 }}>
                 <PlatformIcon platform={p} size={18} /> {platformLabel(p)}
               </span>
             ))}
@@ -70,7 +71,7 @@ export default function Campaigns() {
           <div className="kanban">
             {KANBAN_COLS.map((col) => (
               <div className="kanban-col" key={col}>
-                <h4><span className={`badge ${STATUS_BADGE[col]}`}>{STATUS_LABELS[col]}</span></h4>
+                <h4><StatusBadge status={col} /></h4>
                 {posts.filter((p) => p.status === col).map((p) => (
                   <div className="kanban-card" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</div>
                 ))}

@@ -35,50 +35,67 @@ ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ''}
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
 ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
+<link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg">
+<link rel="stylesheet" href="/naf-public.css">
 <style>
-  :root { color-scheme: light dark; }
+  /* رموز ناف كلها من /naf-public.css المولَّد من naf-theme.css في السجلّ.
+     لا قيمة لون ولا خط هنا — الوضع الداكن يتبع تفضيل النظام تلقائياً. */
   * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
-         background:#fff; color:#1f2430; line-height:1.9; }
+  body { margin:0; font-family: var(--font-sans);
+         background: var(--background); color: var(--foreground); line-height:1.9; }
   .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
-  header.site { border-bottom:1px solid #eee; padding:16px 0; margin-bottom:28px; }
-  header.site a { color:#4f46e5; text-decoration:none; font-weight:700; }
+  header.site { border-bottom:1px solid var(--border); padding:16px 0; margin-bottom:28px;
+                display:flex; align-items:center; gap:12px; }
+  header.site picture, header.site img { height:36px; width:auto; }
+  header.site a { color: var(--primary); text-decoration:none; font-weight:700; }
   h1 { font-size: 32px; line-height:1.4; margin: 0 0 10px; }
-  .meta { color:#6b7280; font-size:14px; margin-bottom:24px; }
-  img { max-width:100%; height:auto; border-radius:10px; }
+  .meta { color: var(--muted-foreground); font-size:14px; margin-bottom:24px; }
+  img { max-width:100%; height:auto; border-radius: calc(var(--radius) + 4px); }
   figure { margin: 20px 0; }
-  figcaption { font-size:13px; color:#6b7280; text-align:center; margin-top:6px; }
-  blockquote { margin:18px 0; padding:12px 16px; border-right:3px solid #4f46e5; background:#f5f5ff; }
-  hr { border:none; border-top:1px solid #e5e7eb; margin:28px 0; }
-  .btn { display:inline-block; background:#4f46e5; color:#fff; text-decoration:none;
-         padding:12px 22px; border-radius:8px; font-weight:600; }
-  .sub { margin-top:44px; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa; }
-  .sub input { padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-family:inherit; font-size:15px; width:100%; margin-bottom:8px; }
-  .sub button { background:#4f46e5; color:#fff; border:none; padding:11px 20px; border-radius:8px; font-weight:600; cursor:pointer; font-family:inherit; font-size:15px; }
-  .card { border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:12px; }
-  .card a { color:#111; text-decoration:none; font-weight:700; font-size:19px; }
-  .note { padding:14px; border-radius:10px; background:#f5f5ff; }
-  @media (prefers-color-scheme: dark) {
-    body { background:#0f1115; color:#e5e7eb; }
-    header.site { border-color:#232833; }
-    blockquote, .note { background:#171a21; }
-    .sub { background:#141821; border-color:#232833; }
-    .sub input { background:#0f1115; color:#e5e7eb; border-color:#2a3040; }
-    .card { border-color:#232833; } .card a { color:#e5e7eb; }
-  }
+  figcaption { font-size:13px; color: var(--muted-foreground); text-align:center; margin-top:8px; }
+  blockquote { margin:20px 0; padding:12px 16px;
+               border-inline-start:3px solid var(--primary); background: var(--primary-soft); }
+  hr { border:none; border-top:1px solid var(--border); margin:28px 0; }
+  .btn { display:inline-block; background: var(--primary); color: var(--primary-foreground);
+         text-decoration:none; padding:12px 24px; border-radius: var(--radius); font-weight:600; }
+  .btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+  .sub { margin-top:44px; padding:20px; border:1px solid var(--border);
+         border-radius: calc(var(--radius) + 4px); background: var(--card); }
+  .sub input { padding:12px; border:1px solid var(--input); border-radius: var(--radius);
+               font-family:inherit; font-size:15px; width:100%; margin-bottom:8px;
+               background: var(--background); color: var(--foreground); }
+  .sub input:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+  .sub button { background: var(--primary); color: var(--primary-foreground); border:none;
+                padding:12px 20px; border-radius: var(--radius); font-weight:600; cursor:pointer;
+                font-family:inherit; font-size:15px; }
+  .sub button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+  .card { border:1px solid var(--border); border-radius: calc(var(--radius) + 4px);
+          padding:16px; margin-bottom:12px; background: var(--card); }
+  .card a { color: var(--card-foreground); text-decoration:none; font-weight:700; font-size:19px; }
+  .note { padding:16px; border-radius: calc(var(--radius) + 4px); background: var(--primary-soft); }
 </style>
 </head>
 <body><div class="wrap">
-<header class="site"><a href="${escapeHtml(canonical.split('/').slice(0, -1).join('/') || '/')}">${escapeHtml(siteName)}</a></header>
+<header class="site"><picture><source srcset="/brand/naf-mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/naf-mark.svg" alt="شعار ناف"></picture><a href="${escapeHtml(canonical.split('/').slice(0, -1).join('/') || '/')}">${escapeHtml(siteName)}</a></header>
 ${body}
 </div></body></html>`;
 }
 
 // نموذج الاشتراك — يظهر أسفل كل مقالة (حلقة النمو)
+// التاريخ بصيغة naf-terms §5: ميلادي 2026/07/25، معزول اتجاهياً.
+function publicDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return escapeHtml(iso);
+  const riyadh = new Date(d.getTime() + 3 * 60 * 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const text = `${riyadh.getUTCFullYear()}/${pad(riyadh.getUTCMonth() + 1)}/${pad(riyadh.getUTCDate())}`;
+  return `<bdi>${text}</bdi>`;
+}
+
 function subscribeForm(actionBase: string): string {
   return `<div class="sub">
   <h3 style="margin:0 0 6px">اشترك في النشرة</h3>
-  <p style="margin:0 0 12px;color:#6b7280;font-size:14px">تصلك مقالاتنا القانونية أولاً بأول. يمكنك إلغاء الاشتراك في أي وقت.</p>
+  <p style="margin:0 0 12px;color:var(--muted-foreground);font-size:14px">تصلك مقالاتنا القانونية أولاً بأول. يمكنك إلغاء الاشتراك في أي وقت.</p>
   <form method="POST" action="${escapeHtml(actionBase)}/subscribe">
     <input type="email" name="email" required placeholder="بريدك الإلكتروني" aria-label="البريد الإلكتروني">
     <input type="text" name="name" placeholder="الاسم (اختياري)" aria-label="الاسم">
@@ -104,8 +121,8 @@ publicRoutes.get('/', async (c) => {
   const items = results.length
     ? results.map((r) => `<div class="card">
         <a href="${escapeHtml(articleUrl(base, path, r.slug))}">${escapeHtml(r.title)}</a>
-        ${r.excerpt ? `<p style="color:#6b7280;margin:6px 0 0">${escapeHtml(r.excerpt)}</p>` : ''}
-        ${r.published_at ? `<div class="meta" style="margin:6px 0 0">${escapeHtml(r.published_at.slice(0, 10))}</div>` : ''}
+        ${r.excerpt ? `<p style="color:var(--muted-foreground);margin:6px 0 0">${escapeHtml(r.excerpt)}</p>` : ''}
+        ${r.published_at ? `<div class="meta" style="margin:6px 0 0">${publicDate(r.published_at)}</div>` : ''}
       </div>`).join('')
     : '<p class="note">لا توجد مقالات منشورة بعد.</p>';
 
@@ -198,7 +215,7 @@ publicRoutes.get('/:slug', async (c) => {
     siteName: name,
     body: `<article>
       <h1>${escapeHtml(row.title)}</h1>
-      ${row.published_at ? `<div class="meta">${escapeHtml(row.published_at.slice(0, 10))}</div>` : ''}
+      ${row.published_at ? `<div class="meta">${publicDate(row.published_at)}</div>` : ''}
       ${cover ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(row.title)}">` : ''}
       ${html}
     </article>${subscribeForm(`${base}${path}`)}`,
@@ -243,7 +260,7 @@ publicRoutes.post('/subscribe', async (c) => {
     .first<{ token: string }>();
   if (row?.token) c.executionCtx.waitUntil(sendWelcome(c.env, email, row.token, c.req.url).catch(() => {}));
 
-  return page('تم تسجيل اشتراكك بنجاح. ستصلك مقالاتنا القادمة على بريدك.');
+  return page('تم الاشتراك. ستصلك مقالاتنا القادمة على بريدك.');
 });
 
 // إلغاء الاشتراك بنقرة واحدة (رابط في كل رسالة — مطلب نظامي)

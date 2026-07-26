@@ -14,7 +14,6 @@ import {
   LogOut,
   Sun,
   Moon,
-  Scale,
   Search,
   ShieldCheck,
   Mails,
@@ -23,6 +22,7 @@ import {
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
 import NotificationBell from './NotificationBell';
+import { NafLogo } from './brand/NafLogo';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
 
@@ -32,6 +32,8 @@ function useTheme() {
   );
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // ثيم ناف يعتمد صنف `.dark`؛ نبقي السمة للأنماط المحلية حتى اكتمال النقل
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     try {
       localStorage.setItem('naf-theme', theme);
     } catch {}
@@ -47,7 +49,7 @@ function TopSearch() {
       style={{ position: 'relative', width: 280 }}
       onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}
     >
-      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'hsl(var(--muted-foreground))' }} />
+      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'var(--muted-foreground)' }} />
       <input
         className="input"
         style={{ paddingInlineStart: 32, height: 34 }}
@@ -66,7 +68,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const sz = 18;
 
   const items: NavItem[] = [
-    { to: '/', label: 'الداشبورد', icon: <LayoutDashboard size={sz} /> },
+    { to: '/', label: 'لوحة التحكم', icon: <LayoutDashboard size={sz} /> },
     { to: '/posts', label: 'إدارة المحتوى', icon: <FileText size={sz} /> },
     { to: '/editor', label: 'إنشاء محتوى', icon: <PenLine size={sz} />, show: can('draft.edit') },
     { to: '/calendar', label: 'التقويم', icon: <CalendarDays size={sz} /> },
@@ -92,9 +94,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">
-            <Scale size={20} />
-          </div>
+          <NafLogo variant="mark" className="h-12 shrink-0" />
           <div className="brand-text">
             <b>منصة ناف</b>
             <small>لإدارة التسويق</small>
@@ -131,7 +131,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className="avatar">{initials}</div>
-            <div style={{ lineHeight: 1.2 }}>
+            <div style={{ lineHeight: 1.35 }}>
               <div style={{ fontWeight: 600 }}>{user?.name}</div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {user ? ROLE_LABELS[user.role_name] : ''}

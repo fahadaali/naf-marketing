@@ -9,14 +9,14 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseYMD = (s: string) => (s ? new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10))) : null);
 const WEEK = ['أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت'];
-const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('ar', { month: 'long' }).format(new Date(2021, i, 1)));
+const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long' }).format(new Date(2021, i, 1)));
 
 function monthLabel(d: Date) {
-  return new Intl.DateTimeFormat('ar', { month: 'long', year: 'numeric' }).format(d);
+  return new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(d);
 }
 function fmtAr(s: string) {
   const d = parseYMD(s);
-  return d ? new Intl.DateTimeFormat('ar', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
+  return d ? new Intl.DateTimeFormat('ar-u-nu-latn', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
 }
 
 // شبكة التقويم مع أوضاع: أيام / أشهر / سنوات
@@ -123,8 +123,8 @@ export function DateRangePicker({
         };
         const presets: [string, () => void][] = [
           ['اليوم', () => { const t = ymd(new Date()); onChange(t, t); close(); }],
-          ['آخر ٧ أيام', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); onChange(ymd(s), ymd(e)); close(); }],
-          ['آخر ٣٠ يوماً', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); onChange(ymd(s), ymd(e)); close(); }],
+          ['آخر 7 أيام', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); onChange(ymd(s), ymd(e)); close(); }],
+          ['آخر 30 يوماً', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); onChange(ymd(s), ymd(e)); close(); }],
           ['هذا الشهر', () => { const n = new Date(); onChange(ymd(new Date(n.getFullYear(), n.getMonth(), 1)), ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0))); close(); }],
           ['مسح', () => { onChange('', ''); close(); }],
         ];
@@ -157,7 +157,7 @@ export function DateTimePicker({
     <>
       <CalGrid month={month} setMonth={setMonth} start={datePart} end="" onPick={(s) => onChange(`${s}T${timePart || '12:00'}`)} />
       <div className="dp-time">
-        <label style={{ fontSize: 12, color: 'hsl(var(--muted-foreground))', display: 'block', marginBottom: 4 }}>الوقت</label>
+        <label style={{ fontSize: 12, color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 }}>الوقت</label>
         <div className="row" style={{ gap: 8 }}>
           <Clock size={16} />
           <input className="input" style={{ width: 130 }} type="time" value={timePart} onChange={(e) => onChange(`${datePart || ymd(new Date())}T${e.target.value}`)} />
@@ -169,7 +169,7 @@ export function DateTimePicker({
   if (inline) return <div className="dp-inline">{panel}</div>;
 
   const label = value
-    ? new Intl.DateTimeFormat('ar', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(`${value}:00`))
+    ? new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(`${value}:00`))
     : 'اختر التاريخ والوقت';
 
   return (

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, Download,
-  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare,
+  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { DateRangePicker } from '../components/DatePicker';
@@ -21,11 +22,12 @@ function riyadhYMD(iso: string): string {
 
 const SOURCE: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
 const TYPE: Record<string, string> = { text: 'نص', image: 'صورة', video: 'فيديو' };
-const BADGE_HSL: Record<string, string> = {
+// لون شريط مخطّط جانت — رمز كامل لا مكوّنات hsl.
+const BADGE_COLOR: Record<string, string> = {
   gray: 'var(--muted-foreground)', blue: 'var(--info)', amber: 'var(--warning)',
-  green: 'var(--success)', red: 'var(--destructive)', purple: 'var(--purple)',
+  green: 'var(--success)', red: 'var(--destructive)',
 };
-const statusColor = (st: string) => `hsl(${BADGE_HSL[STATUS_BADGE[st]] || 'var(--muted-foreground)'})`;
+const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--muted-foreground)';
 
 function stripHtml(s: string) {
   return (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -217,7 +219,7 @@ export default function ContentManagement() {
           .filter((s) => counts[s])
           .map((s) => (
             <div key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`} onClick={() => setFStatus(fStatus === s ? '' : s)}>
-              <span className={`badge ${STATUS_BADGE[s]}`}>{STATUS_LABELS[s]}</span> <b>{counts[s]}</b>
+              <StatusBadge status={s} /> <b>{counts[s]}</b>
             </div>
           ))}
       </div>
@@ -226,7 +228,7 @@ export default function ContentManagement() {
       <div className="card" style={{ marginBottom: 16, padding: 14 }}>
         <div className="row">
           <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={16} style={{ position: 'absolute', insetInlineStart: 12, top: 11, color: 'hsl(var(--muted-foreground))' }} />
+            <Search size={16} style={{ position: 'absolute', insetInlineStart: 12, top: 11, color: 'var(--muted-foreground)' }} />
             <input className="input" style={{ paddingInlineStart: 36 }} placeholder="بحث في العنوان والمحتوى…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <select className="select" style={{ width: 150 }} value={fSource} onChange={(e) => setFSource(e.target.value)}>
@@ -348,7 +350,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
               <td style={{ cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</td>
-              <td><span className={`badge ${STATUS_BADGE[displayStatus(p)]}`}>{STATUS_LABELS[displayStatus(p)]}</span></td>
+              <td><StatusBadge status={displayStatus(p)} /></td>
               <td className="muted">{SOURCE[p.source] || p.source}</td>
               <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
               <td className="muted">{p.campaign_name || '—'}</td>
@@ -394,7 +396,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>💡 اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={14} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
           <div
@@ -406,7 +408,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
             onDrop={(e) => { e.preventDefault(); handleDrop(col.key); }}
           >
             <h4 className="row">
-              <span className={`badge ${STATUS_BADGE[col.key]}`}>{STATUS_LABELS[col.key]}</span>
+              <StatusBadge status={col.key} />
               <div className="spacer" /><span className="muted">{col.items.length}</span>
             </h4>
             {col.items.map((p: any) => (
@@ -459,14 +461,14 @@ function GanttView({ rows, navigate }: any) {
   const step = Math.max(1, Math.ceil(days / 8));
   for (let d = 0; d <= days; d += step) {
     const t = min + d * 24 * 3600 * 1000;
-    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
+    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
   }
   const todayLeft = pct(Date.now());
 
   return (
     <div className="gantt">
       <div className="gantt-head">
-        <div className="gantt-label" style={{ background: 'hsl(var(--muted) / 0.5)' }}>المحتوى</div>
+        <div className="gantt-label" style={{ background: 'color-mix(in oklab, var(--muted) 50%, transparent)' }}>المحتوى</div>
         <div className="gantt-track" style={{ height: 26 }}>
           {ticks.map((t, i) => <div key={i} className="gantt-tick" style={{ insetInlineStart: `${t.left}%` }}>{t.label}</div>)}
         </div>
@@ -478,7 +480,7 @@ function GanttView({ rows, navigate }: any) {
         return (
           <div className="gantt-row" key={p.id}>
             <div className="gantt-label" title={p.title}>
-              <span className={`badge ${STATUS_BADGE[st]}`} style={{ padding: '1px 6px', fontSize: 10 }}>●</span>
+              <StatusBadge status={st} size={11} iconOnly />
               {p.title}
             </div>
             <div className="gantt-track">
@@ -573,7 +575,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <p className="ok">جاهز للاستيراد: {items.length} عنصراً</p>
-          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 8 }}>
+          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
             {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
             {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و{items.length - 20} غيرها</div>}
           </div>
