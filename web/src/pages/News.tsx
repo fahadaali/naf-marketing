@@ -70,10 +70,10 @@ export default function News() {
             <div className="row" style={{ marginBottom: 4 }}>
               <span className="badge gray">{n.feed_title || 'RSS'}</span>
               <div className="spacer" />
-              <span className="muted" style={{ fontSize: 12 }}>{formatRiyadh(n.published_at || n.created_at)}</span>
+              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{formatRiyadh(n.published_at || n.created_at)}</span>
             </div>
             <a href={n.link} target="_blank" rel="noreferrer"><strong>{n.title}</strong></a>
-            <p className="muted" style={{ fontSize: 13, maxHeight: 66, overflow: 'hidden' }}>{stripHtml(n.summary)}</p>
+            <p className="muted" style={{ fontSize: 'var(--text-sm)', maxHeight: 66, overflow: 'hidden' }}>{stripHtml(n.summary)}</p>
             <div className="row">
               {n.converted_post_id ? (
                 <span className="badge green">حوّل إلى مسودة</span>

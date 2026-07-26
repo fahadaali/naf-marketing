@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   LayoutDashboard,
   FileText,
@@ -12,8 +12,6 @@ import {
   MessageCircle,
   Settings,
   LogOut,
-  Sun,
-  Moon,
   Search,
   ShieldCheck,
   Mails,
@@ -22,24 +20,10 @@ import {
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
 import NotificationBell from './NotificationBell';
+import { ThemeToggle } from './ThemeToggle';
 import { NafLogo } from './brand/NafLogo';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
-
-function useTheme() {
-  const [theme, setTheme] = useState<string>(
-    () => document.documentElement.getAttribute('data-theme') || 'light',
-  );
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    // ثيم ناف يعتمد صنف `.dark`؛ نبقي السمة للأنماط المحلية حتى اكتمال النقل
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    try {
-      localStorage.setItem('naf-theme', theme);
-    } catch {}
-  }, [theme]);
-  return { theme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')) };
-}
 
 function TopSearch() {
   const navigate = useNavigate();
@@ -64,7 +48,6 @@ function TopSearch() {
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
   const navigate = useNavigate();
-  const { theme, toggle } = useTheme();
   const sz = 18;
 
   const items: NavItem[] = [
@@ -123,17 +106,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           <TopSearch />
           <div className="user-chip">
             <NotificationBell />
-            <button
-              className="icon-btn"
-              onClick={toggle}
-              title={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
-            >
-              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
+            <ThemeToggle iconSize={16} />
             <div className="avatar">{initials}</div>
             <div style={{ lineHeight: 1.35 }}>
               <div style={{ fontWeight: 600 }}>{user?.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
+              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                 {user ? ROLE_LABELS[user.role_name] : ''}
               </div>
             </div>

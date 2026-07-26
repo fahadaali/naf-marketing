@@ -207,7 +207,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
         <button className="btn ghost sm" onClick={onBack}><ArrowRight size={14} /> رجوع</button>
-        <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
+        <h1 className="page-title" style={{ margin: 0, fontSize: 'var(--text-2xl)' }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
         <button className="btn ghost" onClick={showPreview}><Eye size={15} /> معاينة</button>
@@ -235,7 +235,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <input className="input" value={nl.subject_b || ''} onChange={(e) => field('subject_b', e.target.value)}
                    placeholder="اتركه فارغاً لتعطيل اختبار العنوانين" />
             {nl.subject_b && (
-              <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+              <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>
                 تُرسل عيّنة {nl.ab_percent || 20}% بالعنوان البديل، ثم تعتمد الأفضل فتحاً.
               </p>
             )}
@@ -258,34 +258,34 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
+              <strong style={{ fontSize: 'var(--text-sm)' }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
               <button className="btn sm ghost" disabled={saving} onClick={() => save({ web_published: nl.web_published ? 0 : 1 })}>
                 {nl.web_published ? 'إلغاء النشر' : 'نشر الصفحة'}
               </button>
             </div>
             {nl.web_published && publicUrl && (
-              <a className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }} href={publicUrl} target="_blank" rel="noreferrer">
+              <a className="muted" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }} href={publicUrl} target="_blank" rel="noreferrer">
                 <ExternalLink size={12} style={{ verticalAlign: -2 }} /> {publicUrl}
               </a>
             )}
-            {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
+            {!nl.web_published && <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
           </div>
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
+              <strong style={{ fontSize: 'var(--text-sm)' }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
               <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
             </div>
             {!nl.web_published && (
-              <p className="muted" style={{ fontSize: 12, margin: 0 }}>انشر الصفحة العامة أولاً — المنشور يحتاج رابط المقالة.</p>
+              <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>انشر الصفحة العامة أولاً — المنشور يحتاج رابط المقالة.</p>
             )}
             {nl.web_published && (
               <>
                 <div className="row" style={{ gap: 12, marginBottom: 8 }}>
                   {['x', 'linkedin'].map((p) => (
-                    <label key={p} className="muted" style={{ fontSize: 13, display: 'inline-flex', gap: 6, cursor: 'pointer' }}>
+                    <label key={p} className="muted" style={{ fontSize: 'var(--text-sm)', display: 'inline-flex', gap: 6, cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!socialPick[p]}
                              onChange={(e) => setSocialPick((v) => ({ ...v, [p]: e.target.checked }))} />
                       {p === 'x' ? 'إكس (سلسلة)' : 'لينكدإن'}
@@ -295,7 +295,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                   <button className="btn sm" onClick={publishSocial}><Send size={13} /> نشر</button>
                 </div>
                 {social && (
-                  <div style={{ fontSize: 12 }}>
+                  <div style={{ fontSize: 'var(--text-xs)' }}>
                     <div className="muted" style={{ marginBottom: 4 }}>سلسلة إكس ({social.x?.length} تغريدة):</div>
                     {(social.x || []).map((t: string, i: number) => (
                       <div key={i} className="card" style={{ padding: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}>{t}</div>
@@ -310,8 +310,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
-              <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
+              <strong style={{ fontSize: 'var(--text-sm)' }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
+              <div style={{ fontSize: 'var(--text-xs)', display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
                   <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
                   <span>{ab.a.open_rate}% ({ab.a.opened}/{ab.a.sent})</span>
@@ -322,7 +322,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                 </div>
               </div>
               {nl.ab_winner
-                ? <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                ? <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '8px 0 0' }}>
                     اعتُمد العنوان {nl.ab_winner === 'b' ? '(ب)' : '(أ)'} لبقية القائمة.
                   </p>
                 : <div className="row" style={{ gap: 6, marginTop: 8 }}>
@@ -335,8 +335,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
-              <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
+              <strong style={{ fontSize: 'var(--text-sm)' }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
+              <div style={{ fontSize: 'var(--text-xs)', display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
                 <div className="row"><span className="muted">نُقر فيها</span><div className="spacer" /><span>{stats.clicked} ({pct(stats.clicked, stats.sent)}%)</span></div>
@@ -365,7 +365,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           {blocks.map((b, i) => (
             <div key={i} className="card" style={{ padding: 10, marginBottom: 8 }}>
               <div className="row" style={{ marginBottom: 6 }}>
-                <span className="muted" style={{ fontSize: 12 }}>{blockLabel(b.type)}</span>
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{blockLabel(b.type)}</span>
                 <div className="spacer" />
                 <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={13} /></button>
                 <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={13} /></button>
@@ -374,7 +374,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               <BlockFields block={b} onChange={(patch) => upd(i, patch)} />
             </div>
           ))}
-          {blocks.length === 0 && <p className="muted" style={{ fontSize: 13 }}>أضف كتلاً من الأزرار أعلاه لبناء النشرة.</p>}
+          {blocks.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-sm)' }}>أضف كتلاً من الأزرار أعلاه لبناء النشرة.</p>}
         </div>
       </div>
 
@@ -453,6 +453,6 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         </div>
       );
     default:
-      return <p className="muted" style={{ fontSize: 12, margin: 0 }}>خط فاصل بين الأقسام.</p>;
+      return <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>خط فاصل بين الأقسام.</p>;
   }
 }
