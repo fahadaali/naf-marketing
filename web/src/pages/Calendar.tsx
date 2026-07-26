@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatRiyadh } from '../api';
 import { platformLabel } from '../platforms';
+import { formatMonth } from '../lib/format';
 
 // تقويم محتوى موحّد بتوقيت الرياض (AST) لعرض مواعيد النشر المجدولة.
 export default function Calendar() {
@@ -82,6 +83,6 @@ function buildMonth(cursor: Date, schedules: any[]) {
   for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, other: false, events: byDay[d] || [] });
   while (cells.length % 7 !== 0) cells.push({ day: '', other: true, events: [] });
 
-  const monthLabel = new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(first);
+  const monthLabel = formatMonth(first);
   return { cells, monthLabel };
 }

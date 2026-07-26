@@ -1,4 +1,7 @@
-import { isolate } from '../lib/format';
+import { isolate, formatDate } from '../lib/format';
+
+// إزاحة الرياض الثابتة (+3 بلا توقيت صيفي) — كما في api.ts
+const RIYADH_OFFSET = 3 * 60 * 60 * 1000;
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -466,7 +469,7 @@ function GanttView({ rows, navigate }: any) {
   const step = Math.max(1, Math.ceil(days / 8));
   for (let d = 0; d <= days; d += step) {
     const t = min + d * 24 * 3600 * 1000;
-    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
+    ticks.push({ left: pct(t), label: formatDate(new Date(t + RIYADH_OFFSET)) });
   }
   const todayLeft = pct(Date.now());
 
