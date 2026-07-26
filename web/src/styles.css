@@ -8,28 +8,22 @@
    ========================================================================== */
 
 /* رموز ناف كاملة تأتي من naf-theme.css أعلاه.
-   ما يبقى هنا: رموز لا مقابل لها في السجلّ (عائلة *-soft والأرجواني)،
-   والظلال الملوّنة بلون العلامة. */
+   ما يبقى هنا رمزان مشتقّان من رموز السجلّ لا قيم مستقلة:
 
-:root,
-:root[data-theme='light'] {
-  --primary-soft: 243 75% 96%;
-  --destructive-soft: 0 84% 96%;
-  --success-soft: 142 60% 94%;
-  --warning-soft: 40 96% 93%;
-  --info-soft: 214 95% 95%;
-  --purple: 262 70% 55%;
-  --purple-soft: 262 80% 96%;
-}
+   ١) عائلة *-soft — خلفيات ناعمة للحالات لا يوفّرها ثيم ناف.
+      تُشتقّ بمزج الرمز الأساس في سطح البطاقة، فتتبع الثيم في
+      الوضعين تلقائياً ولا تحتاج تعريفاً منفصلاً للوضع الداكن.
+   ٢) --purple — لون الشارة السادس. مأخوذ من --chart-4 المخصّص
+      للتزيين في السجلّ، لا من قيمة مستقلة. */
 
-:root[data-theme='dark'] {
-  --primary-soft: 243 40% 18%;
-  --destructive-soft: 0 50% 18%;
-  --success-soft: 142 40% 15%;
-  --warning-soft: 38 50% 16%;
-  --info-soft: 217 50% 18%;
-  --purple: 262 75% 68%;
-  --purple-soft: 262 40% 20%;
+:root {
+  --primary-soft: color-mix(in oklab, var(--primary) 14%, var(--card));
+  --destructive-soft: color-mix(in oklab, var(--destructive) 14%, var(--card));
+  --success-soft: color-mix(in oklab, var(--success) 14%, var(--card));
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--card));
+  --info-soft: color-mix(in oklab, var(--info) 14%, var(--card));
+  --purple: var(--chart-4);
+  --purple-soft: color-mix(in oklab, var(--chart-4) 14%, var(--card));
 }
 
 * { box-sizing: border-box; }
@@ -101,7 +95,7 @@ a:hover { text-decoration: underline; }
 .topbar .user-chip { display: flex; align-items: center; gap: 12px; font-size: 14px; }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
-  background: hsl(var(--primary-soft)); color: var(--primary);
+  background: var(--primary-soft); color: var(--primary);
   display: grid; place-items: center; font-weight: 700; font-size: 14px;
 }
 .icon-btn {
@@ -114,7 +108,7 @@ a:hover { text-decoration: underline; }
 /* ===== الإشعارات ===== */
 .notif-dot {
   position: absolute; top: -3px; inset-inline-end: -3px; min-width: 16px; height: 16px; padding: 0 4px;
-  background: var(--destructive); color: #fff; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: var(--destructive); color: var(--destructive-foreground); border-radius: 999px; font-size: 10px; font-weight: 700;
   display: grid; place-items: center; line-height: 1;
 }
 .notif-menu { width: 320px; padding: 8px; }
@@ -152,12 +146,12 @@ a:hover { text-decoration: underline; }
 
 .btn.ghost { background: transparent; color: var(--foreground); border-color: var(--border); }
 .btn.ghost:hover { background: var(--accent); }
-.btn.danger { background: var(--destructive); color: #fff; }
+.btn.danger { background: var(--destructive); color: var(--destructive-foreground); }
 .btn.danger:hover { background: color-mix(in oklab, var(--destructive) 90%, transparent); }
-.btn.success { background: var(--success); color: #fff; }
+.btn.success { background: var(--success); color: var(--success-foreground); }
 .btn.success:hover { background: color-mix(in oklab, var(--success) 90%, transparent); }
 /* زر مميّز (ذكاء اصطناعي/إجراء خاص) — تدرّج أنيق */
-.btn.gold { background: linear-gradient(135deg, var(--primary), hsl(var(--purple))); color: #fff; }
+.btn.gold { background: linear-gradient(135deg, var(--primary), var(--purple)); color: var(--primary-foreground); }
 .btn.gold:hover { filter: brightness(1.07); }
 .btn.sm { padding: 6px 12px; font-size: 13px; border-radius: var(--radius); gap: 4px; }
 
@@ -196,11 +190,11 @@ a:hover { text-decoration: underline; }
   border: 1px solid transparent;
 }
 .badge.gray   { background: var(--muted); color: var(--muted-foreground); }
-.badge.blue   { background: hsl(var(--info-soft)); color: var(--info); }
-.badge.amber  { background: hsl(var(--warning-soft)); color: var(--warning); }
-.badge.green  { background: hsl(var(--success-soft)); color: var(--success); }
-.badge.red    { background: hsl(var(--destructive-soft)); color: var(--destructive); }
-.badge.purple { background: hsl(var(--purple-soft)); color: hsl(var(--purple)); }
+.badge.blue   { background: var(--info-soft); color: var(--info); }
+.badge.amber  { background: var(--warning-soft); color: var(--warning); }
+.badge.green  { background: var(--success-soft); color: var(--success); }
+.badge.red    { background: var(--destructive-soft); color: var(--destructive); }
+.badge.purple { background: var(--purple-soft); color: var(--purple); }
 
 /* ===== المؤشرات ===== */
 .stat .num { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
@@ -240,7 +234,7 @@ h3, h4 { letter-spacing: -0.01em; }
   display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px;
   background:
     radial-gradient(1200px 600px at 100% 0%, color-mix(in oklab, var(--primary) 12%, transparent), transparent 60%),
-    radial-gradient(1000px 500px at 0% 100%, hsl(var(--purple) / 0.10), transparent 55%),
+    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--purple) 10%, transparent), transparent 55%),
     var(--background);
 }
 .auth-card {
@@ -259,7 +253,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .cal-cell.other { background: color-mix(in oklab, var(--muted) 40%, transparent); opacity: .6; }
 .cal-day { font-weight: 600; color: var(--muted-foreground); margin-bottom: 4px; }
 .cal-event {
-  background: hsl(var(--primary-soft)); color: var(--primary); border-radius: var(--radius);
+  background: var(--primary-soft); color: var(--primary); border-radius: var(--radius);
   padding: 4px 8px; margin-bottom: 4px; font-size: 11px; font-weight: 500; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -310,7 +304,7 @@ h3, h4 { letter-spacing: -0.01em; }
   color: var(--foreground); font-family: inherit; font-size: 13px; line-height: 1.5;
   padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background 0.12s, border-color 0.12s;
 }
-.suggest-chip:hover { background: hsl(var(--primary-soft)); border-color: color-mix(in oklab, var(--primary) 40%, transparent); }
+.suggest-chip:hover { background: var(--primary-soft); border-color: color-mix(in oklab, var(--primary) 40%, transparent); }
 
 /* ===== قائمة منسدلة ===== */
 .menu {
@@ -330,7 +324,7 @@ h3, h4 { letter-spacing: -0.01em; }
 /* ===== شريط الإجراءات المجمّعة ===== */
 .bulkbar {
   display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 14px;
-  background: hsl(var(--primary-soft)); border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: var(--radius);
+  background: var(--primary-soft); border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: var(--radius);
   font-size: 14px;
 }
 
@@ -340,7 +334,7 @@ h3, h4 { letter-spacing: -0.01em; }
   border: 1px solid var(--border); background: var(--card); font-size: 13px; font-weight: 600;
 }
 .chip-stat:hover { border-color: var(--primary); }
-.chip-stat.on { background: hsl(var(--primary-soft)); border-color: var(--primary); }
+.chip-stat.on { background: var(--primary-soft); border-color: var(--primary); }
 .chip-stat b { font-size: 15px; }
 
 /* ===== مخطط جانت ===== */
@@ -355,7 +349,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .gantt-track { position: relative; flex: 1; min-width: 640px; }
 .gantt-bar {
   position: absolute; top: 8px; height: 22px; border-radius: var(--radius); display: flex; align-items: center;
-  padding: 0 8px; color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; cursor: pointer;
+  padding: 0 8px; color: var(--primary-foreground); font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; cursor: pointer;
   box-shadow: var(--shadow-sm);
 }
 .gantt-head { display: flex; background: color-mix(in oklab, var(--muted) 50%, transparent); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
@@ -371,7 +365,7 @@ h3, h4 { letter-spacing: -0.01em; }
   user-select: none;
 }
 .media-embed:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
-.media-thumb { display: block; width: 100%; max-height: 240px; object-fit: cover; background: #0b0b0f; }
+.media-thumb { display: block; width: 100%; max-height: 240px; object-fit: cover; background: var(--muted); }
 .media-cap {
   padding: 8px 12px; font-size: 12.5px; font-weight: 500; color: var(--foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -380,18 +374,18 @@ h3, h4 { letter-spacing: -0.01em; }
 .media-card .media-cap { padding: 0; }
 .media-ic {
   flex-shrink: 0; width: 46px; height: 46px; border-radius: var(--radius); display: grid; place-items: center;
-  color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .02em; background: var(--primary);
+  color: var(--primary-foreground); font-weight: 700; font-size: 12px; letter-spacing: .02em; background: var(--primary);
 }
-.media-card.k-video .media-ic { background: #7c3aed; }
-.media-card.k-audio .media-ic { background: #0891b2; }
-.media-card.k-pdf .media-ic { background: #dc2626; }
-.media-card.k-file .media-ic { background: #475569; }
+.media-card.k-video .media-ic { background: var(--chart-4); }
+.media-card.k-audio .media-ic { background: var(--chart-2); }
+.media-card.k-pdf .media-ic { background: var(--destructive); }
+.media-card.k-file .media-ic { background: var(--muted-foreground); }
 .media-meta { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
 .media-sub { font-size: 11px; color: var(--muted-foreground); }
 
 /* ===== نافذة استعراض الوسائط ===== */
 .mv-overlay {
-  position: fixed; inset: 0; background: rgba(6, 8, 15, 0.82); backdrop-filter: blur(4px);
+  position: fixed; inset: 0; background: color-mix(in oklab, var(--foreground) 70%, transparent); backdrop-filter: blur(4px);
   z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fade .12s ease;
 }
 .mv-box {
@@ -400,10 +394,10 @@ h3, h4 { letter-spacing: -0.01em; }
   box-shadow: var(--shadow-2xl); animation: pop .14s ease;
 }
 .mv-head { padding: 12px 18px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
-.mv-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #0b0b0f; min-height: 220px; }
+.mv-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: var(--muted); min-height: 220px; }
 .mv-media { max-width: 100%; max-height: 72vh; display: block; }
-.mv-pdf { width: 100%; height: 72vh; border: none; background: #fff; }
-.mv-file { padding: 48px 24px; color: #cdd3e0; text-align: center; }
+.mv-pdf { width: 100%; height: 72vh; border: none; background: var(--card); }
+.mv-file { padding: 48px 24px; color: var(--muted-foreground); text-align: center; }
 .mv-bar { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
 
 /* ===== منتقي التواريخ ===== */
@@ -445,19 +439,19 @@ h3, h4 { letter-spacing: -0.01em; }
 .dp-day:hover { background: var(--accent); }
 .dp-day.other { color: var(--muted-foreground); opacity: .4; }
 .dp-day.today { box-shadow: inset 0 0 0 1px var(--primary); }
-.dp-day.inrange { background: hsl(var(--primary-soft)); border-radius: 0; }
+.dp-day.inrange { background: var(--primary-soft); border-radius: 0; }
 .dp-day.sel { background: var(--primary); color: var(--primary-foreground); }
 .dp-time { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
 
 /* ===== drag-drop kanban ===== */
-.kanban-col.dragover { outline: 2px dashed var(--primary); outline-offset: -2px; background: hsl(var(--primary-soft)); }
+.kanban-col.dragover { outline: 2px dashed var(--primary); outline-offset: -2px; background: var(--primary-soft); }
 .kanban-card { transition: box-shadow .1s; }
 .kanban-card.dragging { opacity: .5; }
 .kanban-card[draggable='true'] { cursor: grab; }
 
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: var(--muted); border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), hsl(var(--purple))); border-radius: 999px; }
+.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), var(--purple)); border-radius: 999px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 68px; padding: 16px 8px; }

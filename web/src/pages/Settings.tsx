@@ -96,7 +96,7 @@ function NewUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => voi
     <Modal title="مستخدم جديد" onClose={onClose}>
       <div className="field"><label>الاسم</label><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
       <div className="field"><label>البريد</label><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-      <div className="field"><label>كلمة المرور (٨ أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+      <div className="field"><label>كلمة المرور (8 أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
       <div className="field">
         <label>الدور</label>
         <select className="select" value={f.role_name} onChange={(e) => setF({ ...f, role_name: e.target.value })}>
@@ -326,7 +326,7 @@ function Platforms() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer',
                   borderColor: on ? 'var(--primary)' : 'var(--border)',
-                  background: on ? 'hsl(var(--primary-soft))' : 'var(--card)',
+                  background: on ? 'var(--primary-soft)' : 'var(--card)',
                 }}
               >
                 <PlatformIcon platform={p} size={26} />
@@ -849,7 +849,7 @@ function Integrations() {
           الأعمدة حسب مرحلة الاعتماد، وتاريخ استحقاقها = تاريخ النشر، وتُسند لأعضاء المشروع.
           أسماء الأعمدة المتوقّعة (تُنشأ تلقائياً إن غابت): المسودات، بانتظار اعتماد قسم التسويق، بانتظار اعتماد المدير العام،
           معتمد، مجدول للنشر، منشور، مرفوض، مؤرشف.
-          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت ٩:٠٠م في مجلد «تقارير الأداء الأسبوعية (آلي)»،
+          ويُرفع تقرير أداء أسبوعي (Excel) كل سبت 21:00 في مجلد «تقارير الأداء الأسبوعية (آلي)»،
           وتقرير شهري في اليوم الأول من كل شهر في مجلد «تقارير الأداء الشهرية (آلي)».
           تعليقات بطاقات بيسكامب تُستورد تلقائياً كملاحظات على المحتوى المقابل (يظهر ذلك في صفحة تعديل المحتوى).
         </p>

@@ -14,6 +14,8 @@ import {
   BookOpen,
   ImagePlus,
   Paperclip,
+  ArrowLeft,
+  ChevronLeft,
   Wand2,
   Image as ImageIcon,
   Video,
@@ -260,7 +262,7 @@ export default function Editor() {
       </div>
 
       {status === 'rejected' && rejectReason && (
-        <div className="card" style={{ borderColor: 'var(--danger)', marginBottom: 14, background: '#fdf3f2' }}>
+        <div className="card" style={{ borderColor: 'var(--destructive)', marginBottom: 14, background: 'var(--destructive-soft)' }}>
           <strong className="err">سبب الرفض:</strong> {rejectReason}
         </div>
       )}
@@ -494,7 +496,7 @@ export default function Editor() {
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
                 <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
-                  <div>{a.actor_name} → <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={12} /> <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
                 </div>
@@ -883,9 +885,9 @@ function KBModal({
       {loading && <p className="muted">جارٍ التحميل…</p>}
 
       {!loading && (!status?.configured || !status?.project_set) && (
-        <div className="card" style={{ background: 'hsl(var(--warning-soft))' }}>
+        <div className="card" style={{ background: 'var(--warning-soft)' }}>
           <p style={{ margin: 0 }}>
-            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات ← التكاملات</b> لضبط معرّف الحساب والمشروع،
+            لم يُضبط تكامل بيسكامب بعد. اذهب إلى <b>الإعدادات<ChevronLeft size={13} style={{ verticalAlign: -2 }} />التكاملات</b> لضبط معرّف الحساب والمشروع،
             واضبط الأسرار عبر Cloudflare. عندها ستظهر ملفات «مركز المعرفة» هنا.
           </p>
         </div>
@@ -905,7 +907,7 @@ function KBModal({
                     padding: '9px 12px',
                     cursor: 'pointer',
                     borderBottom: '1px solid var(--border)',
-                    background: selected?.id === f.id && selected?.type === f.type ? 'hsl(var(--primary-soft))' : 'transparent',
+                    background: selected?.id === f.id && selected?.type === f.type ? 'var(--primary-soft)' : 'transparent',
                   }}
                 >
                   <div style={{ fontSize: 14 }}>{f.title}</div>

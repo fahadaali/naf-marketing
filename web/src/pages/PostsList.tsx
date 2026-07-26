@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, Download,
-  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare,
+  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import { useAuth } from '../auth';
@@ -394,7 +394,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>💡 اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={14} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
           <div

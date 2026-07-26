@@ -1,5 +1,6 @@
 import { formatNumber } from '../lib/format';
-import { useEffect, useState } from 'react';
+import { StarValue } from '../components/Rating';
+import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
@@ -231,7 +232,7 @@ export default function Analytics() {
 
       {/* تنبيهات المحتوى المتأخر */}
       {alerts.length > 0 && (
-        <div className="card" style={{ marginTop: 16, borderColor: 'hsl(var(--warning, 38 92% 50%))' }}>
+        <div className="card" style={{ marginTop: 16, borderColor: 'var(--warning)' }}>
           <h4 style={{ marginTop: 0 }} className="row"><AlertTriangle size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
           <table className="table">
             <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
@@ -284,7 +285,7 @@ export default function Analytics() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
+function Stat({ label, value }: { label: string; value: number | string | ReactNode }) {
   return (
     <div className="card stat">
       <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
@@ -343,7 +344,7 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
       {open && (
         <div style={{ marginTop: 12 }}>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى ٣٠ فيديو، تهدئة ٧ أيام).
+            تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى 30 فيديو، تهدئة 7 أيام).
           </p>
           {accounts.length === 0 ? (
             <p className="muted" style={{ fontSize: 13 }}>لا توجد حسابات فيديو مربوطة (يوتيوب/تيك توك).</p>
@@ -397,9 +398,9 @@ function ReputationCard() {
     <div className="card" style={{ marginBottom: 16 }}>
       <h4 style={{ marginTop: 0 }}>السمعة والتقييمات</h4>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <Stat label="متوسط التقييم" value={`${t.avg_rating} ★`} />
+        <Stat label="متوسط التقييم" value={<StarValue value={t.avg_rating} size={16} />} />
         <Stat label="عدد التقييمات" value={t.count} />
-        <Stat label="تقييمات سلبية (≤٢)" value={t.negative} />
+        <Stat label="تقييمات سلبية (≤2)" value={t.negative} />
         <Stat label="نسبة الرد على التقييمات" value={`${t.reply_rate}%`} />
       </div>
 
@@ -412,7 +413,7 @@ function ReputationCard() {
             return (
               <div key={star} style={{ marginBottom: 6 }}>
                 <div className="row" style={{ fontSize: 12 }}>
-                  <span>{star} ★</span>
+                  <span><StarValue value={star} size={12} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
                 </div>
@@ -431,7 +432,7 @@ function ReputationCard() {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
-                <span className="muted">{m.avg_rating} ★ · {m.count}</span>
+                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><StarValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />

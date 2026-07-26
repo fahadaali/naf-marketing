@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
+import { StarScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
 
 // إدارة التعليقات والرسائل والإشارات والتقييمات — مزامنة من المزوّد مع الرد والاقتراحات الذكية والإشراف.
@@ -138,14 +139,7 @@ export default function Comments() {
                 <div>
                   <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                     {c.author_name}
-                    {c.rating != null && (
-                      <span
-                        className={`badge ${c.rating <= 2 ? 'red' : c.rating >= 4 ? 'green' : 'gray'}`}
-                        title={`تقييم ${c.rating} من ٥`}
-                      >
-                        {'★'.repeat(c.rating)}{'☆'.repeat(Math.max(0, 5 - c.rating))}
-                      </span>
-                    )}
+                    {c.rating != null && <StarScale value={c.rating} />}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>
@@ -168,7 +162,7 @@ export default function Comments() {
               )}
 
               {c.reply_body && editing[c.id] === undefined ? (
-                <div className="card" style={{ background: 'hsl(var(--primary-soft))', padding: 10 }}>
+                <div className="card" style={{ background: 'var(--primary-soft)', padding: 10 }}>
                   <div className="row" style={{ marginBottom: 4 }}>
                     <div className="muted" style={{ fontSize: 12 }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
                     <div className="spacer" />

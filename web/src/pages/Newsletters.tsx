@@ -389,6 +389,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
+          {/* استثناء مقصود: هذه معاينة لرسالة بريد، وألوانها تطابق قالب البريد
+              في newsletterSend.ts حرفياً. لو تبعت ثيم المنصة لأظهرت المعاينة
+              شيئاً غير ما يصل المشترك. عملاء البريد لا يدعمون رموز CSS. */}
           <div
             style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 'var(--radius)', marginTop: 10, maxWidth: 640 }}
             dangerouslySetInnerHTML={{ __html: preview }}

@@ -123,8 +123,8 @@ export function DateRangePicker({
         };
         const presets: [string, () => void][] = [
           ['اليوم', () => { const t = ymd(new Date()); onChange(t, t); close(); }],
-          ['آخر ٧ أيام', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); onChange(ymd(s), ymd(e)); close(); }],
-          ['آخر ٣٠ يوماً', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); onChange(ymd(s), ymd(e)); close(); }],
+          ['آخر 7 أيام', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); onChange(ymd(s), ymd(e)); close(); }],
+          ['آخر 30 يوماً', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); onChange(ymd(s), ymd(e)); close(); }],
           ['هذا الشهر', () => { const n = new Date(); onChange(ymd(new Date(n.getFullYear(), n.getMonth(), 1)), ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0))); close(); }],
           ['مسح', () => { onChange('', ''); close(); }],
         ];

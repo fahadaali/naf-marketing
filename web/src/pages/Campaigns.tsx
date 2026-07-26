@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, ArrowLeft } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { useAuth } from '../auth';
@@ -47,7 +47,7 @@ export default function Campaigns() {
             <div className="row" style={{ fontSize: 12 }}>
               <span className="muted">{c.posts_count} منشور</span>
               <div className="spacer" />
-              <span className="muted">{c.start_date || '؟'} ← {c.end_date || '؟'}</span>
+              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={12} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
           </div>
         ))}
