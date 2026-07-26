@@ -14,7 +14,6 @@ import {
   LogOut,
   Sun,
   Moon,
-  Scale,
   Search,
   ShieldCheck,
   Mails,
@@ -23,6 +22,7 @@ import {
 import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
 import NotificationBell from './NotificationBell';
+import { NafLogo } from './brand/NafLogo';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
 
@@ -94,9 +94,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">
-            <Scale size={20} />
-          </div>
+          <NafLogo variant="mark" className="h-9" />
           <div className="brand-text">
             <b>منصة ناف</b>
             <small>لإدارة التسويق</small>
