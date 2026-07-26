@@ -37,6 +37,12 @@ If a value you need does not exist in the token set, **stop and ask**. Adding a 
 
 **No parallel systems.** A platform must not define its own theme, token set, colour scale or utility palette in `tailwind.config.js` or anywhere else. If you find one, it predates this system and must be replaced entirely and its definition removed. Two sources of truth in one repository is worse than no system at all.
 
+**Two exceptions, and only these two.**
+
+*Email templates.* Email clients do not support CSS custom properties. A template that renders inside an inbox carries literal values by necessity, and so does any in-app preview of it — a preview styled from the app theme shows the author something the subscriber will never receive. Keep those values in one template file, comment why, and mirror the same values in the preview. Everything else in the same repository still obeys the rule.
+
+*External brand colours.* Platform marks — LinkedIn, X, Instagram, YouTube, Facebook, TikTok, Snapchat, Threads, Google — are identities owned by other parties. Recolouring them to fit our theme makes them unrecognisable, which defeats the icon. They are registered as `--brand-*` tokens in `naf-theme.css`; consume those. Never type the hex, and never use a `--brand-*` token for anything but that platform's own mark.
+
 ---
 
 ## 2. RTL is the default
@@ -134,6 +140,8 @@ bg-primary  text-primary-foreground  hover:bg-primary/90
 - Accent is emphasis, not decoration. More than one accent element visible at once means one is wrong.
 - Never communicate meaning by colour alone — pair status colours with an icon and a label.
 - Light and dark must both work. Test both.
+
+**Soft state backgrounds.** `--primary-soft`, `--destructive-soft`, `--success-soft`, `--warning-soft`, `--info-soft` and `--secondary-soft` are derived from their base token by `color-mix` into the card surface, so they follow both modes from a single definition. Use them for status badges and quiet alerts. Never define your own soft value — a hand-picked tint is the exact drift that survives a palette change and then clashes with it.
 
 **No undocumented status.** Every status shown to a user must exist in `naf-terms.md` with a registered colour token and a registered icon. A status that appears in one screen without passing through the registry — however reasonable it looks — is the first step back to five different systems.
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
-import { StarScale } from '../components/Rating';
+import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
 
 // إدارة التعليقات والرسائل والإشارات والتقييمات — مزامنة من المزوّد مع الرد والاقتراحات الذكية والإشراف.
@@ -139,7 +139,7 @@ export default function Comments() {
                 <div>
                   <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                     {c.author_name}
-                    {c.rating != null && <StarScale value={c.rating} />}
+                    {c.rating != null && <RatingScale value={c.rating} size={14} />}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>

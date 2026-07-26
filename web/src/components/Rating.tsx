@@ -1,37 +1,81 @@
-import { Star } from 'lucide-react';
+import * as React from "react"
+import { Star } from "lucide-react"
 
-/* عرض التقييم بالنجوم — تعريف واحد لكل المنصة.
-   اللون من رمز --warning، ولا يُكتب لون خام.
-   المعنى لا يُنقل باللون وحده: يرافق المقياسَ رقمٌ دائماً. */
+import { cn } from "../lib/utils"
 
-const FILL = 'var(--warning)';
+// منسوخ من fahadaali/naf-ui#v1.2.0 (registry/naf/ui/rating.tsx).
+// التعديل الوحيد: مسار استيراد cn محلي بدل مسار السجلّ.
+//
+// التقييم نمط عرض لا أيقونة. صيغتان فقط: قيمة ومقياس.
+//
+// الممتلئة warning والفارغة muted-foreground — استثناء مقصود لقاعدة
+// «الأيقونة ترث لون النص»، لأن التقييم مقياس بصري لا زخرفة.
+//
+// المعنى لا يُنقل باللون وحده: القيمة رقم ظاهر، والمقياس يحمل نصاً بديلاً.
+// النجمة لا تُقلب في الاتجاه من اليمين لليسار.
 
-/** قيمة تقييم مختصرة: الرقم ونجمة واحدة — «4.4 ★» */
-export function StarValue({ value, size = 14 }: { value: number | string; size?: number }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <bdi>{value}</bdi>
-      <Star size={size} fill={FILL} color={FILL} />
-    </span>
-  );
+const MAX = 5
+
+/** قيمة تقييم مختصرة للوحات والجداول: الرقم ونجمة واحدة ممتلئة. */
+export interface RatingValueProps extends React.HTMLAttributes<HTMLSpanElement> {
+  value: number | string
+  /** مقاس النجمة — من سلّم الأيقونات: 16 داخل النصوص، 20 داخل الأزرار */
+  size?: number
 }
 
-/** مقياس من خمس نجمات، الممتلئ منها بعدد التقييم */
-export function StarScale({ value, size = 13 }: { value: number; size?: number }) {
-  const filled = Math.max(0, Math.min(5, Math.round(value)));
-  return (
+const RatingValue = React.forwardRef<HTMLSpanElement, RatingValueProps>(
+  ({ value, size = 16, className, ...props }, ref) => (
     <span
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
-      title={`تقييم ${value} من 5`}
+      ref={ref}
+      className={cn("inline-flex items-center gap-1 tabular-nums", className)}
+      {...props}
     >
-      {Array.from({ length: 5 }, (_, i) => (
-        <Star
-          key={i}
-          size={size}
-          fill={i < filled ? FILL : 'none'}
-          color={i < filled ? FILL : 'var(--muted-foreground)'}
-        />
-      ))}
+      <bdi>{value}</bdi>
+      <Star size={size} className="shrink-0 fill-warning text-warning" />
     </span>
-  );
+  )
+)
+RatingValue.displayName = "RatingValue"
+
+/** مقياس من خمس نجمات لبطاقة تقييم مفرد. */
+export interface RatingScaleProps extends React.HTMLAttributes<HTMLSpanElement> {
+  value: number
+  size?: number
+  /** نص بديل مخصّص — الافتراضي «تقييم N من 5» */
+  label?: string
 }
+
+const RatingScale = React.forwardRef<HTMLSpanElement, RatingScaleProps>(
+  ({ value, size = 16, label, className, ...props }, ref) => {
+    const filled = Math.max(0, Math.min(MAX, Math.round(value)))
+    const text = label ?? `تقييم ${value} من ${MAX}`
+
+    return (
+      <span
+        ref={ref}
+        role="img"
+        aria-label={text}
+        title={text}
+        className={cn("inline-flex items-center gap-0.5", className)}
+        {...props}
+      >
+        {Array.from({ length: MAX }, (_, index) => (
+          <Star
+            key={index}
+            size={size}
+            aria-hidden
+            className={cn(
+              "shrink-0",
+              index < filled
+                ? "fill-warning text-warning"
+                : "fill-transparent text-muted-foreground"
+            )}
+          />
+        ))}
+      </span>
+    )
+  }
+)
+RatingScale.displayName = "RatingScale"
+
+export { RatingValue, RatingScale }

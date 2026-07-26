@@ -96,6 +96,35 @@
   --shadow-xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.10), 0px 8px 10px -1px hsl(0 0% 0% / 0.10);
   --shadow-2xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.25);
 
+  /* [جديد] خلفيات ناعمة للحالات — لم تكن موجودة، فكانت كل منصة
+     تخترع لنفسها قيماً ثابتة تتعارض مع الأساسي عند تغييره.
+     مشتقّة لا مستقلة: تمزج الرمز الأساس في سطح البطاقة، فتتبع
+     الوضعين تلقائياً بتعريف واحد ولا تحتاج كتلة في .dark.
+     نسبة 14% مضبوطة بصرياً في الوضعين. */
+  --primary-soft: color-mix(in oklab, var(--primary) 14%, var(--card));
+  --secondary-soft: color-mix(in oklab, var(--secondary) 14%, var(--card));
+  --destructive-soft: color-mix(in oklab, var(--destructive) 14%, var(--card));
+  --success-soft: color-mix(in oklab, var(--success) 14%, var(--card));
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--card));
+  --info-soft: color-mix(in oklab, var(--info) 14%, var(--card));
+
+  /* [جديد] ألوان العلامات الخارجية — استثناء منصوص عليه.
+     هذه ليست قيم تصميم لناف بل هويات مملوكة لأطراف أخرى، وتغييرها
+     يجعل أيقونات المنصات غير قابلة للتعرّف. تُسجَّل هنا لتبقى تحت
+     السجلّ بدل أن تتكرّر خاماً في كل منصة.
+     تُستعمل لخلفيات أيقونات المنصات حصراً — لا لأي عنصر واجهة آخر. */
+  --brand-linkedin: #0A66C2;
+  --brand-x: #000000;
+  --brand-instagram: #DD2A7B;
+  --brand-instagram-gradient: linear-gradient(45deg, #F58529, #DD2A7B, #8134AF, #515BD4);
+  --brand-facebook: #1877F2;
+  --brand-youtube: #FF0000;
+  --brand-tiktok: #010101;
+  --brand-snapchat: #FFFC00;
+  --brand-snapchat-foreground: #111111;
+  --brand-threads: #000000;
+  --brand-google: #4285F4;
+
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 }
@@ -205,6 +234,24 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+
+  /* [جديد] الخلفيات الناعمة وألوان العلامات الخارجية */
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary-soft: var(--secondary-soft);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-success-soft: var(--success-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-info-soft: var(--info-soft);
+  --color-brand-linkedin: var(--brand-linkedin);
+  --color-brand-x: var(--brand-x);
+  --color-brand-instagram: var(--brand-instagram);
+  --color-brand-facebook: var(--brand-facebook);
+  --color-brand-youtube: var(--brand-youtube);
+  --color-brand-tiktok: var(--brand-tiktok);
+  --color-brand-snapchat: var(--brand-snapchat);
+  --color-brand-snapchat-foreground: var(--brand-snapchat-foreground);
+  --color-brand-threads: var(--brand-threads);
+  --color-brand-google: var(--brand-google);
 
   --color-border: var(--border);
   --color-input: var(--input);

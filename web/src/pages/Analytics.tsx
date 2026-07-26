@@ -1,5 +1,5 @@
 import { formatNumber } from '../lib/format';
-import { StarValue } from '../components/Rating';
+import { RatingValue } from '../components/Rating';
 import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -398,7 +398,7 @@ function ReputationCard() {
     <div className="card" style={{ marginBottom: 16 }}>
       <h4 style={{ marginTop: 0 }}>السمعة والتقييمات</h4>
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <Stat label="متوسط التقييم" value={<StarValue value={t.avg_rating} size={16} />} />
+        <Stat label="متوسط التقييم" value={<RatingValue value={t.avg_rating} size={16} />} />
         <Stat label="عدد التقييمات" value={t.count} />
         <Stat label="تقييمات سلبية (≤2)" value={t.negative} />
         <Stat label="نسبة الرد على التقييمات" value={`${t.reply_rate}%`} />
@@ -413,7 +413,7 @@ function ReputationCard() {
             return (
               <div key={star} style={{ marginBottom: 6 }}>
                 <div className="row" style={{ fontSize: 12 }}>
-                  <span><StarValue value={star} size={12} /></span>
+                  <span><RatingValue value={star} size={12} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
                 </div>
@@ -432,7 +432,7 @@ function ReputationCard() {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
-                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><StarValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
+                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />

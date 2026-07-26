@@ -1,4 +1,4 @@
-/* ثيم ناف وخطه من السجلّ fahadaali/naf-ui#v1.1.1 — لا تعدّل الملفين. */
+/* ثيم ناف وخطه من السجلّ fahadaali/naf-ui#v1.2.0 — لا تعدّل الملفين. */
 @import "./naf-theme.css";
 @import "./naf-font.css";
 
@@ -6,25 +6,6 @@
    منصة ناف — أنماط المنصة فوق ثيم ناف الرسمي.
    الألوان كلها من رموز السجلّ؛ وضع فاتح/داكن، RTL كامل.
    ========================================================================== */
-
-/* رموز ناف كاملة تأتي من naf-theme.css أعلاه.
-   ما يبقى هنا رمزان مشتقّان من رموز السجلّ لا قيم مستقلة:
-
-   ١) عائلة *-soft — خلفيات ناعمة للحالات لا يوفّرها ثيم ناف.
-      تُشتقّ بمزج الرمز الأساس في سطح البطاقة، فتتبع الثيم في
-      الوضعين تلقائياً ولا تحتاج تعريفاً منفصلاً للوضع الداكن.
-   ٢) --purple — لون الشارة السادس. مأخوذ من --chart-4 المخصّص
-      للتزيين في السجلّ، لا من قيمة مستقلة. */
-
-:root {
-  --primary-soft: color-mix(in oklab, var(--primary) 14%, var(--card));
-  --destructive-soft: color-mix(in oklab, var(--destructive) 14%, var(--card));
-  --success-soft: color-mix(in oklab, var(--success) 14%, var(--card));
-  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--card));
-  --info-soft: color-mix(in oklab, var(--info) 14%, var(--card));
-  --purple: var(--chart-4);
-  --purple-soft: color-mix(in oklab, var(--chart-4) 14%, var(--card));
-}
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -151,7 +132,7 @@ a:hover { text-decoration: underline; }
 .btn.success { background: var(--success); color: var(--success-foreground); }
 .btn.success:hover { background: color-mix(in oklab, var(--success) 90%, transparent); }
 /* زر مميّز (ذكاء اصطناعي/إجراء خاص) — تدرّج أنيق */
-.btn.gold { background: linear-gradient(135deg, var(--primary), var(--purple)); color: var(--primary-foreground); }
+.btn.gold { background: linear-gradient(135deg, var(--primary), var(--chart-4)); color: var(--primary-foreground); }
 .btn.gold:hover { filter: brightness(1.07); }
 .btn.sm { padding: 6px 12px; font-size: 13px; border-radius: var(--radius); gap: 4px; }
 
@@ -194,7 +175,9 @@ a:hover { text-decoration: underline; }
 .badge.amber  { background: var(--warning-soft); color: var(--warning); }
 .badge.green  { background: var(--success-soft); color: var(--success); }
 .badge.red    { background: var(--destructive-soft); color: var(--destructive); }
-.badge.purple { background: var(--purple-soft); color: var(--purple); }
+/* اللون السادس للشارات: chart-4 من رموز التزيين، وخلفيته مشتقّة
+   بالصيغة نفسها التي يشتقّ بها الثيم عائلة *-soft. */
+.badge.purple { background: color-mix(in oklab, var(--chart-4) 14%, var(--card)); color: var(--chart-4); }
 
 /* ===== المؤشرات ===== */
 .stat .num { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
@@ -234,7 +217,7 @@ h3, h4 { letter-spacing: -0.01em; }
   display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px;
   background:
     radial-gradient(1200px 600px at 100% 0%, color-mix(in oklab, var(--primary) 12%, transparent), transparent 60%),
-    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--purple) 10%, transparent), transparent 55%),
+    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--chart-4) 10%, transparent), transparent 55%),
     var(--background);
 }
 .auth-card {
@@ -451,7 +434,7 @@ h3, h4 { letter-spacing: -0.01em; }
 
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: var(--muted); border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), var(--purple)); border-radius: 999px; }
+.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), var(--chart-4)); border-radius: 999px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 68px; padding: 16px 8px; }
