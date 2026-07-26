@@ -153,6 +153,11 @@ a:hover { text-decoration: underline; }
 .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--foreground); }
 
 /* ===== الجداول ===== */
+/* أرقام جدولية — naf-terms §5 و CLAUDE.md §8: أعمدة الأرقام تصطفّ.
+   يشمل الجداول وبطاقات المؤشّرات وشرائح الإحصاء والمخطّط الزمني. */
+.table, .stat .num, .chip-stat b, .gantt-tick, .cal-day {
+  font-variant-numeric: tabular-nums;
+}
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { padding: 12px 14px; text-align: start; }
 .table th {

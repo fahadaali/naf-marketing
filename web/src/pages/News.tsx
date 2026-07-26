@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Sparkles, FilePlus2 } from 'lucide-react';
@@ -23,11 +24,11 @@ export default function News() {
       const d = await api.post('/rss/refresh');
       const failed = (d.feeds || []).filter((f: any) => f.error);
       if (failed.length) {
-        setMsg(`أُضيف ${d.added} خبراً. تعذّر جلب ${failed.length} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
+        setMsg(`أُضيف ${isolate(d.added)} خبراً. تعذّر جلب ${isolate(failed.length)} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
       } else if (d.added === 0) {
         setMsg('لا توجد أخبار جديدة (كل العناصر مجلوبة مسبقاً).');
       } else {
-        setMsg(`تم جلب ${d.added} خبراً جديداً`);
+        setMsg(`تم جلب ${isolate(d.added)} خبراً جديداً`);
       }
       load();
     } catch (e: any) {

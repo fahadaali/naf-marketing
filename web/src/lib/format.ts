@@ -34,6 +34,15 @@ function pad(value: number): string {
   return String(value).padStart(2, "0")
 }
 
+/**
+ * يعزل قيمة اتجاهياً داخل نص عربي — للسلاسل الخام التي لا يصلح فيها <bdi>
+ * مثل رسائل confirm ونصوص الحالة. في JSX استعمل <bdi> لا هذه.
+ * المحرفان U+2068 (عزل أول) و U+2069 (إنهاء العزل).
+ */
+export function isolate(value: string | number): string {
+  return `⁨${value}⁩`
+}
+
 /** المبلغ بلا رمز العملة: 12400 -> "12,400.00" */
 export function formatAmount(value: number): string {
   return AMOUNT_FORMAT.format(value)

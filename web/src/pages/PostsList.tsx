@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -126,15 +127,15 @@ export default function ContentManagement() {
   async function bulkDelete() {
     const targets = selectedPosts().filter(canDelete);
     if (!targets.length) return setErr('لا يمكنك حذف العناصر المحددة');
-    if (!confirm(`حذف ${targets.length} عنصراً نهائياً؟`)) return;
+    if (!confirm(`حذف ${isolate(targets.length)} عنصراً نهائياً؟`)) return;
     let ok = 0;
     for (const p of targets) { try { await api.del(`/posts/${p.id}`); ok++; } catch {} }
-    setSel(new Set()); setMsg(`تم حذف ${ok} عنصراً`); load();
+    setSel(new Set()); setMsg(`تم حذف ${isolate(ok)} عنصراً`); load();
   }
   async function bulkAssign(campaignId: string) {
     let ok = 0;
     for (const p of selectedPosts()) { try { await api.patch(`/posts/${p.id}`, { campaign_id: campaignId || null }); ok++; } catch {} }
-    setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${ok} عنصراً`); load();
+    setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${isolate(ok)} عنصراً`); load();
   }
 
   // السحب والإفلات في كانبان: يحدّد الإجراء المسموح حسب الانتقال، ويحترم التسلسل والصلاحيات (الخادم يتحقق).
@@ -257,7 +258,7 @@ export default function ContentManagement() {
             <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
           </div>
           <div className="spacer" />
-          <span className="muted" style={{ fontSize: 13 }}>{filtered.length} عنصر</span>
+          <span className="muted" style={{ fontSize: 13 }}><bdi>{filtered.length}</bdi> عنصر</span>
           {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={20} /> استيراد</button>}
           <Popover
             render={({ toggle }) => (
@@ -299,7 +300,7 @@ export default function ContentManagement() {
       {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
 
-      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${n} عنصراً`); load(); }} />}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
       {showAssign && (
         <Modal title="نقل العناصر المحددة إلى حملة" onClose={() => setShowAssign(false)}>
           <div className="field">
@@ -574,16 +575,16 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
 
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <p className="ok">جاهز للاستيراد: {items.length} عنصراً</p>
+          <p className="ok">جاهز للاستيراد: <bdi>{items.length}</bdi> عنصراً</p>
           <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
             {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
-            {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و{items.length - 20} غيرها</div>}
+            {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و<bdi>{items.length - 20}</bdi> غيرها</div>}
           </div>
         </div>
       )}
       {err && <p className="err">{err}</p>}
       <button className="btn" style={{ marginTop: 12 }} disabled={!items.length || busy} onClick={submit}>
-        {busy ? 'جارٍ الاستيراد…' : `استيراد ${items.length || ''} عنصراً`}
+        {busy ? 'جارٍ الاستيراد…' : `استيراد ${isolate(items.length || '')} عنصراً`}
       </button>
     </Modal>
   );

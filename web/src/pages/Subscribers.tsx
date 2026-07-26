@@ -1,4 +1,4 @@
-import { formatNumber } from '../lib/format';
+import { formatNumber, isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Plus, Upload, Trash2, UserMinus, RotateCcw, Search } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -39,7 +39,7 @@ export default function Subscribers() {
     if (!importText.trim()) return;
     try {
       const d = await api.post('/subscribers/import', { text: importText });
-      setMsg(`أُضيف ${d.added} · تُخطّي ${d.skipped}`);
+      setMsg(`أُضيف ${isolate(d.added)} · تُخطّي ${isolate(d.skipped)}`);
       setImportText(''); setImporting(false); load();
     } catch (e: any) { setMsg(e.message); }
   }
@@ -136,7 +136,7 @@ export default function Subscribers() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="card stat">
-      <div className="num">{formatNumber(value)}</div>
+      <div className="num"><bdi>{formatNumber(value)}</bdi></div>
       <div className="label">{label}</div>
     </div>
   );

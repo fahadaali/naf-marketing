@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { ConnectionBadge } from '../components/StateBadge';
@@ -173,7 +174,7 @@ function Feeds() {
       if (d.result?.error) {
         setErr(`أُضيفت الخلاصة لكن تعذّر جلبها: ${d.result.error}`);
       } else {
-        setMsg(`أُضيفت الخلاصة وجُلب منها ${d.result?.added ?? 0} خبراً.`);
+        setMsg(`أُضيفت الخلاصة وجُلب منها ${isolate(d.result?.added ?? 0)} خبراً.`);
       }
       load();
     } catch (e: any) { setErr(e.message); }
@@ -799,7 +800,7 @@ function Integrations() {
 
   async function resync() {
     setMsg('جارٍ إعادة المزامنة…');
-    try { const r = await api.post('/basecamp/resync'); setMsg(`تمت جدولة مزامنة ${r.queued} عنصراً`); }
+    try { const r = await api.post('/basecamp/resync'); setMsg(`تمت جدولة مزامنة ${isolate(r.queued)} عنصراً`); }
     catch (e: any) { setMsg(e.message); }
   }
   async function runReport() {
@@ -951,8 +952,8 @@ function IntegrationHealth() {
           <span className="muted">مواعيد النشر</span>
           <div className="spacer" />
           <span>
-            {L.schedules_pending} بانتظار
-            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}>{L.schedules_failed} فاشل</span>}
+            <bdi>{L.schedules_pending}</bdi> بانتظار
+            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}><bdi>{L.schedules_failed}</bdi> فاشل</span>}
           </span>
         </div>
       </div>

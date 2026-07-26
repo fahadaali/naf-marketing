@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -42,7 +43,7 @@ export default function Comments() {
     setMsg('جارٍ الجلب…');
     try {
       const d = await api.post('/comments/refresh');
-      setMsg(`تم جلب ${d.added} عنصراً`);
+      setMsg(`تم جلب ${isolate(d.added)} عنصراً`);
       load();
     } catch (e: any) { setMsg(e.message); }
   }

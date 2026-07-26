@@ -1,4 +1,4 @@
-import { formatNumber } from '../lib/format';
+import { formatNumber, isolate } from '../lib/format';
 import { RatingValue } from '../components/Rating';
 import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw, TriangleAlert, ExternalLink, FileOutput } from 'lucide-react';
@@ -65,7 +65,7 @@ export default function Analytics() {
     setMsg('جارٍ السحب…');
     try {
       const d = await api.post('/analytics/refresh');
-      setMsg(`تم سحب ${d.captured} لقطة`);
+      setMsg(`تم سحب ${isolate(d.captured)} لقطة`);
       load();
     } catch (e: any) {
       setMsg(e.message);
@@ -259,7 +259,7 @@ export default function Analytics() {
               <div className="row" style={{ fontSize: 13 }}>
                 <span>{w.name}</span>
                 <div className="spacer" />
-                <span className="muted">{w.created_count} محتوى · {w.published_count} منشور · {w.rejected_count} مرفوض</span>
+                <span className="muted"><bdi>{w.created_count}</bdi> محتوى · <bdi>{w.published_count}</bdi> منشور · <bdi>{w.rejected_count}</bdi> مرفوض</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(w.created_count / maxCreated) * 100}%` }} />
@@ -289,7 +289,7 @@ export default function Analytics() {
 function Stat({ label, value }: { label: string; value: number | string | ReactNode }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
+      <div className="num"><bdi>{typeof value === 'number' ? formatNumber(value) : value}</bdi></div>
       <div className="label">{label}</div>
     </div>
   );
@@ -327,8 +327,8 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
     setBusy(id); setMsg('');
     try {
       const d = await api.post(`/analytics/exports/${id}/ingest`);
-      if (d.pending) { setMsg(`التصدير لم يكتمل بعد (${d.status}). أعد المحاولة لاحقاً.`); }
-      else { setMsg(`تم استيراد ${d.imported} فيديو إلى اللوحة.`); onImported(); }
+      if (d.pending) { setMsg(`التصدير لم يكتمل بعد (${isolate(d.status)}). أعد المحاولة لاحقاً.`); }
+      else { setMsg(`تم استيراد ${isolate(d.imported)} فيديو إلى اللوحة.`); onImported(); }
       load();
     } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
   }
@@ -477,7 +477,7 @@ function BestTimesCard({ platform }: { platform: string }) {
         <h4 style={{ marginTop: 0, marginBottom: 0 }}>أفضل أوقات النشر</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          بتوقيت الرياض · من {data.sample} منشوراً
+          بتوقيت الرياض · من <bdi>{data.sample}</bdi> منشوراً
         </span>
       </div>
       {!data.enough && (
@@ -493,7 +493,7 @@ function BestTimesCard({ platform }: { platform: string }) {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{DAY_AR[d.day] || d.day}</span>
                 <div className="spacer" />
-                <span className="muted">{d.avg_engagement} تفاعل · {d.posts}</span>
+                <span className="muted"><bdi>{d.avg_engagement}</bdi> تفاعل · <bdi>{d.posts}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(d.avg_engagement / maxDay) * 100}%` }} />
@@ -508,7 +508,7 @@ function BestTimesCard({ platform }: { platform: string }) {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{hourLabel(h.hour)}</span>
                 <div className="spacer" />
-                <span className="muted">{h.avg_engagement} تفاعل · {h.posts}</span>
+                <span className="muted"><bdi>{h.avg_engagement}</bdi> تفاعل · <bdi>{h.posts}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(h.avg_engagement / maxHour) * 100}%` }} />

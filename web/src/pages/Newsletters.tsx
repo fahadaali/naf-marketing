@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
@@ -50,7 +51,7 @@ export default function Newsletters() {
         <div>
           <h1 className="page-title">النشرات والمقالات</h1>
           <p className="page-sub" style={{ margin: 0 }}>
-            اكتب مرة واحدة، وانشر بريداً للمشتركين وصفحةً عامة على الموقع · {activeSubs} مشترك نشط
+            اكتب مرة واحدة، وانشر بريداً للمشتركين وصفحةً عامة على الموقع · <bdi>{activeSubs}</bdi> مشترك نشط
           </p>
         </div>
         <div className="spacer" />
@@ -148,7 +149,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     try {
       await save();
       const d = await api.post(`/newsletters/${id}/send`);
-      setMsg(`بدأ الإرسال إلى ${d.queued} مشترك — يكتمل تدريجياً`);
+      setMsg(`بدأ الإرسال إلى ${isolate(d.queued)} مشترك — يكتمل تدريجياً`);
       const r = await api.get(`/newsletters/${id}`);
       setNl(r.newsletter);
       loadStats();

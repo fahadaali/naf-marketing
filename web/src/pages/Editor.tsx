@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -176,7 +177,7 @@ export default function Editor() {
     const isEarly = earliest && earliest > Date.now();
     const when = earliest ? formatRiyadh(new Date(earliest).toISOString()) : '';
     const confirmMsg = isEarly
-      ? `تنبيه: الموعد المجدول لم يحن بعد (${when}).\nهل تريد النشر الآن فوراً على أي حال؟`
+      ? `تنبيه: الموعد المجدول لم يحن بعد (${isolate(when)}).\nهل تريد النشر الآن فوراً على أي حال؟`
       : 'تأكيد النشر الآن؟';
     if (!confirm(confirmMsg)) return;
     setErr(''); setMsg('');
@@ -184,7 +185,7 @@ export default function Editor() {
       const d = await api.post('/schedules/publish-now', { post_id: postId });
       await loadPost(postId);
       setStatus('published');
-      setMsg(`تم النشر الآن (${d.published} منصة)` + (d.early ? ' — قبل الموعد' : ''));
+      setMsg(`تم النشر الآن (${isolate(d.published)} منصة)` + (d.early ? ' — قبل الموعد' : ''));
     } catch (e: any) {
       setErr(e.message);
     }
@@ -483,7 +484,7 @@ export default function Editor() {
               <div className="row">
                 <h4 style={{ marginTop: 0, marginBottom: 0 }}>سجل النسخ</h4>
                 <div className="spacer" />
-                <span className="muted" style={{ fontSize: 12 }}>{versions.length} نسخة</span>
+                <span className="muted" style={{ fontSize: 12 }}><bdi>{versions.length}</bdi> نسخة</span>
               </div>
               <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
                 <History size={20} /> عرض واستعادة

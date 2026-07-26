@@ -46,7 +46,7 @@ export default function Campaigns() {
             </div>
             <p className="muted" style={{ fontSize: 13, minHeight: 40 }}>{c.objective || 'بدون هدف محدد'}</p>
             <div className="row" style={{ fontSize: 12 }}>
-              <span className="muted">{c.posts_count} منشور</span>
+              <span className="muted"><bdi>{c.posts_count}</bdi> منشور</span>
               <div className="spacer" />
               <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={16} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
