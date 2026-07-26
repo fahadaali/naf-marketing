@@ -348,7 +348,7 @@ function Platforms() {
             {customEnabled.map((k) => (
               <span key={k} className="badge gray" style={{ gap: 8, padding: '6px 10px' }}>
                 <PlatformIcon platform={k} size={16} /> {platformLabel(k, labels)}
-                <Trash2 size={16} style={{ cursor: 'pointer' }} onClick={() => removeCustom(k)} />
+                <button type="button" className="row-link" title="حذف" onClick={() => removeCustom(k)}><Trash2 size={16} /></button>
               </span>
             ))}
           </div>

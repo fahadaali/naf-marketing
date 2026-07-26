@@ -213,15 +213,17 @@ export default function ContentManagement() {
 
       {/* شرائح الحالة (فلترة سريعة) */}
       <div className="row" style={{ margin: '16px 0' }}>
-        <div className={`chip-stat ${fStatus === '' ? 'on' : ''}`} onClick={() => setFStatus('')}>
-          الكل <b>{posts.length}</b>
-        </div>
+        <button type="button" className={`chip-stat ${fStatus === '' ? 'on' : ''}`}
+                aria-pressed={fStatus === ''} onClick={() => setFStatus('')}>
+          الكل <b><bdi>{posts.length}</bdi></b>
+        </button>
         {['draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
           .filter((s) => counts[s])
           .map((s) => (
-            <div key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`} onClick={() => setFStatus(fStatus === s ? '' : s)}>
-              <StatusBadge status={s} /> <b>{counts[s]}</b>
-            </div>
+            <button type="button" key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`}
+                    aria-pressed={fStatus === s} onClick={() => setFStatus(fStatus === s ? '' : s)}>
+              <StatusBadge status={s} /> <b><bdi>{counts[s]}</bdi></b>
+            </button>
           ))}
       </div>
 
@@ -350,7 +352,9 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
           {rows.map((p: any) => (
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
-              <td style={{ cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</td>
+              <td style={{ fontWeight: 500 }}>
+                <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
+              </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
               <td className="muted">{SOURCE[p.source] || p.source}</td>
               <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
@@ -486,14 +490,15 @@ function GanttView({ rows, navigate }: any) {
             </div>
             <div className="gantt-track">
               {todayLeft >= 0 && todayLeft <= 100 && <div className="gantt-today" style={{ insetInlineStart: `${todayLeft}%` }} />}
-              <div
+              <button
+                type="button"
                 className="gantt-bar"
                 style={{ insetInlineStart: `${left}%`, width: `${width}%`, background: statusColor(st) }}
                 title={`${p.title} — ${STATUS_LABELS[st]}`}
                 onClick={() => navigate(`/editor/${p.id}`)}
               >
                 {STATUS_LABELS[st]}
-              </div>
+              </button>
             </div>
           </div>
         );

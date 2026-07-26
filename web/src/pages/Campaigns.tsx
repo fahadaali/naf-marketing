@@ -38,7 +38,7 @@ export default function Campaigns() {
 
       <div className="grid cols-3">
         {campaigns.map((c) => (
-          <div className="card" key={c.id} style={{ cursor: 'pointer' }} onClick={() => openCampaign(c.id)}>
+          <button type="button" className="card row-link" key={c.id} onClick={() => openCampaign(c.id)}>
             <div className="row">
               <strong>{c.name}</strong>
               <div className="spacer" />
@@ -50,7 +50,7 @@ export default function Campaigns() {
               <div className="spacer" />
               <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={16} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
-          </div>
+          </button>
         ))}
         {campaigns.length === 0 && <p className="muted">لا توجد حملات بعد</p>}
       </div>
@@ -73,7 +73,7 @@ export default function Campaigns() {
               <div className="kanban-col" key={col}>
                 <h4><StatusBadge status={col} /></h4>
                 {posts.filter((p) => p.status === col).map((p) => (
-                  <div className="kanban-card" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</div>
+                  <button type="button" className="kanban-card row-link" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
                 ))}
               </div>
             ))}

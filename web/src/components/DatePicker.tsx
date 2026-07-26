@@ -110,10 +110,10 @@ export function DateRangePicker({
   return (
     <Popover
       render={({ toggle }) => (
-        <div className="dp-trigger" onClick={toggle}>
+        <button type="button" className="dp-trigger" onClick={toggle}>
           <Calendar size={16} />
           {from && to ? <span>{fmtAr(from)} — {fmtAr(to)}</span> : from ? <span>{fmtAr(from)} — …</span> : <span className="ph">{placeholder}</span>}
-        </div>
+        </button>
       )}
     >
       {({ close }) => {
@@ -175,10 +175,10 @@ export function DateTimePicker({
   return (
     <Popover
       render={({ toggle }) => (
-        <div className="dp-trigger" onClick={toggle}>
+        <button type="button" className="dp-trigger" onClick={toggle}>
           <Calendar size={16} />
           <span className={value ? '' : 'ph'}>{label}</span>
-        </div>
+        </button>
       )}
     >
       {() => <div className="dp-pop" style={{ flexDirection: 'column' }}>{panel}</div>}

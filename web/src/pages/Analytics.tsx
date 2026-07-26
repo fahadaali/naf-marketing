@@ -239,10 +239,10 @@ export default function Analytics() {
             <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
             <tbody>
               {alerts.map((a) => (
-                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${a.id}`)}>
-                  <td>{a.title}</td>
+                <tr key={a.id}>
+                  <td><button type="button" className="row-link" onClick={() => navigate(`/editor/${a.id}`)}>{a.title}</button></td>
                   <td><StatusBadge status={a.status} /></td>
-                  <td>{a.days_stuck}</td>
+                  <td><bdi>{a.days_stuck}</bdi></td>
                 </tr>
               ))}
             </tbody>
@@ -337,11 +337,11 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="row row-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <h4 style={{ margin: 0 }}><FileOutput size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
-      </div>
+      </button>
       {open && (
         <div style={{ marginTop: 12 }}>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>

@@ -37,9 +37,9 @@ export default function Calendar() {
             <div key={i} className={`cal-cell ${cell.other ? 'other' : ''}`}>
               <div className="cal-day">{cell.day}</div>
               {cell.events.map((e: any) => (
-                <div key={e.id} className="cal-event" title={`${e.title} — ${formatRiyadh(e.scheduled_at)}`} onClick={() => navigate(`/editor/${e.post_id}`)}>
+                <button type="button" key={e.id} className="cal-event" title={`${e.title} — ${formatRiyadh(e.scheduled_at)}`} onClick={() => navigate(`/editor/${e.post_id}`)}>
                   {platformLabel(e.platform)}: {e.title}
-                </div>
+                </button>
               ))}
             </div>
           ))}

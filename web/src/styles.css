@@ -446,6 +446,72 @@ h3, h4 { letter-spacing: -0.01em; }
   .content { padding: 18px; }
 }
 
+/* ===== أهداف نقر تُشغَّل بلوحة المفاتيح =====
+   كانت هذه بطاقات وصفوفاً من نوع div عليها onClick، فلا يصلها التركيز
+   ولا تُفتح بمفتاح Enter. صارت <button> حقيقية، وهذه القاعدة تُلغي
+   مظهر الزر الافتراضي فقط دون المساس بسلوكه. */
+button.row-link,
+button.card,
+button.cal-event,
+button.kanban-card,
+button.chip-stat,
+button.dp-trigger,
+button.gantt-bar,
+button.notif-item {
+  font-family: inherit;
+  font-size: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+button.row-link,
+button.card,
+button.kanban-card,
+button.cal-event,
+button.notif-item { display: block; width: 100%; }
+button.cal-event,
+button.gantt-bar { border: none; }
+button.row-link,
+button.notif-item {
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-radius: var(--radius);
+}
+/* الصفّ القابل للنقر يبقى صفاً: العنوان ثم المباعد ثم الحالة */
+button.row-link.row { display: flex; width: 100%; }
+/* الحجم يأتي من نمط سطري في الشيفرة، فلا width هنا */
+button.gantt-bar { display: flex; }
+
+/* ===== التركيز =====
+   CLAUDE.md §4: «كل عنصر تفاعلي يحتاج حالة :focus-visible ظاهرة».
+   حلقة واحدة من var(--ring) لكل ما يُنقَل إليه بلوحة المفاتيح، فتتبع
+   الثيم في الوضعين ولا تختلف من عنصر لآخر.
+   الحقول و.btn و.rte لها حلقاتها أعلاه (حلقة داخلية تناسب الإطار). */
+.nav-link:focus-visible,
+.icon-btn:focus-visible,
+.notif-item:focus-visible,
+.rte-toolbar button:focus-visible,
+.chip-stat:focus-visible,
+.cal-event:focus-visible,
+.kanban-card:focus-visible,
+.gantt-bar:focus-visible,
+.media-card:focus-visible,
+.dp-trigger:focus-visible,
+.dp-nav:focus-visible,
+.dp-title:focus-visible,
+.dp-mg button:focus-visible,
+.dp-day:focus-visible,
+.chk:focus-visible,
+.tab:focus-visible,
+.row-link:focus-visible,
+.table tbody tr:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* صفوف الجداول: الحلقة الخارجية تُقصّ داخل جدول له overflow، فتُرسم داخلية */
+.table tbody tr:focus-visible { outline-offset: -2px; }
+
 /* ===== الاتجاهية: قلب الأيقونات الاتجاهية =====
    naf-icons.md «قواعد القلب»: تُقلب الأسهم والشيفرون الأفقية والرجوع
    والتالي والإرسال والرد وتسجيل الخروج والإزاحة.

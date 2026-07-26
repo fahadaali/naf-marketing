@@ -52,16 +52,17 @@ export default function NotificationBell() {
           </div>
           <div style={{ maxHeight: 340, overflow: 'auto' }}>
             {items.map((n) => (
-              <div
+              <button
+                type="button"
                 key={n.id}
-                className="notif-item"
+                className="notif-item row-link"
                 style={{ background: n.read_at ? 'transparent' : 'var(--primary-soft)' }}
                 onClick={() => open(n, close)}
               >
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>
                 {n.body && <div className="muted" style={{ fontSize: 12 }}>{n.body}</div>}
                 <div className="muted" style={{ fontSize: 11 }}>{formatRiyadh(n.created_at)}</div>
-              </div>
+              </button>
             ))}
             {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا توجد إشعارات</p>}
           </div>

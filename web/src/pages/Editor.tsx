@@ -396,13 +396,13 @@ export default function Editor() {
           {/* نصوص مخصّصة لكل منصة — النشر يستخدمها بدل النص الأساسي عند وجودها */}
           {postId && platforms.length > 0 && can('draft.edit') && (
             <div className="card" style={{ marginBottom: 14 }}>
-              <div className="row" style={{ cursor: 'pointer' }} onClick={() => setShowVariants((v) => !v)}>
+              <button type="button" className="row row-link" aria-expanded={showVariants} onClick={() => setShowVariants((v) => !v)}>
                 <h4 style={{ margin: 0 }}>نصوص مخصّصة وأول تعليق لكل منصة</h4>
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 12 }}>
                   {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
                 </span>
-              </div>
+              </button>
               {showVariants && (
                 <div style={{ marginTop: 10 }}>
                   <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
