@@ -24,7 +24,8 @@ import {
   History,
   RefreshCw,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh } from '../api';
+import { api, formatRiyadh } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import RichEditor, { type RichEditorHandle } from '../components/RichEditor';
 import Modal from '../components/Modal';
@@ -255,7 +256,7 @@ export default function Editor() {
     <div>
       <div className="row" style={{ marginBottom: 12 }}>
         <h1 className="page-title">{postId ? 'تعديل المحتوى' : 'محتوى جديد'}</h1>
-        <span className={`badge ${STATUS_BADGE[effStatus]}`}>{STATUS_LABELS[effStatus]}</span>
+        <StatusBadge status={effStatus} />
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
@@ -496,7 +497,7 @@ export default function Editor() {
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
                 <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={12} /> <span className={`badge ${STATUS_BADGE[a.to_status] || 'gray'}`}>{STATUS_LABELS[a.to_status] || a.to_status}</span></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={12} /> <StatusBadge status={a.to_status} /></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
                 </div>

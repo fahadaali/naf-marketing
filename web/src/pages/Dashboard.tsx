@@ -1,7 +1,8 @@
 import { formatNumber } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
+import { api, formatRiyadh, displayStatus } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 
 export default function Dashboard() {
@@ -30,7 +31,7 @@ export default function Dashboard() {
           <div className="card stat" key={p.status}>
             <div className="num">{p.count}</div>
             <div className="label">
-              <span className={`badge ${STATUS_BADGE[p.status]}`}>{STATUS_LABELS[p.status]}</span>
+              <StatusBadge status={p.status} />
             </div>
           </div>
         ))}
@@ -64,7 +65,7 @@ export default function Dashboard() {
             {posts.slice(0, 8).map((p) => (
               <tr key={p.id}>
                 <td><Link to={`/editor/${p.id}`}>{p.title}</Link></td>
-                <td><span className={`badge ${STATUS_BADGE[displayStatus(p)]}`}>{STATUS_LABELS[displayStatus(p)]}</span></td>
+                <td><StatusBadge status={displayStatus(p)} /></td>
                 <td>{p.author_name}</td>
                 <td className="muted">{formatRiyadh(p.updated_at)}</td>
               </tr>

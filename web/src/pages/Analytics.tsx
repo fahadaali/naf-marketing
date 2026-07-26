@@ -3,7 +3,8 @@ import { RatingValue } from '../components/Rating';
 import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { api } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateRangePicker } from '../components/DatePicker';
 
@@ -204,7 +205,7 @@ export default function Analytics() {
           <div className="row">
             {(data?.pipeline || []).map((s: any) => (
               <div key={s.status} style={{ marginInlineEnd: 12 }}>
-                <span className={`badge ${STATUS_BADGE[s.status] || 'gray'}`}>{STATUS_LABELS[s.status] || s.status}</span>
+                <StatusBadge status={s.status} />
                 <strong style={{ marginInlineStart: 6 }}>{s.count}</strong>
               </div>
             ))}
@@ -240,7 +241,7 @@ export default function Analytics() {
               {alerts.map((a) => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${a.id}`)}>
                   <td>{a.title}</td>
-                  <td><span className={`badge ${STATUS_BADGE[a.status] || 'gray'}`}>{STATUS_LABELS[a.status] || a.status}</span></td>
+                  <td><StatusBadge status={a.status} /></td>
                   <td>{a.days_stuck}</td>
                 </tr>
               ))}

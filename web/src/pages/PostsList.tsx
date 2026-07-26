@@ -5,6 +5,7 @@ import {
   FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { DateRangePicker } from '../components/DatePicker';
@@ -24,7 +25,7 @@ const TYPE: Record<string, string> = { text: 'نص', image: 'صورة', video: '
 // لون شريط مخطّط جانت — رمز كامل لا مكوّنات hsl.
 const BADGE_COLOR: Record<string, string> = {
   gray: 'var(--muted-foreground)', blue: 'var(--info)', amber: 'var(--warning)',
-  green: 'var(--success)', red: 'var(--destructive)', purple: 'var(--chart-4)',
+  green: 'var(--success)', red: 'var(--destructive)',
 };
 const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--muted-foreground)';
 
@@ -218,7 +219,7 @@ export default function ContentManagement() {
           .filter((s) => counts[s])
           .map((s) => (
             <div key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`} onClick={() => setFStatus(fStatus === s ? '' : s)}>
-              <span className={`badge ${STATUS_BADGE[s]}`}>{STATUS_LABELS[s]}</span> <b>{counts[s]}</b>
+              <StatusBadge status={s} /> <b>{counts[s]}</b>
             </div>
           ))}
       </div>
@@ -349,7 +350,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
               <td style={{ cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</td>
-              <td><span className={`badge ${STATUS_BADGE[displayStatus(p)]}`}>{STATUS_LABELS[displayStatus(p)]}</span></td>
+              <td><StatusBadge status={displayStatus(p)} /></td>
               <td className="muted">{SOURCE[p.source] || p.source}</td>
               <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
               <td className="muted">{p.campaign_name || '—'}</td>
@@ -407,7 +408,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
             onDrop={(e) => { e.preventDefault(); handleDrop(col.key); }}
           >
             <h4 className="row">
-              <span className={`badge ${STATUS_BADGE[col.key]}`}>{STATUS_LABELS[col.key]}</span>
+              <StatusBadge status={col.key} />
               <div className="spacer" /><span className="muted">{col.items.length}</span>
             </h4>
             {col.items.map((p: any) => (
@@ -479,7 +480,7 @@ function GanttView({ rows, navigate }: any) {
         return (
           <div className="gantt-row" key={p.id}>
             <div className="gantt-label" title={p.title}>
-              <span className={`badge ${STATUS_BADGE[st]}`} style={{ padding: '1px 6px', fontSize: 10 }}>●</span>
+              <StatusBadge status={st} size={11} iconOnly />
               {p.title}
             </div>
             <div className="gantt-track">

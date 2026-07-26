@@ -1,4 +1,4 @@
-/* ثيم ناف وخطه من السجلّ fahadaali/naf-ui#v1.2.0 — لا تعدّل الملفين. */
+/* ثيم ناف وخطه من السجلّ fahadaali/naf-ui#v1.3.0 — لا تعدّل الملفين. */
 @import "./naf-theme.css";
 @import "./naf-font.css";
 
@@ -50,7 +50,7 @@ a:hover { text-decoration: underline; }
   margin-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
-.brand-text { line-height: 1.2; }
+.brand-text { line-height: 1.35; }
 .brand-text b { font-size: 15px; font-weight: 700; display: block; }
 .brand-text small { font-size: 11px; color: var(--muted-foreground); }
 
@@ -90,7 +90,7 @@ a:hover { text-decoration: underline; }
 .notif-dot {
   position: absolute; top: -3px; inset-inline-end: -3px; min-width: 16px; height: 16px; padding: 0 4px;
   background: var(--destructive); color: var(--destructive-foreground); border-radius: 999px; font-size: 10px; font-weight: 700;
-  display: grid; place-items: center; line-height: 1;
+  display: grid; place-items: center;
 }
 .notif-menu { width: 320px; padding: 8px; }
 .notif-item { padding: 8px 8px; border-radius: var(--radius); cursor: pointer; margin-bottom: 2px; }
@@ -175,9 +175,6 @@ a:hover { text-decoration: underline; }
 .badge.amber  { background: var(--warning-soft); color: var(--warning); }
 .badge.green  { background: var(--success-soft); color: var(--success); }
 .badge.red    { background: var(--destructive-soft); color: var(--destructive); }
-/* اللون السادس للشارات: chart-4 من رموز التزيين، وخلفيته مشتقّة
-   بالصيغة نفسها التي يشتقّ بها الثيم عائلة *-soft. */
-.badge.purple { background: color-mix(in oklab, var(--chart-4) 14%, var(--card)); color: var(--chart-4); }
 
 /* ===== المؤشرات ===== */
 .stat .num { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
@@ -278,7 +275,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .count-pill {
   display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
   padding: 0 4px; border-radius: var(--radius); background: color-mix(in oklab, var(--muted-foreground) 18%, transparent);
-  color: inherit; font-size: 11px; font-weight: 700; line-height: 1;
+  color: inherit; font-size: 11px; font-weight: 700;
 }
 .seg button.on .count-pill { background: color-mix(in oklab, var(--primary) 16%, transparent); color: var(--primary); }
 .suggest-chip {

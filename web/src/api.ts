@@ -43,8 +43,8 @@ export const STATUS_LABELS: Record<string, string> = {
 export const STATUS_BADGE: Record<string, string> = {
   draft: 'gray',
   pending_marketing: 'amber',
-  pending_gm: 'purple',
-  approved: 'blue',
+  pending_gm: 'amber',
+  approved: 'green',
   scheduled: 'blue',
   late: 'red',
   published: 'green',

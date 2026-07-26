@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, ArrowLeft } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE } from '../api';
+import { api } from '../api';
+import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -70,7 +71,7 @@ export default function Campaigns() {
           <div className="kanban">
             {KANBAN_COLS.map((col) => (
               <div className="kanban-col" key={col}>
-                <h4><span className={`badge ${STATUS_BADGE[col]}`}>{STATUS_LABELS[col]}</span></h4>
+                <h4><StatusBadge status={col} /></h4>
                 {posts.filter((p) => p.status === col).map((p) => (
                   <div className="kanban-card" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</div>
                 ))}

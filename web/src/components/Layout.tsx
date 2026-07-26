@@ -131,7 +131,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className="avatar">{initials}</div>
-            <div style={{ lineHeight: 1.2 }}>
+            <div style={{ lineHeight: 1.35 }}>
               <div style={{ fontWeight: 600 }}>{user?.name}</div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {user ? ROLE_LABELS[user.role_name] : ''}
