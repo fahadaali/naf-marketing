@@ -640,7 +640,7 @@ function AIModal({ platforms, tones, onClose, onResult }: { platforms: string[];
   }
 
   return (
-    <Modal title="توليد نص بالذكاء الاصطناعي (Claude)" onClose={onClose}>
+    <Modal title="توليد نص بالذكاء الاصطناعي (\u2068Claude\u2069)" onClose={onClose}>
       <div className="field">
         <label>الموضوع / الفكرة</label>
         <textarea className="textarea" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="مثال: أهمية توثيق العقود التجارية للشركات الناشئة" />

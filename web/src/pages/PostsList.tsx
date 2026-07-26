@@ -359,7 +359,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
                 <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
               </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
-              <td className="muted">{SOURCE[p.source] || p.source}</td>
+              <td className="muted"><bdi>{SOURCE[p.source] || p.source}</bdi></td>
               <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
               <td className="muted">{p.campaign_name || '—'}</td>
               <td className="muted">{p.author_name}</td>

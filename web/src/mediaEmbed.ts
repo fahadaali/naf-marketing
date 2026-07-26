@@ -18,7 +18,7 @@ export function mediaKind(mime: string, filename = ''): MediaKind {
   return 'file';
 }
 
-const KIND_LABEL: Record<MediaKind, string> = { image: 'صورة', video: 'فيديو', audio: 'صوت', pdf: 'مستند PDF', file: 'ملف' };
+const KIND_LABEL: Record<MediaKind, string> = { image: 'صورة', video: 'فيديو', audio: 'صوت', pdf: 'مستند \u2068PDF\u2069', file: 'ملف' };
 
 function badge(kind: MediaKind, name: string): string {
   const ext = (name.split('.').pop() || '').toUpperCase();

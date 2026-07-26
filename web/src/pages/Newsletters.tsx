@@ -455,7 +455,7 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         <div className="grid" style={{ gap: 6 }}>
           <input className="input" placeholder="رابط الصورة أو /api/media/<id>" value={block.url || ''}
                  onChange={(e) => onChange({ url: e.target.value })} />
-          <input className="input" placeholder="وصف بديل (alt)" value={block.alt || ''}
+          <input className="input" placeholder="وصف بديل (\u2068alt\u2069)" value={block.alt || ''}
                  onChange={(e) => onChange({ alt: e.target.value })} />
           <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
                  onChange={(e) => onChange({ caption: e.target.value })} />

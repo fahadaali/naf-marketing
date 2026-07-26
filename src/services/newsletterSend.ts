@@ -281,7 +281,7 @@ export async function sendWelcome(env: Env, email: string, token: string, reques
 
   const { base, path } = await publicSettings(env, requestUrl);
   const name = cfg.app_name || env.APP_NAME || 'شركة ناف القانونية';
-  const body = `<p style="margin:0 0 14px;line-height:1.9;font-size:16px;color:#1f2430">${escapeHtml(cfg.welcome_body || '')}</p>`;
+  const body = `<p style="margin:0 0 14px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}">${escapeHtml(cfg.welcome_body || '')}</p>`;
 
   const provider = await getEmailProvider(env);
   await provider.send(

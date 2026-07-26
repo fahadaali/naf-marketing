@@ -14,7 +14,9 @@ body {
   font-family: var(--font-sans);
   background: var(--background);
   color: var(--foreground);
-  direction: rtl;
+  /* الاتجاه من <html dir> في index.html — مصدر واحد.
+     كان مثبَّتاً هنا rtl فيتجاوز الجذر: الأيقونات تتبع dir والتخطيط لا،
+     فينكسر العرض عند dir="ltr" بدل أن ينقلب. */
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -209,7 +211,7 @@ h3, h4 { letter-spacing: -0.01em; }
 .rte-toolbar button:hover { background: var(--card); color: var(--foreground); border-color: var(--border); }
 .rte {
   min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
-  padding: 16px; background: var(--background); direction: rtl; text-align: start;
+  padding: 16px; background: var(--background); text-align: start;
   outline: none; font-size: 15px; line-height: 1.8; color: var(--foreground);
 }
 .rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 15%, transparent); }

@@ -30,7 +30,7 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
   linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
   x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XGlyph size={g(s)} /> },
   // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
-  google: { label: 'نشاطي التجاري (Google)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
+  google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
   instagram: {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',

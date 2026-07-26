@@ -13,7 +13,7 @@ export default function Settings() {
   const tabs = [
     can('users.manage') && { id: 'users', label: 'المستخدمون' },
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
-    can('settings.manage') && { id: 'feeds', label: 'خلاصات RSS' },
+    can('settings.manage') && { id: 'feeds', label: 'خلاصات \u2068RSS\u2069' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
     can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
@@ -283,7 +283,7 @@ function Platforms() {
   function addCustom() {
     setErr('');
     const key = customKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!key) return setErr('أدخل معرّفاً لاتينياً للمنصة (مثل: medium)');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للمنصة (مثل: \u2068medium\u2069)');
     if (enabled.includes(key) || KNOWN_PLATFORMS.includes(key)) return setErr('المنصة موجودة مسبقاً');
     setEnabled((s) => [...s, key]);
     if (customLabel.trim()) setLabels((l) => ({ ...l, [key]: customLabel.trim() }));
@@ -358,7 +358,7 @@ function Platforms() {
       <div className="field">
         <label>إضافة منصة مخصّصة</label>
         <div className="row">
-          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني، مثل: medium)" value={customKey} onChange={(e) => setCustomKey(e.target.value)} />
+          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني، مثل: \u2068medium\u2069)" value={customKey} onChange={(e) => setCustomKey(e.target.value)} />
           <input className="input" style={{ flex: 1 }} placeholder="الاسم بالعربية" value={customLabel} onChange={(e) => setCustomLabel(e.target.value)} />
           <button className="btn ghost" onClick={addCustom}><Plus size={20} /> إضافة</button>
         </div>
@@ -503,7 +503,7 @@ function AITones() {
   function add() {
     setErr('');
     const key = newKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!key) return setErr('أدخل معرّفاً لاتينياً للنبرة (مثل: humorous)');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للنبرة (مثل: \u2068humorous\u2069)');
     if (tones.some((t) => t.key === key)) return setErr('النبرة موجودة مسبقاً');
     setTones((ts) => [...ts, { key, label: newLabel.trim() || key, prompt: '' }]);
     setNewKey(''); setNewLabel('');
