@@ -15,7 +15,8 @@
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit && npm --prefix web run typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:identity": "node scripts/check-identity.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240605.0",

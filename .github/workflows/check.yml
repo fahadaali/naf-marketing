@@ -1,0 +1,40 @@
+name: الفحص
+
+# يعمل على كل طلب دمج وعلى الدفع إلى main.
+# الغرض: ما لا يمسكه tsc ولا الاختبارات — انحراف الهوية خاصةً،
+# لأن CSS لا يخطئ بل يصمت.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: سحب المستودع
+        uses: actions/checkout@v4
+
+      - name: تهيئة Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: تركيب حزم الخادم
+        run: npm ci
+
+      - name: تركيب حزم الواجهة
+        run: npm ci --prefix web
+
+      - name: حارس الهوية
+        run: npm run check:identity
+
+      - name: فحص الأنواع
+        run: npm run typecheck
+
+      - name: الاختبارات
+        run: npm test
+
+      - name: البناء
+        run: npm --prefix web run build
