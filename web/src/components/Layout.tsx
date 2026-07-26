@@ -49,7 +49,7 @@ function TopSearch() {
       style={{ position: 'relative', width: 280 }}
       onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}
     >
-      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'hsl(var(--muted-foreground))' }} />
+      <Search size={15} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'var(--muted-foreground)' }} />
       <input
         className="input"
         style={{ paddingInlineStart: 32, height: 34 }}

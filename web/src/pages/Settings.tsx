@@ -325,8 +325,8 @@ function Platforms() {
                 className="card"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer',
-                  borderColor: on ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                  background: on ? 'hsl(var(--primary-soft))' : 'hsl(var(--card))',
+                  borderColor: on ? 'var(--primary)' : 'var(--border)',
+                  background: on ? 'hsl(var(--primary-soft))' : 'var(--card)',
                 }}
               >
                 <PlatformIcon platform={p} size={26} />
@@ -375,7 +375,7 @@ function Platforms() {
       </div>
 
       {cfg && (
-        <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+        <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
           <div className="row" style={{ marginBottom: 8 }}>
             <strong style={{ fontSize: 14 }}>ربط حسابات {cfg.label}</strong>
             <div className="spacer" />
@@ -457,7 +457,7 @@ function SocialApiWebhook() {
   }
 
   return (
-    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+    <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
         <strong style={{ fontSize: 14 }}>الاستقبال الفوري (Webhook)</strong>
         <div className="spacer" />
@@ -522,7 +522,7 @@ function AITones() {
       </p>
 
       {tones.map((t, i) => (
-        <div className="card" key={i} style={{ marginBottom: 12, background: 'hsl(var(--muted) / 0.35)' }}>
+        <div className="card" key={i} style={{ marginBottom: 12, background: 'color-mix(in oklab, var(--muted) 35%, transparent)' }}>
           <div className="row" style={{ marginBottom: 8 }}>
             <div className="field" style={{ margin: 0, width: 220 }}>
               <label>الاسم المعروض</label>
@@ -718,7 +718,7 @@ function NotificationSettings() {
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
       </p>
 
-      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 12, marginBottom: 12 }}>
+      <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 12, marginBottom: 12 }}>
         <strong style={{ fontSize: 14 }}>النشرة والمقالات</strong>
         <div className="grid cols-2" style={{ marginTop: 8 }}>
           <div className="field">
@@ -815,7 +815,7 @@ function Integrations() {
         تُضبط عبر Cloudflare Secrets؛ هنا تضبط معرّف الحساب والمشروع فقط.
       </p>
 
-      <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 16 }}>
+      <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 16 }}>
         <div className="row">
           <span>حالة الاتصال بالمفاتيح السرية:</span>
           <span className={`badge ${status?.configured ? 'green' : 'red'}`}>
@@ -901,7 +901,7 @@ function IntegrationHealth() {
   const quota = (used: number, limit: number) => (limit === -1 ? `${used} / بلا حد` : `${used} / ${limit}`);
 
   return (
-    <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginBottom: 12 }}>
+    <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
         <strong style={{ fontSize: 14 }}>صحّة التكامل</strong>
         <div className="spacer" />

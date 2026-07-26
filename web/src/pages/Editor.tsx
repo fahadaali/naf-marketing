@@ -894,7 +894,7 @@ function KBModal({
         <>
           <div className="field">
             <label>اختر ملفاً من مركز المعرفة</label>
-            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 8 }}>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
               {files.length === 0 && <p className="muted" style={{ padding: 12 }}>لا توجد ملفات.</p>}
               {files.map((f) => (
                 <div
@@ -903,7 +903,7 @@ function KBModal({
                   style={{
                     padding: '9px 12px',
                     cursor: 'pointer',
-                    borderBottom: '1px solid hsl(var(--border))',
+                    borderBottom: '1px solid var(--border)',
                     background: selected?.id === f.id && selected?.type === f.type ? 'hsl(var(--primary-soft))' : 'transparent',
                   }}
                 >
@@ -1038,7 +1038,7 @@ function TemplatesModal({
         <label>القوالب المتاحة</label>
         <div style={{ maxHeight: 300, overflow: 'auto' }}>
           {templates.map((t) => (
-            <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid hsl(var(--border))' }}>
+            <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
                 <div className="muted" style={{ fontSize: 12 }}>{t.creator_name}</div>

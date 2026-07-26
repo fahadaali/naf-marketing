@@ -93,7 +93,7 @@ export function PlatformIcon({ platform, size = 24 }: { platform: string; size?:
     display: 'grid',
     placeItems: 'center',
     color: meta?.fg || '#fff',
-    background: meta?.gradient || meta?.color || 'hsl(var(--muted-foreground))',
+    background: meta?.gradient || meta?.color || 'var(--muted-foreground)',
     flexShrink: 0,
   };
   return <span style={style}>{meta?.glyph || <Globe size={Math.round(size * 0.62)} />}</span>;

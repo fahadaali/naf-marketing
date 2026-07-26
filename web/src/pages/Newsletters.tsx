@@ -260,7 +260,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <textarea className="input" rows={2} value={nl.excerpt || ''} onChange={(e) => field('excerpt', e.target.value)} />
           </div>
 
-          <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+          <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
               <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
@@ -276,7 +276,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
           </div>
 
-          <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+          <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
               <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
@@ -313,7 +313,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
-            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+            <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
               <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> اختبار العنوانين</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
@@ -338,7 +338,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           )}
 
           {stats && stats.total > 0 && (
-            <div className="card" style={{ background: 'hsl(var(--muted) / 0.4)', marginTop: 10 }}>
+            <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
               <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginLeft: 4 }} /> نتائج الإرسال</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 3, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>

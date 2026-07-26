@@ -44,7 +44,7 @@ export default function Search() {
           <div className="card">
             <h3 style={{ marginTop: 0 }}>المحتوى ({posts.length})</h3>
             {posts.map((p) => (
-              <div key={p.id} style={{ padding: '9px 0', borderBottom: '1px solid hsl(var(--border))', cursor: 'pointer' }} onClick={() => navigate(`/editor/${p.id}`)}>
+              <div key={p.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => navigate(`/editor/${p.id}`)}>
                 <div style={{ fontWeight: 600 }}>{p.title}</div>
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
               </div>
@@ -54,7 +54,7 @@ export default function Search() {
           <div className="card">
             <h3 style={{ marginTop: 0 }}>الأخبار ({news.length})</h3>
             {news.map((n) => (
-              <div key={n.id} style={{ padding: '9px 0', borderBottom: '1px solid hsl(var(--border))' }}>
+              <div key={n.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
                 <a href={n.link} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{n.title}</a>
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: n.snippet }} />
               </div>

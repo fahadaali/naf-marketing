@@ -226,7 +226,7 @@ export default function ContentManagement() {
       <div className="card" style={{ marginBottom: 16, padding: 14 }}>
         <div className="row">
           <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={16} style={{ position: 'absolute', insetInlineStart: 12, top: 11, color: 'hsl(var(--muted-foreground))' }} />
+            <Search size={16} style={{ position: 'absolute', insetInlineStart: 12, top: 11, color: 'var(--muted-foreground)' }} />
             <input className="input" style={{ paddingInlineStart: 36 }} placeholder="بحث في العنوان والمحتوى…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <select className="select" style={{ width: 150 }} value={fSource} onChange={(e) => setFSource(e.target.value)}>
@@ -466,7 +466,7 @@ function GanttView({ rows, navigate }: any) {
   return (
     <div className="gantt">
       <div className="gantt-head">
-        <div className="gantt-label" style={{ background: 'hsl(var(--muted) / 0.5)' }}>المحتوى</div>
+        <div className="gantt-label" style={{ background: 'color-mix(in oklab, var(--muted) 50%, transparent)' }}>المحتوى</div>
         <div className="gantt-track" style={{ height: 26 }}>
           {ticks.map((t, i) => <div key={i} className="gantt-tick" style={{ insetInlineStart: `${t.left}%` }}>{t.label}</div>)}
         </div>
@@ -573,7 +573,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <p className="ok">جاهز للاستيراد: {items.length} عنصراً</p>
-          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid hsl(var(--border))', borderRadius: 8, padding: 8 }}>
+          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
             {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
             {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و{items.length - 20} غيرها</div>}
           </div>
