@@ -59,7 +59,7 @@ export default function Audit() {
           <div className="field" style={{ margin: 0, minWidth: 200 }}>
             <label>اسم الفاعل</label>
             <form onSubmit={(e) => { e.preventDefault(); load(); }}>
-              <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم المستخدم…" />
+              <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث باسم المستخدم…" />
             </form>
           </div>
           <button className="btn ghost" onClick={load}>بحث</button>

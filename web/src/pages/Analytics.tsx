@@ -159,7 +159,7 @@ export default function Analytics() {
               </div>
             </div>
           ))}
-          {(data?.byPlatform || []).length === 0 && <p className="muted">لا توجد بيانات — اسحب التحليلات بعد نشر محتوى.</p>}
+          {(data?.byPlatform || []).length === 0 && <p className="muted">لا تحليلات بعد. انشر محتوى ثم اسحب التحليلات.</p>}
         </div>
 
         {/* أفضل المنشورات */}
@@ -224,7 +224,7 @@ export default function Analytics() {
               </div>
             </div>
           ))}
-          {(data?.campaigns || []).length === 0 && <p className="muted">لا توجد بيانات حملات بعد.</p>}
+          {(data?.campaigns || []).length === 0 && <p className="muted">لا حملة لها بيانات بعد. اربط المحتوى بحملة لتظهر هنا.</p>}
         </div>
       </div>
 
@@ -263,7 +263,7 @@ export default function Analytics() {
               </div>
             </div>
           ))}
-          {(perf?.writers || []).length === 0 && <p className="muted">لا توجد بيانات بعد.</p>}
+          {(perf?.writers || []).length === 0 && <p className="muted">لا أداء مسجّل بعد. انشر محتوى ليظهر هنا.</p>}
         </div>
 
         <div className="card">
@@ -424,7 +424,7 @@ function ReputationCard() {
         </div>
         <div>
           <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>اتجاه المتوسط الشهري</div>
-          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد بيانات كافية.</p>}
+          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>التقييمات لا تكفي لرسم اتجاه بعد.</p>}
           {trend.map((m) => (
             <div key={m.month} style={{ marginBottom: 6 }}>
               <div className="row" style={{ fontSize: 12 }}>

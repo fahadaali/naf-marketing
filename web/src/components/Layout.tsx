@@ -68,7 +68,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const sz = 18;
 
   const items: NavItem[] = [
-    { to: '/', label: 'الداشبورد', icon: <LayoutDashboard size={sz} /> },
+    { to: '/', label: 'لوحة التحكم', icon: <LayoutDashboard size={sz} /> },
     { to: '/posts', label: 'إدارة المحتوى', icon: <FileText size={sz} /> },
     { to: '/editor', label: 'إنشاء محتوى', icon: <PenLine size={sz} />, show: can('draft.edit') },
     { to: '/calendar', label: 'التقويم', icon: <CalendarDays size={sz} /> },

@@ -252,7 +252,7 @@ export default function Editor() {
   return (
     <div>
       <div className="row" style={{ marginBottom: 12 }}>
-        <h1 className="page-title">{postId ? 'تحرير المحتوى' : 'محتوى جديد'}</h1>
+        <h1 className="page-title">{postId ? 'تعديل المحتوى' : 'محتوى جديد'}</h1>
         <span className={`badge ${STATUS_BADGE[effStatus]}`}>{STATUS_LABELS[effStatus]}</span>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
@@ -483,7 +483,7 @@ export default function Editor() {
                 <span className="muted" style={{ fontSize: 12 }}>{versions.length} نسخة</span>
               </div>
               <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
-                <History size={14} /> عرض واسترجاع
+                <History size={14} /> عرض واستعادة
               </button>
             </div>
           )}
@@ -573,7 +573,7 @@ export default function Editor() {
             await api.post(`/posts/${postId}/versions/${vId}/restore`);
             setShowVersions(false);
             await loadPost(postId);
-            setMsg('تم استرجاع النسخة');
+            setMsg('تمت استعادة النسخة');
           }}
         />
       )}
@@ -949,7 +949,7 @@ function KBModal({
   );
 }
 
-// سجل نسخ المحتوى — استعراض واسترجاع نسخة سابقة
+// سجل نسخ المحتوى — استعراض واستعادة نسخة سابقة
 function VersionsModal({
   versions,
   onClose,
@@ -972,9 +972,9 @@ function VersionsModal({
               <div className="spacer" />
               <button
                 className="btn ghost sm"
-                onClick={() => { if (confirm('استرجاع هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
+                onClick={() => { if (confirm('استعادة هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
               >
-                <History size={14} /> استرجاع
+                <History size={14} /> استعادة
               </button>
             </div>
           </div>
