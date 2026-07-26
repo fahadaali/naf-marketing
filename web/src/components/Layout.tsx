@@ -32,6 +32,8 @@ function useTheme() {
   );
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // ثيم ناف يعتمد صنف `.dark`؛ نبقي السمة للأنماط المحلية حتى اكتمال النقل
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     try {
       localStorage.setItem('naf-theme', theme);
     } catch {}

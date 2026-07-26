@@ -17,6 +17,7 @@
         try {
           var t = localStorage.getItem('naf-theme') || 'light';
           document.documentElement.setAttribute('data-theme', t);
+          if (t === 'dark') document.documentElement.classList.add('dark');
         } catch (e) {}
       })();
     </script>
