@@ -31,6 +31,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      # npm يسجّل تبعيات github في ملف القفل بصيغة git+ssh مهما كُتبت،
+      # ولا مفتاح SSH في المشغّل — فيفشل npm ci عند أول تبعية داخلية.
+      # naf-auth عام، فإعادة التوجيه إلى HTTPS تكفي بلا أي بيانات اعتماد.
+      - name: جلب تبعيات ناف الداخلية عبر HTTPS
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
       - name: تركيب الحزم
         run: npm ci
 
