@@ -36,7 +36,7 @@ export default function NotificationBell() {
     <Popover
       render={({ toggle }) => (
         <button className="icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
-          <Bell size={17} />
+          <Bell size={20} />
           {unread > 0 && <span className="notif-dot">{unread > 9 ? '9+' : unread}</span>}
         </button>
       )}
@@ -47,23 +47,24 @@ export default function NotificationBell() {
             <strong style={{ fontSize: 14 }}>الإشعارات</strong>
             <div className="spacer" />
             {unread > 0 && (
-              <button className="btn ghost sm" onClick={markAll}><CheckCheck size={13} /> تعليم الكل</button>
+              <button className="btn ghost sm" onClick={markAll}><CheckCheck size={20} /> تعليم الكل</button>
             )}
           </div>
           <div style={{ maxHeight: 340, overflow: 'auto' }}>
             {items.map((n) => (
-              <div
+              <button
+                type="button"
                 key={n.id}
-                className="notif-item"
+                className="notif-item row-link"
                 style={{ background: n.read_at ? 'transparent' : 'var(--primary-soft)' }}
                 onClick={() => open(n, close)}
               >
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>
                 {n.body && <div className="muted" style={{ fontSize: 12 }}>{n.body}</div>}
                 <div className="muted" style={{ fontSize: 11 }}>{formatRiyadh(n.created_at)}</div>
-              </div>
+              </button>
             ))}
-            {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا توجد إشعارات</p>}
+            {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا إشعارات جديدة.</p>}
           </div>
         </div>
       )}

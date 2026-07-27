@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -14,10 +15,10 @@ function parseCaps(v: any): Caps {
 
 function kindMeta(kind: string) {
   switch (kind) {
-    case 'dm': return { icon: <Mail size={12} />, label: 'رسالة مباشرة' };
-    case 'mention': return { icon: <AtSign size={12} />, label: 'إشارة' };
-    case 'review': return { icon: <Star size={12} />, label: 'تقييم' };
-    default: return { icon: <MessageCircle size={12} />, label: 'تعليق' };
+    case 'dm': return { icon: <Mail size={16} />, label: 'رسالة مباشرة' };
+    case 'mention': return { icon: <AtSign size={16} />, label: 'إشارة' };
+    case 'review': return { icon: <Star size={16} />, label: 'تقييم' };
+    default: return { icon: <MessageCircle size={16} />, label: 'تعليق' };
   }
 }
 
@@ -42,7 +43,7 @@ export default function Comments() {
     setMsg('جارٍ الجلب…');
     try {
       const d = await api.post('/comments/refresh');
-      setMsg(`تم جلب ${d.added} عنصراً`);
+      setMsg(`تم جلب ${isolate(d.added)} عنصراً`);
       load();
     } catch (e: any) { setMsg(e.message); }
   }
@@ -113,7 +114,7 @@ export default function Comments() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> جلب الآن</button>
+        <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> جلب الآن</button>
       </div>
 
       <div className="row" style={{ marginBottom: 16 }}>
@@ -135,11 +136,11 @@ export default function Comments() {
           return (
             <div className="card" key={c.id} style={c.is_hidden ? { opacity: 0.6 } : undefined}>
               <div className="row" style={{ marginBottom: 8 }}>
-                <PlatformIcon platform={c.platform} size={22} />
+                <PlatformIcon platform={c.platform} size={16} />
                 <div>
                   <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
                     {c.author_name}
-                    {c.rating != null && <RatingScale value={c.rating} size={14} />}
+                    {c.rating != null && <RatingScale value={c.rating} size={16} />}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>
@@ -153,11 +154,11 @@ export default function Comments() {
 
               {isComment && (caps.can_hide || caps.can_delete || caps.can_like) && (
                 <div className="row" style={{ gap: 6, marginBottom: 10 }}>
-                  {caps.can_like && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'like')} title="إعجاب"><ThumbsUp size={14} /></button>}
+                  {caps.can_like && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'like')} title="إعجاب"><ThumbsUp size={20} /></button>}
                   {caps.can_hide && (c.is_hidden
-                    ? <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'unhide')} title="إظهار"><Eye size={14} /></button>
-                    : <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'hide')} title="إخفاء"><EyeOff size={14} /></button>)}
-                  {caps.can_delete && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'delete')} title="حذف"><Trash2 size={14} /></button>}
+                    ? <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'unhide')} title="إظهار"><Eye size={20} /></button>
+                    : <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'hide')} title="إخفاء"><EyeOff size={20} /></button>)}
+                  {caps.can_delete && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'delete')} title="حذف"><Trash2 size={20} /></button>}
                 </div>
               )}
 
@@ -169,8 +170,8 @@ export default function Comments() {
                     {/* التعديل/الحذف مدعومان للتعليقات والتقييمات فقط — الرسائل والإشارات لا تُعدَّل بعد الإرسال */}
                     {canEditReply && (
                       <>
-                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((e) => ({ ...e, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={13} /></button>
-                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => removeReply(c.id)} title="حذف الرد"><Trash2 size={13} /></button>
+                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((e) => ({ ...e, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={20} /></button>
+                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => removeReply(c.id)} title="حذف الرد"><Trash2 size={20} /></button>
                       </>
                     )}
                   </div>
@@ -192,7 +193,7 @@ export default function Comments() {
                     <div className="grid" style={{ gap: 6, marginBottom: 8 }}>
                       {sugg.map((s, i) => (
                         <button key={i} className="suggest-chip" onClick={() => setReplyDrafts((d) => ({ ...d, [c.id]: s }))} title="استخدام هذا الاقتراح">
-                          <Sparkles size={12} style={{ flexShrink: 0, opacity: 0.7 }} /> <span>{s}</span>
+                          <Sparkles size={20} style={{ flexShrink: 0, opacity: 0.7 }} /> <span>{s}</span>
                         </button>
                       ))}
                     </div>
@@ -206,16 +207,16 @@ export default function Comments() {
                       onKeyDown={(e) => e.key === 'Enter' && reply(c.id)}
                     />
                     <button className="btn sm ghost" disabled={busy === `sg:${c.id}`} onClick={() => suggest(c.id)} title="اقتراحات ذكية للرد">
-                      <Sparkles size={14} /> {busy === `sg:${c.id}` ? '…' : 'اقتراح'}
+                      <Sparkles size={20} /> {busy === `sg:${c.id}` ? '…' : 'اقتراح'}
                     </button>
                     <button className="btn sm" disabled={busy === c.id || !replyDrafts[c.id]?.trim()} onClick={() => reply(c.id)}>
-                      <Send size={14} /> إرسال
+                      <Send size={20} /> إرسال
                     </button>
                   </div>
                   {isComment && canPrivate && (
                     <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, marginTop: 6, cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!privateMode[c.id]} onChange={(e) => setPrivateMode((d) => ({ ...d, [c.id]: e.target.checked }))} />
-                      <Lock size={12} /> رد خاص (رسالة مباشرة لصاحب التعليق)
+                      <Lock size={16} /> رد خاص (رسالة مباشرة لصاحب التعليق)
                     </label>
                   )}
                 </div>
@@ -223,7 +224,7 @@ export default function Comments() {
             </div>
           );
         })}
-        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا توجد عناصر بعد — جرّب «جلب الآن».</p>}
+        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.</p>}
       </div>
     </div>
   );

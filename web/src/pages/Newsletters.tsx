@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
@@ -6,6 +7,18 @@ import {
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
+
+/* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
+   لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
+   وموضعه واحد. أي تغيير هناك يُنسخ هنا، وإلا كذبت المعاينة على المحرّر.
+   استثناء قوالب البريد — CLAUDE.md §1. */
+const EMAIL_PREVIEW = {
+  background: '#E8EBED',
+  card: '#FFFFFF',
+  foreground: '#333333',
+  radius: '12px',
+  fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
+} as const;
 
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
@@ -50,12 +63,12 @@ export default function Newsletters() {
         <div>
           <h1 className="page-title">النشرات والمقالات</h1>
           <p className="page-sub" style={{ margin: 0 }}>
-            اكتب مرة واحدة، وانشر بريداً للمشتركين وصفحةً عامة على الموقع · {activeSubs} مشترك نشط
+            اكتب مرة واحدة، وانشر بريداً للمشتركين وصفحةً عامة على الموقع · <bdi>{activeSubs}</bdi> مشترك نشط
           </p>
         </div>
         <div className="spacer" />
         {msg && <span className="err">{msg}</span>}
-        <button className="btn" onClick={create}><Plus size={15} /> نشرة جديدة</button>
+        <button className="btn" onClick={create}><Plus size={20} /> نشرة جديدة</button>
       </div>
 
       <div className="card">
@@ -74,7 +87,7 @@ export default function Newsletters() {
                 <td><button className="btn sm" onClick={() => setOpenId(n.id)}>فتح</button></td>
               </tr>
             ))}
-            {list.length === 0 && <tr><td colSpan={6} className="muted">لا توجد نشرات بعد — ابدأ بواحدة.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={6} className="muted">لم تُنشئ أي نشرة بعد. ابدأ بأول نشرة.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -148,7 +161,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     try {
       await save();
       const d = await api.post(`/newsletters/${id}/send`);
-      setMsg(`بدأ الإرسال إلى ${d.queued} مشترك — يكتمل تدريجياً`);
+      setMsg(`بدأ الإرسال إلى ${isolate(d.queued)} مشترك — يكتمل تدريجياً`);
       const r = await api.get(`/newsletters/${id}`);
       setNl(r.newsletter);
       loadStats();
@@ -206,16 +219,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
-        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={14} /> رجوع</button>
+        <button className="btn ghost sm" onClick={onBack}><ArrowRight size={20} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 22 }}>{nl.title}</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={showPreview}><Eye size={15} /> معاينة</button>
-        <button className="btn ghost" onClick={sendTest}><Mail size={15} /> اختبار</button>
+        <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
+        <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
         {['draft', 'scheduled'].includes(nl.status) && (
-          <button className="btn" onClick={sendAll}><Send size={15} /> إرسال للمشتركين</button>
+          <button className="btn" onClick={sendAll}><Send size={20} /> إرسال للمشتركين</button>
         )}
-        <button className="btn" disabled={saving} onClick={() => save()}><Save size={15} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
+        <button className="btn" disabled={saving} onClick={() => save()}><Save size={20} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
 
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
@@ -258,7 +271,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Globe size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
+              <strong style={{ fontSize: 14 }}><Globe size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> الصفحة العامة</strong>
               <div className="spacer" />
               <button className="btn sm ghost" disabled={saving} onClick={() => save({ web_published: nl.web_published ? 0 : 1 })}>
                 {nl.web_published ? 'إلغاء النشر' : 'نشر الصفحة'}
@@ -266,7 +279,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
             {nl.web_published && publicUrl && (
               <a className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }} href={publicUrl} target="_blank" rel="noreferrer">
-                <ExternalLink size={12} style={{ verticalAlign: -2 }} /> {publicUrl}
+                <ExternalLink size={16} style={{ verticalAlign: -2 }} /> {publicUrl}
               </a>
             )}
             {!nl.web_published && <p className="muted" style={{ fontSize: 12, margin: 0 }}>غير منشورة — لن تظهر للعامة.</p>}
@@ -274,7 +287,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
             <div className="row" style={{ marginBottom: 6 }}>
-              <strong style={{ fontSize: 14 }}><Share2 size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
+              <strong style={{ fontSize: 14 }}><Share2 size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> النشر على التواصل</strong>
               <div className="spacer" />
               <button className="btn sm ghost" onClick={loadSocial}>معاينة الصياغة</button>
             </div>
@@ -292,7 +305,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                     </label>
                   ))}
                   <div className="spacer" />
-                  <button className="btn sm" onClick={publishSocial}><Send size={13} /> نشر</button>
+                  <button className="btn sm" onClick={publishSocial}><Send size={20} /> نشر</button>
                 </div>
                 {social && (
                   <div style={{ fontSize: 12 }}>
@@ -310,7 +323,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {ab && (ab.a?.sent > 0 || ab.b?.sent > 0) && nl.subject_b && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><FlaskConical size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
+              <strong style={{ fontSize: 14 }}><FlaskConical size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> اختبار العنوانين</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row">
                   <span className="muted">(أ) {nl.subject}</span><div className="spacer" />
@@ -335,7 +348,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
 
           {stats && stats.total > 0 && (
             <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}><MousePointerClick size={14} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
+              <strong style={{ fontSize: 14 }}><MousePointerClick size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> نتائج الإرسال</strong>
               <div style={{ fontSize: 12, display: 'grid', gap: 4, marginTop: 8 }}>
                 <div className="row"><span className="muted">مُسلَّم</span><div className="spacer" /><span>{stats.sent} من {stats.total}</span></div>
                 <div className="row"><span className="muted">فُتحت</span><div className="spacer" /><span>{stats.opened} ({pct(stats.opened, stats.sent)}%)</span></div>
@@ -347,19 +360,19 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           )}
 
-          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={14} /> حذف النشرة</button>
+          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={20} /> حذف النشرة</button>
         </div>
 
         {/* المحتوى */}
         <div className="card">
           <h4 style={{ marginTop: 0 }}>المحتوى</h4>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={14} /> عنوان</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={14} /> فقرة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={14} /> صورة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={14} /> زر</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={14} /> اقتباس</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={14} /> فاصل</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={20} /> عنوان</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={20} /> فقرة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={20} /> صورة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={20} /> زر</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={20} /> اقتباس</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={20} /> فاصل</button>
           </div>
 
           {blocks.map((b, i) => (
@@ -367,9 +380,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               <div className="row" style={{ marginBottom: 6 }}>
                 <span className="muted" style={{ fontSize: 12 }}>{blockLabel(b.type)}</span>
                 <div className="spacer" />
-                <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={13} /></button>
-                <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={13} /></button>
-                <button className="btn sm ghost" onClick={() => del(i)} title="حذف"><Trash2 size={13} /></button>
+                <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={20} /></button>
+                <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={20} /></button>
+                <button className="btn sm ghost" onClick={() => del(i)} title="حذف"><Trash2 size={20} /></button>
               </div>
               <BlockFields block={b} onChange={(patch) => upd(i, patch)} />
             </div>
@@ -381,17 +394,31 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {preview && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="row">
-            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={15} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
+            <h4 style={{ marginTop: 0, marginBottom: 0 }}><Mail size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} /> معاينة البريد</h4>
             <div className="spacer" />
             <button className="btn sm ghost" onClick={() => setPreview('')}>إغلاق</button>
           </div>
-          {/* استثناء مقصود: هذه معاينة لرسالة بريد، وألوانها تطابق قالب البريد
-              في newsletterSend.ts حرفياً. لو تبعت ثيم المنصة لأظهرت المعاينة
-              شيئاً غير ما يصل المشترك. عملاء البريد لا يدعمون رموز CSS. */}
-          <div
-            style={{ background: '#fff', color: '#1f2430', padding: 20, borderRadius: 'var(--radius)', marginTop: 10, maxWidth: 640 }}
-            dangerouslySetInnerHTML={{ __html: preview }}
-          />
+          {/* استثناء مقصود — CLAUDE.md §1: هذه معاينة لرسالة بريد، فتحمل
+              قيم القالب الحرفية لا رموز الثيم. معاينة تتبع ثيم المنصة تُري
+              المحرّر شيئاً لا يصل المشترك أبداً.
+              القيم من EMAIL_PREVIEW أدناه، وهي نسخة طبق الأصل من
+              src/services/emailTheme.ts — الملف الذي يبني الرسالة فعلاً.
+              كانت هذه الكتلة تخالف ما تدّعيه: زاوية var(--radius) بدل 12px،
+              وبلا خلفية الصفحة، ولون متن مختلف. */}
+          <div style={{ background: EMAIL_PREVIEW.background, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
+            <div
+              style={{
+                background: EMAIL_PREVIEW.card,
+                color: EMAIL_PREVIEW.foreground,
+                fontFamily: EMAIL_PREVIEW.fontStack,
+                padding: 28,
+                borderRadius: EMAIL_PREVIEW.radius,
+                maxWidth: 640,
+                margin: '0 auto',
+              }}
+              dangerouslySetInnerHTML={{ __html: preview }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -428,7 +455,7 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         <div className="grid" style={{ gap: 6 }}>
           <input className="input" placeholder="رابط الصورة أو /api/media/<id>" value={block.url || ''}
                  onChange={(e) => onChange({ url: e.target.value })} />
-          <input className="input" placeholder="وصف بديل (alt)" value={block.alt || ''}
+          <input className="input" placeholder="وصف بديل (\u2068alt\u2069)" value={block.alt || ''}
                  onChange={(e) => onChange({ alt: e.target.value })} />
           <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
                  onChange={(e) => onChange({ caption: e.target.value })} />

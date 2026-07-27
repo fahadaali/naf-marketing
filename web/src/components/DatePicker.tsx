@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronLeft, CalendarDays, Clock } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Calendar, Clock } from 'lucide-react';
 import { Popover } from './Popover';
+import { formatDate, formatMonth, formatDateTime } from '../lib/format';
 
 // منتقي تواريخ عصري (شبكة تقويم) — نطاق «من/إلى» ومنتقي تاريخ+وقت.
 // التنقّل: النقر على العنوان يفتح شبكة الأشهر، ثم شبكة السنوات، للوصول السريع.
@@ -9,14 +10,14 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseYMD = (s: string) => (s ? new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10))) : null);
 const WEEK = ['أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت'];
-const MONTHS_AR = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long' }).format(new Date(2021, i, 1)));
+// أسماء الأشهر لشبكة اختيار الشهر — تسميات واجهة لا صيغة تاريخ.
+// عرض قيمة تاريخ يمرّ من lib/format حصراً (CLAUDE.md §8).
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 
-function monthLabel(d: Date) {
-  return new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(d);
-}
 function fmtAr(s: string) {
   const d = parseYMD(s);
-  return d ? new Intl.DateTimeFormat('ar-u-nu-latn', { day: 'numeric', month: 'short', year: 'numeric' }).format(d) : '';
+  return d ? formatDate(d) : '';
 }
 
 // شبكة التقويم مع أوضاع: أيام / أشهر / سنوات
@@ -41,7 +42,7 @@ function CalGrid({
   const prev = () => setMonth(mode === 'days' ? new Date(y, m - 1, 1) : mode === 'months' ? new Date(y - 1, m, 1) : new Date(y - 12, m, 1));
   const next = () => setMonth(mode === 'days' ? new Date(y, m + 1, 1) : mode === 'months' ? new Date(y + 1, m, 1) : new Date(y + 12, m, 1));
   const y0 = Math.floor(y / 12) * 12;
-  const title = mode === 'days' ? monthLabel(month) : mode === 'months' ? String(y) : `${y0} – ${y0 + 11}`;
+  const title = mode === 'days' ? formatMonth(month) : mode === 'months' ? String(y) : `${y0} – ${y0 + 11}`;
   const cycle = () => setMode((mo) => (mo === 'days' ? 'months' : mo === 'months' ? 'years' : 'years'));
 
   const first = new Date(y, m, 1);
@@ -54,9 +55,9 @@ function CalGrid({
   return (
     <div className="dp-cal">
       <div className="dp-head">
-        <button type="button" className="dp-nav" onClick={prev}><ChevronRight size={16} /></button>
+        <button type="button" className="dp-nav" onClick={prev}><ChevronRight size={20} /></button>
         <button type="button" className="dp-title" onClick={cycle}>{title}</button>
-        <button type="button" className="dp-nav" onClick={next}><ChevronLeft size={16} /></button>
+        <button type="button" className="dp-nav" onClick={next}><ChevronLeft size={20} /></button>
       </div>
 
       {mode === 'days' && (
@@ -110,10 +111,10 @@ export function DateRangePicker({
   return (
     <Popover
       render={({ toggle }) => (
-        <div className="dp-trigger" onClick={toggle}>
-          <CalendarDays size={16} />
+        <button type="button" className="dp-trigger" onClick={toggle}>
+          <Calendar size={16} />
           {from && to ? <span>{fmtAr(from)} — {fmtAr(to)}</span> : from ? <span>{fmtAr(from)} — …</span> : <span className="ph">{placeholder}</span>}
-        </div>
+        </button>
       )}
     >
       {({ close }) => {
@@ -168,17 +169,15 @@ export function DateTimePicker({
 
   if (inline) return <div className="dp-inline">{panel}</div>;
 
-  const label = value
-    ? new Intl.DateTimeFormat('ar-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(`${value}:00`))
-    : 'اختر التاريخ والوقت';
+  const label = value ? formatDateTime(new Date(`${value}:00`)) : 'اختر التاريخ والوقت';
 
   return (
     <Popover
       render={({ toggle }) => (
-        <div className="dp-trigger" onClick={toggle}>
-          <CalendarDays size={16} />
+        <button type="button" className="dp-trigger" onClick={toggle}>
+          <Calendar size={16} />
           <span className={value ? '' : 'ph'}>{label}</span>
-        </div>
+        </button>
       )}
     >
       {() => <div className="dp-pop" style={{ flexDirection: 'column' }}>{panel}</div>}

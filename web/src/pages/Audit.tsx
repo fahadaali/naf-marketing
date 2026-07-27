@@ -73,7 +73,7 @@ export default function Audit() {
                   <td className="muted">{formatRiyadh(e.created_at)}</td>
                 </tr>
               ))}
-              {entries.length === 0 && <tr><td colSpan={5} className="muted">لا توجد سجلات</td></tr>}
+              {entries.length === 0 && <tr><td colSpan={5} className="muted">لا نشاط مسجّل في هذه المدة. وسّع النطاق الزمني.</td></tr>}
             </tbody>
           </table>
         )}

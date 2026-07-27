@@ -34,7 +34,7 @@ export default function Search() {
 
       <form className="row" onSubmit={submit} style={{ marginBottom: 20, maxWidth: 480 }}>
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="اكتب كلمات البحث…" />
-        <button className="btn"><SearchIcon size={15} /> بحث</button>
+        <button className="btn"><SearchIcon size={20} /> بحث</button>
       </form>
 
       {loading && <p className="muted">جارٍ البحث…</p>}
@@ -44,12 +44,12 @@ export default function Search() {
           <div className="card">
             <h3 style={{ marginTop: 0 }}>المحتوى ({posts.length})</h3>
             {posts.map((p) => (
-              <div key={p.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => navigate(`/editor/${p.id}`)}>
+              <button type="button" key={p.id} className="row-link" style={{ padding: '9px 0', borderBottom: '1px solid var(--border)' }} onClick={() => navigate(`/editor/${p.id}`)}>
                 <div style={{ fontWeight: 600 }}>{p.title}</div>
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
-              </div>
+              </button>
             ))}
-            {posts.length === 0 && <p className="muted">لا نتائج</p>}
+            {posts.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}
           </div>
           <div className="card">
             <h3 style={{ marginTop: 0 }}>الأخبار ({news.length})</h3>
@@ -59,7 +59,7 @@ export default function Search() {
                 <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: n.snippet }} />
               </div>
             ))}
-            {news.length === 0 && <p className="muted">لا نتائج</p>}
+            {news.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}
           </div>
         </div>
       )}

@@ -14,7 +14,9 @@ body {
   font-family: var(--font-sans);
   background: var(--background);
   color: var(--foreground);
-  direction: rtl;
+  /* الاتجاه من <html dir> في index.html — مصدر واحد.
+     كان مثبَّتاً هنا rtl فيتجاوز الجذر: الأيقونات تتبع dir والتخطيط لا،
+     فينكسر العرض عند dir="ltr" بدل أن ينقلب. */
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -131,9 +133,12 @@ a:hover { text-decoration: underline; }
 .btn.danger:hover { background: color-mix(in oklab, var(--destructive) 90%, transparent); }
 .btn.success { background: var(--success); color: var(--success-foreground); }
 .btn.success:hover { background: color-mix(in oklab, var(--success) 90%, transparent); }
-/* زر مميّز (ذكاء اصطناعي/إجراء خاص) — تدرّج أنيق */
-.btn.gold { background: linear-gradient(135deg, var(--primary), var(--chart-4)); color: var(--primary-foreground); }
-.btn.gold:hover { filter: brightness(1.07); }
+/* زر مميّز (ذكاء اصطناعي/إجراء خاص).
+   كان تدرّجاً يمزج --primary برمز مخطّطات --chart-4: معالجة بصرية غير
+   مسجّلة، ورموز chart-* للمخطّطات لا لعناصر الواجهة (CLAUDE.md §6).
+   صار الزر الأساسي نفسه؛ التمييز يأتي من الأيقونة والنص لا من لون ثانٍ. */
+.btn.gold { background: var(--primary); color: var(--primary-foreground); }
+.btn.gold:hover { background: color-mix(in oklab, var(--primary) 90%, transparent); }
 .btn.sm { padding: 6px 12px; font-size: 13px; border-radius: var(--radius); gap: 4px; }
 
 /* ===== الحقول ===== */
@@ -153,6 +158,11 @@ a:hover { text-decoration: underline; }
 .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--foreground); }
 
 /* ===== الجداول ===== */
+/* أرقام جدولية — naf-terms §5 و CLAUDE.md §8: أعمدة الأرقام تصطفّ.
+   يشمل الجداول وبطاقات المؤشّرات وشرائح الإحصاء والمخطّط الزمني. */
+.table, .stat .num, .chip-stat b, .gantt-tick, .cal-day {
+  font-variant-numeric: tabular-nums;
+}
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { padding: 12px 14px; text-align: start; }
 .table th {
@@ -200,8 +210,8 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .rte-toolbar button:hover { background: var(--card); color: var(--foreground); border-color: var(--border); }
 .rte {
-  min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 8px 8px;
-  padding: 16px; background: var(--background); direction: rtl; text-align: start;
+  min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
+  padding: 16px; background: var(--background); text-align: start;
   outline: none; font-size: 15px; line-height: 1.8; color: var(--foreground);
 }
 .rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 15%, transparent); }
@@ -214,7 +224,7 @@ h3, h4 { letter-spacing: -0.01em; }
   display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px;
   background:
     radial-gradient(1200px 600px at 100% 0%, color-mix(in oklab, var(--primary) 12%, transparent), transparent 60%),
-    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--chart-4) 10%, transparent), transparent 55%),
+    radial-gradient(1000px 500px at 0% 100%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 55%),
     var(--background);
 }
 .auth-card {
@@ -431,7 +441,9 @@ h3, h4 { letter-spacing: -0.01em; }
 
 /* ===== progress bar ===== */
 .bar-track { height: 8px; background: var(--muted); border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 8px; background: linear-gradient(90deg, var(--primary), var(--chart-4)); border-radius: 999px; }
+/* كان تدرّجاً بزاوية 90deg — اتجاه فيزيائي لا ينقلب في RTL — ويمزج
+   رمز مخطّطات. صار لوناً واحداً من الرمز الأساسي. */
+.bar-fill { height: 8px; background: var(--primary); border-radius: 999px; }
 
 @media (max-width: 900px) {
   .sidebar { width: 68px; padding: 16px 8px; }
@@ -441,11 +453,93 @@ h3, h4 { letter-spacing: -0.01em; }
   .content { padding: 18px; }
 }
 
-/* ===== الاتجاهية: قلب الأيقونات الاتجاهية في RTL =====
-   تُقلب الأيقونات التي تدلّ على اتجاه أفقي فقط.
-   لا تُقلب الشعارات ولا الساعات ولا علامات الصح. */
+/* ===== أهداف نقر تُشغَّل بلوحة المفاتيح =====
+   كانت هذه بطاقات وصفوفاً من نوع div عليها onClick، فلا يصلها التركيز
+   ولا تُفتح بمفتاح Enter. صارت <button> حقيقية، وهذه القاعدة تُلغي
+   مظهر الزر الافتراضي فقط دون المساس بسلوكه. */
+button.row-link,
+button.card,
+button.cal-event,
+button.kanban-card,
+button.chip-stat,
+button.dp-trigger,
+button.gantt-bar,
+button.notif-item {
+  font-family: inherit;
+  font-size: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+button.row-link,
+button.card,
+button.kanban-card,
+button.cal-event,
+button.notif-item { display: block; width: 100%; }
+button.cal-event,
+button.gantt-bar { border: none; }
+button.row-link,
+button.notif-item {
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-radius: var(--radius);
+}
+/* الصفّ القابل للنقر يبقى صفاً: العنوان ثم المباعد ثم الحالة */
+button.row-link.row { display: flex; width: 100%; }
+/* الحجم يأتي من نمط سطري في الشيفرة، فلا width هنا */
+button.gantt-bar { display: flex; }
+
+/* ===== التركيز =====
+   CLAUDE.md §4: «كل عنصر تفاعلي يحتاج حالة :focus-visible ظاهرة».
+   حلقة واحدة من var(--ring) لكل ما يُنقَل إليه بلوحة المفاتيح، فتتبع
+   الثيم في الوضعين ولا تختلف من عنصر لآخر.
+   الحقول و.btn و.rte لها حلقاتها أعلاه (حلقة داخلية تناسب الإطار). */
+.nav-link:focus-visible,
+.icon-btn:focus-visible,
+.notif-item:focus-visible,
+.rte-toolbar button:focus-visible,
+.chip-stat:focus-visible,
+.cal-event:focus-visible,
+.kanban-card:focus-visible,
+.gantt-bar:focus-visible,
+.media-card:focus-visible,
+.dp-trigger:focus-visible,
+.dp-nav:focus-visible,
+.dp-title:focus-visible,
+.dp-mg button:focus-visible,
+.dp-day:focus-visible,
+.chk:focus-visible,
+.tab:focus-visible,
+.row-link:focus-visible,
+.table tbody tr:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* صفوف الجداول: الحلقة الخارجية تُقصّ داخل جدول له overflow، فتُرسم داخلية */
+.table tbody tr:focus-visible { outline-offset: -2px; }
+
+/* ===== الاتجاهية: قلب الأيقونات الاتجاهية =====
+   naf-icons.md «قواعد القلب»: تُقلب الأسهم والشيفرون الأفقية والرجوع
+   والتالي والإرسال والرد وتسجيل الخروج والإزاحة.
+   لا تُقلب الشعارات ولا الساعات ولا علامات الصح ولا الشيفرون الرأسي.
+
+   الأيقونة تُقلب بين الاتجاهين دائماً؛ الاتجاه الذي يحمل الرسم الطبيعي
+   يختلف باختلاف نوع الاسم، ولذلك كتلتان لا واحدة. */
+
+/* (أ) أيقونات ذات اسم واحد لا نظير له — Lucide ترسمها لاتينية،
+       فتُقلب في RTL. */
 [dir='rtl'] .lucide-send,
 [dir='rtl'] .lucide-log-out,
 [dir='rtl'] .lucide-log-in,
 [dir='rtl'] .lucide-external-link,
 [dir='rtl'] .lucide-reply { transform: scaleX(-1); }
+
+/* (ب) أيقونات الاتجاه المزدوج — الخريطة تختار الاسم بمظهره في RTL
+       («رجوع → ArrowRight»، «التالي → ArrowLeft»، «فاصل مسار → ChevronLeft»)،
+       لأن RTL هو الأصل. فالرسم الطبيعي صحيح هنا، والقلب في LTR.
+       بدون هذه الكتلة تنقلب كل هذه الأيقونات خطأً عند dir="ltr". */
+[dir='ltr'] .lucide-arrow-left,
+[dir='ltr'] .lucide-arrow-right,
+[dir='ltr'] .lucide-chevron-left,
+[dir='ltr'] .lucide-chevron-right { transform: scaleX(-1); }

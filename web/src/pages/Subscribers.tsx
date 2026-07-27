@@ -1,4 +1,4 @@
-import { formatNumber } from '../lib/format';
+import { formatNumber, isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Plus, Upload, Trash2, UserMinus, RotateCcw, Search } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
@@ -39,7 +39,7 @@ export default function Subscribers() {
     if (!importText.trim()) return;
     try {
       const d = await api.post('/subscribers/import', { text: importText });
-      setMsg(`أُضيف ${d.added} · تُخطّي ${d.skipped}`);
+      setMsg(`أُضيف ${isolate(d.added)} · تُخطّي ${isolate(d.skipped)}`);
       setImportText(''); setImporting(false); load();
     } catch (e: any) { setMsg(e.message); }
   }
@@ -64,8 +64,8 @@ export default function Subscribers() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={() => setImporting((v) => !v)}><Upload size={15} /> استيراد</button>
-        <button className="btn" onClick={addOne}><Plus size={15} /> إضافة</button>
+        <button className="btn ghost" onClick={() => setImporting((v) => !v)}><Upload size={20} /> استيراد</button>
+        <button className="btn" onClick={addOne}><Plus size={20} /> إضافة</button>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
@@ -100,7 +100,7 @@ export default function Subscribers() {
           <div className="spacer" />
           <input className="input" style={{ maxWidth: 260 }} placeholder="بحث بالبريد أو الاسم…"
                  value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} />
-          <button className="btn ghost sm" onClick={load}><Search size={14} /></button>
+          <button className="btn ghost sm" onClick={load}><Search size={20} /></button>
         </div>
       </div>
 
@@ -119,13 +119,13 @@ export default function Subscribers() {
                 <td className="muted">{s.consent_at ? formatRiyadh(s.consent_at) : '—'}</td>
                 <td>
                   {s.status === 'active'
-                    ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={13} /></button>
-                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={13} /></button>}
-                  <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
+                    ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={20} /></button>
+                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={20} /></button>}
+                  <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={20} /></button>
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={6} className="muted">لا يوجد مشتركون بعد.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={6} className="muted">لا مشتركين بعد. أضف أول مشترك أو استورد قائمة.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -136,7 +136,7 @@ export default function Subscribers() {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="card stat">
-      <div className="num">{formatNumber(value)}</div>
+      <div className="num"><bdi>{formatNumber(value)}</bdi></div>
       <div className="label">{label}</div>
     </div>
   );

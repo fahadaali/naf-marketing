@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Sparkles, FilePlus2 } from 'lucide-react';
@@ -23,11 +24,11 @@ export default function News() {
       const d = await api.post('/rss/refresh');
       const failed = (d.feeds || []).filter((f: any) => f.error);
       if (failed.length) {
-        setMsg(`أُضيف ${d.added} خبراً. تعذّر جلب ${failed.length} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
+        setMsg(`أُضيف ${isolate(d.added)} خبراً. تعذّر جلب ${isolate(failed.length)} خلاصة: ${failed.map((f: any) => f.error).join(' | ')}`);
       } else if (d.added === 0) {
-        setMsg('لا توجد أخبار جديدة (كل العناصر مجلوبة مسبقاً).');
+        setMsg('لا أخبار جديدة — كل العناصر مجلوبة مسبقاً.');
       } else {
-        setMsg(`تم جلب ${d.added} خبراً جديداً`);
+        setMsg(`تم جلب ${isolate(d.added)} خبراً جديداً`);
       }
       load();
     } catch (e: any) {
@@ -61,7 +62,7 @@ export default function News() {
         </div>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        {can('settings.manage') && <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> تحديث الآن</button>}
+        {can('settings.manage') && <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> تحديث الآن</button>}
       </div>
 
       <div className="grid cols-2">
@@ -80,11 +81,11 @@ export default function News() {
               ) : can('draft.edit') ? (
                 <>
                   <button className="btn ghost sm" disabled={!!busy} onClick={() => toDraft(n, false)}>
-                    <FilePlus2 size={15} /> تحويل إلى مسودة
+                    <FilePlus2 size={20} /> تحويل إلى مسودة
                   </button>
                   {can('ai.generate') && (
                     <button className="btn gold sm" disabled={busy === n.id} onClick={() => toDraft(n, true)}>
-                      <Sparkles size={15} /> {busy === n.id ? '…' : 'صياغة ثم تحويل'}
+                      <Sparkles size={20} /> {busy === n.id ? '…' : 'صياغة ثم تحويل'}
                     </button>
                   )}
                 </>
@@ -92,7 +93,7 @@ export default function News() {
             </div>
           </div>
         ))}
-        {news.length === 0 && <p className="muted">لا توجد أخبار — أضِف خلاصات RSS من الإعدادات ثم حدّث.</p>}
+        {news.length === 0 && <p className="muted">لا أخبار بعد. أضِف خلاصة RSS من الإعدادات ثم حدّث.</p>}
       </div>
     </div>
   );

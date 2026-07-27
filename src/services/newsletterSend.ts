@@ -1,6 +1,7 @@
 import type { Env } from '../types';
 import { newId, nowIso } from '../util';
 import { getEmailProvider } from './email';
+import { EMAIL } from './emailTheme';
 import {
   parseBlocks, renderBlocks, escapeHtml, publicSettings, articleUrl,
 } from './newsletter';
@@ -24,19 +25,19 @@ function emailShell(opts: {
   const { siteName, preheader, body, unsubUrl, articleUrl: aUrl, trackOpenUrl } = opts;
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f5f7;font-family:system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif">
+<body style="margin:0;padding:0;background:${EMAIL.background};font-family:${EMAIL.fontStack}">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${EMAIL.background};padding:24px 12px">
 <tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#fff;border-radius:12px;overflow:hidden">
-<tr><td style="padding:20px 28px;border-bottom:1px solid #eee">
-  <span style="font-weight:700;color:#4f46e5;font-size:17px">${escapeHtml(siteName)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:${EMAIL.card};border-radius:${EMAIL.radius};overflow:hidden">
+<tr><td style="padding:20px 28px;border-bottom:1px solid ${EMAIL.border}">
+  <span style="font-weight:700;color:${EMAIL.primary};font-size:17px">${escapeHtml(siteName)}</span>
 </td></tr>
 <tr><td style="padding:28px" dir="rtl">${body}</td></tr>
-<tr><td style="padding:18px 28px;border-top:1px solid #eee;background:#fafafa;font-size:12px;color:#6b7280;text-align:center">
-  <p style="margin:0 0 8px"><a href="${escapeHtml(aUrl)}" style="color:#4f46e5">اقرأ هذه المقالة على الموقع</a></p>
+<tr><td style="padding:18px 28px;border-top:1px solid ${EMAIL.border};background:${EMAIL.background};font-size:12px;color:${EMAIL.mutedForeground};text-align:center">
+  <p style="margin:0 0 8px"><a href="${escapeHtml(aUrl)}" style="color:${EMAIL.primary}">اقرأ هذه المقالة على الموقع</a></p>
   <p style="margin:0">وصلتك هذه الرسالة لاشتراكك في نشرة ${escapeHtml(siteName)}.
-    <a href="${escapeHtml(unsubUrl)}" style="color:#6b7280;text-decoration:underline">إلغاء الاشتراك</a></p>
+    <a href="${escapeHtml(unsubUrl)}" style="color:${EMAIL.mutedForeground};text-decoration:underline">إلغاء الاشتراك</a></p>
 </td></tr>
 </table></td></tr></table>
 <img src="${escapeHtml(trackOpenUrl)}" width="1" height="1" alt="" style="display:block">
@@ -280,7 +281,7 @@ export async function sendWelcome(env: Env, email: string, token: string, reques
 
   const { base, path } = await publicSettings(env, requestUrl);
   const name = cfg.app_name || env.APP_NAME || 'شركة ناف القانونية';
-  const body = `<p style="margin:0 0 14px;line-height:1.9;font-size:16px;color:#1f2430">${escapeHtml(cfg.welcome_body || '')}</p>`;
+  const body = `<p style="margin:0 0 14px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}">${escapeHtml(cfg.welcome_body || '')}</p>`;
 
   const provider = await getEmailProvider(env);
   await provider.send(

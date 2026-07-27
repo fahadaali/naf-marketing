@@ -10,10 +10,12 @@ export type PlatformMeta = {
   color: string;        // اللون الرسمي (خلفية الأيقونة)
   fg?: string;          // لون الرمز (افتراضي أبيض)
   gradient?: string;    // تدرّج (إنستغرام)
-  glyph: ReactNode;
+  glyph: (size: number) => ReactNode;
 };
 
-const g = (size: number) => size;
+// رمز العلامة يتبع حجم الرقعة بدل مقاس ثابت. الرقعة نفسها تأخذ أحد مقاسات
+// naf-icons.md الثلاثة من موضع الاستدعاء؛ وهذه نسبة رسم داخلية لا مقاس أيقونة.
+const g = (size: number) => Math.round(size * 0.62);
 
 function XGlyph({ size = 16 }: { size?: number }) {
   return (
@@ -24,22 +26,22 @@ function XGlyph({ size = 16 }: { size?: number }) {
 }
 
 export const PLATFORM_META: Record<string, PlatformMeta> = {
-  linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
-  linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: <Linkedin size={g(15)} /> },
-  x: { label: 'إكس', color: 'var(--brand-x)', glyph: <XGlyph size={14} /> },
+  linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
+  linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
+  x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XGlyph size={g(s)} /> },
   // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
-  google: { label: 'نشاطي التجاري (Google)', color: 'var(--brand-google)', glyph: <MapPin size={g(14)} /> },
+  google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
   instagram: {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',
     gradient: 'var(--brand-instagram-gradient)',
-    glyph: <Instagram size={g(15)} />,
+    glyph: (s) => <Instagram size={g(s)} />,
   },
-  snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: <Ghost size={g(15)} /> },
-  tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: <Music2 size={g(14)} /> },
-  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: <Facebook size={g(15)} /> },
-  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: <Youtube size={g(15)} /> },
-  threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: <AtSign size={g(15)} /> },
+  snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: (s) => <Ghost size={g(s)} /> },
+  tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: (s) => <Music2 size={g(s)} /> },
+  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: (s) => <Facebook size={g(s)} /> },
+  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: (s) => <Youtube size={g(s)} /> },
+  threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: (s) => <AtSign size={g(s)} /> },
 };
 
 // المنصات المعروفة القابلة للإضافة من الإعدادات
@@ -102,5 +104,5 @@ export function PlatformIcon({ platform, size = 24 }: { platform: string; size?:
     background: meta?.gradient || meta?.color || 'var(--muted-foreground)',
     flexShrink: 0,
   };
-  return <span style={style}>{meta?.glyph || <Globe size={Math.round(size * 0.62)} />}</span>;
+  return <span style={style}>{meta ? meta.glyph(size) : <Globe size={g(size)} />}</span>;
 }

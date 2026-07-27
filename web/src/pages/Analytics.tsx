@@ -1,7 +1,7 @@
-import { formatNumber } from '../lib/format';
+import { formatNumber, isolate } from '../lib/format';
 import { RatingValue } from '../components/Rating';
 import { useEffect, useState, type ReactNode } from 'react';
-import { RefreshCw, AlertTriangle, ExternalLink, FileDown } from 'lucide-react';
+import { RefreshCw, TriangleAlert, ExternalLink, FileOutput } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import StatusBadge from '../components/StatusBadge';
@@ -65,7 +65,7 @@ export default function Analytics() {
     setMsg('جارٍ السحب…');
     try {
       const d = await api.post('/analytics/refresh');
-      setMsg(`تم سحب ${d.captured} لقطة`);
+      setMsg(`تم سحب ${isolate(d.captured)} لقطة`);
       load();
     } catch (e: any) {
       setMsg(e.message);
@@ -83,7 +83,7 @@ export default function Analytics() {
         <h1 className="page-title">التحليلات</h1>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
-        <button className="btn ghost" onClick={refresh}><RefreshCw size={15} /> سحب التحليلات</button>
+        <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> سحب التحليلات</button>
       </div>
 
       {/* الفلاتر */}
@@ -152,7 +152,7 @@ export default function Analytics() {
           {(data?.byPlatform || []).map((p: any) => (
             <div key={p.platform} style={{ marginBottom: 10 }}>
               <div className="row" style={{ fontSize: 13 }}>
-                <PlatformIcon platform={p.platform} size={20} />
+                <PlatformIcon platform={p.platform} size={16} />
                 <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{formatNumber(p.impressions || 0)}</bdi> انطباع</span>
@@ -180,13 +180,13 @@ export default function Analytics() {
                 >
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      {p.external_url && <ExternalLink size={13} style={{ opacity: 0.55, flexShrink: 0 }} />}
+                      {p.external_url && <ExternalLink size={16} style={{ opacity: 0.55, flexShrink: 0 }} />}
                       {p.title}
                     </span>
                   </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <PlatformIcon platform={p.platform} size={18} /> {platformLabel(p.platform)}
+                      <PlatformIcon platform={p.platform} size={16} /> {platformLabel(p.platform)}
                     </span>
                   </td>
                   <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
@@ -234,15 +234,15 @@ export default function Analytics() {
       {/* تنبيهات المحتوى المتأخر */}
       {alerts.length > 0 && (
         <div className="card" style={{ marginTop: 16, borderColor: 'var(--warning)' }}>
-          <h4 style={{ marginTop: 0 }} className="row"><AlertTriangle size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
+          <h4 style={{ marginTop: 0 }} className="row"><TriangleAlert size={16} /> محتوى متأخر بحاجة لمتابعة</h4>
           <table className="table">
             <thead><tr><th>المحتوى</th><th>المرحلة</th><th>عدد الأيام</th></tr></thead>
             <tbody>
               {alerts.map((a) => (
-                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/editor/${a.id}`)}>
-                  <td>{a.title}</td>
+                <tr key={a.id}>
+                  <td><button type="button" className="row-link" onClick={() => navigate(`/editor/${a.id}`)}>{a.title}</button></td>
                   <td><StatusBadge status={a.status} /></td>
-                  <td>{a.days_stuck}</td>
+                  <td><bdi>{a.days_stuck}</bdi></td>
                 </tr>
               ))}
             </tbody>
@@ -259,7 +259,7 @@ export default function Analytics() {
               <div className="row" style={{ fontSize: 13 }}>
                 <span>{w.name}</span>
                 <div className="spacer" />
-                <span className="muted">{w.created_count} محتوى · {w.published_count} منشور · {w.rejected_count} مرفوض</span>
+                <span className="muted"><bdi>{w.created_count}</bdi> محتوى · <bdi>{w.published_count}</bdi> منشور · <bdi>{w.rejected_count}</bdi> مرفوض</span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(w.created_count / maxCreated) * 100}%` }} />
@@ -289,7 +289,7 @@ export default function Analytics() {
 function Stat({ label, value }: { label: string; value: number | string | ReactNode }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
+      <div className="num"><bdi>{typeof value === 'number' ? formatNumber(value) : value}</bdi></div>
       <div className="label">{label}</div>
     </div>
   );
@@ -327,8 +327,8 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
     setBusy(id); setMsg('');
     try {
       const d = await api.post(`/analytics/exports/${id}/ingest`);
-      if (d.pending) { setMsg(`التصدير لم يكتمل بعد (${d.status}). أعد المحاولة لاحقاً.`); }
-      else { setMsg(`تم استيراد ${d.imported} فيديو إلى اللوحة.`); onImported(); }
+      if (d.pending) { setMsg(`التصدير لم يكتمل بعد (${isolate(d.status)}). أعد المحاولة لاحقاً.`); }
+      else { setMsg(`تم استيراد ${isolate(d.imported)} فيديو إلى اللوحة.`); onImported(); }
       load();
     } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
   }
@@ -337,25 +337,25 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="row" style={{ cursor: 'pointer' }} onClick={() => setOpen((o) => !o)}>
-        <h4 style={{ margin: 0 }}><FileDown size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
+      <button type="button" className="row row-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <h4 style={{ margin: 0 }}><FileOutput size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
-      </div>
+      </button>
       {open && (
         <div style={{ marginTop: 12 }}>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى 30 فيديو، تهدئة 7 أيام).
           </p>
           {accounts.length === 0 ? (
-            <p className="muted" style={{ fontSize: 13 }}>لا توجد حسابات فيديو مربوطة (يوتيوب/تيك توك).</p>
+            <p className="muted" style={{ fontSize: 13 }}>لا حسابات فيديو مربوطة. اربط يوتيوب أو تيك توك من الإعدادات.</p>
           ) : (
             <div className="row" style={{ gap: 8, marginBottom: 12 }}>
               <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{platformLabel(a.platform)} — {a.name}</option>)}
               </select>
-              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileDown size={14} /> إنشاء تصدير</button>
-              <button className="btn sm ghost" onClick={load}><RefreshCw size={14} /> تحديث الحالة</button>
+              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileOutput size={20} /> إنشاء تصدير</button>
+              <button className="btn sm ghost" onClick={load}><RefreshCw size={20} /> تحديث الحالة</button>
             </div>
           )}
           {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
@@ -414,7 +414,7 @@ function ReputationCard() {
             return (
               <div key={star} style={{ marginBottom: 6 }}>
                 <div className="row" style={{ fontSize: 12 }}>
-                  <span><RatingValue value={star} size={12} /></span>
+                  <span><RatingValue value={star} size={16} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
                 </div>
@@ -433,7 +433,7 @@ function ReputationCard() {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
-                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={12} /> · <bdi>{m.count}</bdi></span>
+                <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={16} /> · <bdi>{m.count}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(Number(m.avg_rating) / 5) * 100}%` }} />
@@ -477,7 +477,7 @@ function BestTimesCard({ platform }: { platform: string }) {
         <h4 style={{ marginTop: 0, marginBottom: 0 }}>أفضل أوقات النشر</h4>
         <div className="spacer" />
         <span className="muted" style={{ fontSize: 12 }}>
-          بتوقيت الرياض · من {data.sample} منشوراً
+          بتوقيت الرياض · من <bdi>{data.sample}</bdi> منشوراً
         </span>
       </div>
       {!data.enough && (
@@ -493,7 +493,7 @@ function BestTimesCard({ platform }: { platform: string }) {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{DAY_AR[d.day] || d.day}</span>
                 <div className="spacer" />
-                <span className="muted">{d.avg_engagement} تفاعل · {d.posts}</span>
+                <span className="muted"><bdi>{d.avg_engagement}</bdi> تفاعل · <bdi>{d.posts}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(d.avg_engagement / maxDay) * 100}%` }} />
@@ -508,7 +508,7 @@ function BestTimesCard({ platform }: { platform: string }) {
               <div className="row" style={{ fontSize: 12 }}>
                 <span>{hourLabel(h.hour)}</span>
                 <div className="spacer" />
-                <span className="muted">{h.avg_engagement} تفاعل · {h.posts}</span>
+                <span className="muted"><bdi>{h.avg_engagement}</bdi> تفاعل · <bdi>{h.posts}</bdi></span>
               </div>
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(h.avg_engagement / maxHour) * 100}%` }} />

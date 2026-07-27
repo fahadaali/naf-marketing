@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { EMAIL } from './emailTheme';
 
 // ===== تصيير كتل النشرة =====
 // مصدر واحد (blocks) يُصيَّر لوجهتين:
@@ -21,7 +22,7 @@ export function escapeHtml(s: string): string {
 
 // يحوّل أسطر النص إلى فقرات مع دعم الروابط النصية
 function paragraphs(text: string, inline: boolean): string {
-  const style = inline ? ' style="margin:0 0 14px;line-height:1.9;font-size:16px;color:#1f2430"' : '';
+  const style = inline ? ` style="margin:0 0 14px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"` : '';
   return String(text || '')
     .split(/\n{2,}/)
     .filter((p) => p.trim())
@@ -49,7 +50,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       case 'heading': {
         const lvl = b.level === 3 ? 3 : 2;
         const st = inline
-          ? ` style="margin:26px 0 12px;font-size:${lvl === 2 ? 22 : 18}px;font-weight:700;color:#111"`
+          ? ` style="margin:26px 0 12px;font-size:${lvl === 2 ? 22 : 18}px;font-weight:700;color:${EMAIL.foreground}"`
           : '';
         out.push(`<h${lvl}${st}>${escapeHtml(b.text)}</h${lvl}>`);
         break;
@@ -60,17 +61,17 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       case 'image': {
         const src = mediaUrl(b);
         if (!src) break;
-        const st = inline ? ' style="max-width:100%;height:auto;border-radius:8px;display:block;margin:0 auto"' : '';
+        const st = inline ? ` style="max-width:100%;height:auto;border-radius:${EMAIL.radius};display:block;margin:0 auto"` : '';
         out.push(`<figure${inline ? ' style="margin:18px 0"' : ''}>` +
           `<img src="${escapeHtml(src)}" alt="${escapeHtml(b.alt || '')}"${st}>` +
-          (b.caption ? `<figcaption${inline ? ' style="font-size:13px;color:#6b7280;text-align:center;margin-top:6px"' : ''}>${escapeHtml(b.caption)}</figcaption>` : '') +
+          (b.caption ? `<figcaption${inline ? ` style="font-size:13px;color:${EMAIL.mutedForeground};text-align:center;margin-top:6px"` : ''}>${escapeHtml(b.caption)}</figcaption>` : '') +
           `</figure>`);
         break;
       }
       case 'button': {
         if (!b.url) break;
         const st = inline
-          ? ' style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600"'
+          ? ` style="display:inline-block;background:${EMAIL.primary};color:${EMAIL.primaryForeground};text-decoration:none;padding:12px 22px;border-radius:${EMAIL.radius};font-weight:600"`
           : ' class="btn"';
         out.push(`<p${inline ? ' style="text-align:center;margin:22px 0"' : ' style="text-align:center"'}>` +
           `<a href="${escapeHtml(b.url)}"${st}>${escapeHtml(b.text || 'اقرأ المزيد')}</a></p>`);
@@ -80,13 +81,13 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         const st = inline
           // border-right لا border-inline-start: عملاء البريد المكتبية لا تدعم
           // الخصائص المنطقية. جهة RTL مكتوبة مباشرةً — استثناء CLAUDE.md §1.
-          ? ' style="margin:18px 0;padding:12px 16px;border-right:3px solid #4f46e5;background:#f5f5ff;color:#374151"'
+          ? ` style="margin:18px 0;padding:12px 16px;border-right:3px solid ${EMAIL.primary};background:${EMAIL.primarySoft};color:${EMAIL.foreground}"`
           : '';
         out.push(`<blockquote${st}>${escapeHtml(b.text)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);
         break;
       }
       case 'divider':
-        out.push(inline ? '<hr style="border:none;border-top:1px solid #e5e7eb;margin:26px 0">' : '<hr>');
+        out.push(inline ? `<hr style="border:none;border-top:1px solid ${EMAIL.border};margin:26px 0">` : '<hr>');
         break;
     }
   }

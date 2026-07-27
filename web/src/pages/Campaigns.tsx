@@ -33,12 +33,12 @@ export default function Campaigns() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">الحملات</h1>
         <div className="spacer" />
-        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}><Plus size={16} /> حملة جديدة</button>}
+        {can('content.schedule') && <button className="btn" onClick={() => setShowNew(true)}><Plus size={20} /> حملة جديدة</button>}
       </div>
 
       <div className="grid cols-3">
         {campaigns.map((c) => (
-          <div className="card" key={c.id} style={{ cursor: 'pointer' }} onClick={() => openCampaign(c.id)}>
+          <button type="button" className="card row-link" key={c.id} onClick={() => openCampaign(c.id)}>
             <div className="row">
               <strong>{c.name}</strong>
               <div className="spacer" />
@@ -46,13 +46,13 @@ export default function Campaigns() {
             </div>
             <p className="muted" style={{ fontSize: 13, minHeight: 40 }}>{c.objective || 'بدون هدف محدد'}</p>
             <div className="row" style={{ fontSize: 12 }}>
-              <span className="muted">{c.posts_count} منشور</span>
+              <span className="muted"><bdi>{c.posts_count}</bdi> منشور</span>
               <div className="spacer" />
-              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={12} /><bdi>{c.end_date || '؟'}</bdi></span>
+              <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={16} /><bdi>{c.end_date || '؟'}</bdi></span>
             </div>
-          </div>
+          </button>
         ))}
-        {campaigns.length === 0 && <p className="muted">لا توجد حملات بعد</p>}
+        {campaigns.length === 0 && <p className="muted">لم تُنشئ أي حملة بعد. ابدأ بأول حملة.</p>}
       </div>
 
       {selected && (
@@ -62,7 +62,7 @@ export default function Campaigns() {
             <span className="muted">المنصات:</span>
             {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
               <span key={p} className="row" style={{ gap: 4 }}>
-                <PlatformIcon platform={p} size={18} /> {platformLabel(p)}
+                <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
               </span>
             ))}
             {(JSON.parse(selected.target_platforms || '[]') as string[]).length === 0 && <span>—</span>}
@@ -73,7 +73,7 @@ export default function Campaigns() {
               <div className="kanban-col" key={col}>
                 <h4><StatusBadge status={col} /></h4>
                 {posts.filter((p) => p.status === col).map((p) => (
-                  <div className="kanban-card" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</div>
+                  <button type="button" className="kanban-card row-link" key={p.id} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
                 ))}
               </div>
             ))}
@@ -125,7 +125,7 @@ function NewCampaign({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           {avail.map((p) => (
             <button key={p} type="button" className={`btn sm ${platforms.includes(p) ? '' : 'ghost'}`}
               onClick={() => setPlatforms((s) => s.includes(p) ? s.filter((x) => x !== p) : [...s, p])}>
-              <PlatformIcon platform={p} size={16} /> {platformLabel(p)}
+              <PlatformIcon platform={p} size={20} /> {platformLabel(p)}
             </button>
           ))}
         </div>

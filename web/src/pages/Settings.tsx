@@ -1,3 +1,4 @@
+import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { ConnectionBadge } from '../components/StateBadge';
@@ -12,7 +13,7 @@ export default function Settings() {
   const tabs = [
     can('users.manage') && { id: 'users', label: 'المستخدمون' },
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
-    can('settings.manage') && { id: 'feeds', label: 'خلاصات RSS' },
+    can('settings.manage') && { id: 'feeds', label: 'خلاصات \u2068RSS\u2069' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
     can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
@@ -61,7 +62,7 @@ function Users() {
       <div className="row" style={{ marginBottom: 12 }}>
         <h3 style={{ margin: 0 }}>المستخدمون</h3>
         <div className="spacer" />
-        <button className="btn sm" onClick={() => setShow(true)}><Plus size={15} /> مستخدم</button>
+        <button className="btn sm" onClick={() => setShow(true)}><Plus size={20} /> مستخدم</button>
       </div>
       <table className="table">
         <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الحالة</th><th></th></tr></thead>
@@ -173,7 +174,7 @@ function Feeds() {
       if (d.result?.error) {
         setErr(`أُضيفت الخلاصة لكن تعذّر جلبها: ${d.result.error}`);
       } else {
-        setMsg(`أُضيفت الخلاصة وجُلب منها ${d.result?.added ?? 0} خبراً.`);
+        setMsg(`أُضيفت الخلاصة وجُلب منها ${isolate(d.result?.added ?? 0)} خبراً.`);
       }
       load();
     } catch (e: any) { setErr(e.message); }
@@ -186,7 +187,7 @@ function Feeds() {
       <div className="row" style={{ marginBottom: 12 }}>
         <input className="input" style={{ flex: 2 }} placeholder="رابط الخلاصة https://..." value={url} onChange={(e) => setUrl(e.target.value)} />
         <input className="input" style={{ flex: 1 }} placeholder="عنوان (اختياري)" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <button className="btn" onClick={add}><Plus size={15} /> إضافة</button>
+        <button className="btn" onClick={add}><Plus size={20} /> إضافة</button>
       </div>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
@@ -198,10 +199,10 @@ function Feeds() {
               <td>{f.title}</td>
               <td className="muted" style={{ fontSize: 12 }}>{f.url}</td>
               <td className="muted">{formatRiyadh(f.created_at)}</td>
-              <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={14} /></button></td>
+              <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={20} /></button></td>
             </tr>
           ))}
-          {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا توجد خلاصات</td></tr>}
+          {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا خلاصات بعد. أضِف أول خلاصة RSS.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -267,7 +268,7 @@ function Platforms() {
     try {
       const d = await api.get(cfg.endpoint);
       setAcctList(d.profiles || []);
-      if (!d.profiles?.length) setAcctMsg('لا توجد حسابات مربوطة بعد.');
+      if (!d.profiles?.length) setAcctMsg('لا حسابات مربوطة بعد. اربط حساباً من لوحة المزوّد.');
     } catch (e: any) {
       setAcctMsg(e.message || 'تعذّر جلب الحسابات');
     } finally {
@@ -282,7 +283,7 @@ function Platforms() {
   function addCustom() {
     setErr('');
     const key = customKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!key) return setErr('أدخل معرّفاً لاتينياً للمنصة (مثل: medium)');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للمنصة (مثل: \u2068medium\u2069)');
     if (enabled.includes(key) || KNOWN_PLATFORMS.includes(key)) return setErr('المنصة موجودة مسبقاً');
     setEnabled((s) => [...s, key]);
     if (customLabel.trim()) setLabels((l) => ({ ...l, [key]: customLabel.trim() }));
@@ -330,7 +331,7 @@ function Platforms() {
                   background: on ? 'var(--primary-soft)' : 'var(--card)',
                 }}
               >
-                <PlatformIcon platform={p} size={26} />
+                <PlatformIcon platform={p} size={20} />
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{PLATFORM_META[p].label}</span>
                 <div className="spacer" />
                 <ConnectionBadge kind="enabled" on={on} />
@@ -346,8 +347,8 @@ function Platforms() {
           <div className="row">
             {customEnabled.map((k) => (
               <span key={k} className="badge gray" style={{ gap: 8, padding: '6px 10px' }}>
-                <PlatformIcon platform={k} size={18} /> {platformLabel(k, labels)}
-                <Trash2 size={13} style={{ cursor: 'pointer' }} onClick={() => removeCustom(k)} />
+                <PlatformIcon platform={k} size={16} /> {platformLabel(k, labels)}
+                <button type="button" className="row-link" title="حذف" onClick={() => removeCustom(k)}><Trash2 size={16} /></button>
               </span>
             ))}
           </div>
@@ -357,9 +358,9 @@ function Platforms() {
       <div className="field">
         <label>إضافة منصة مخصّصة</label>
         <div className="row">
-          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني، مثل: medium)" value={customKey} onChange={(e) => setCustomKey(e.target.value)} />
+          <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني، مثل: \u2068medium\u2069)" value={customKey} onChange={(e) => setCustomKey(e.target.value)} />
           <input className="input" style={{ flex: 1 }} placeholder="الاسم بالعربية" value={customLabel} onChange={(e) => setCustomLabel(e.target.value)} />
-          <button className="btn ghost" onClick={addCustom}><Plus size={15} /> إضافة</button>
+          <button className="btn ghost" onClick={addCustom}><Plus size={20} /> إضافة</button>
         </div>
         {err && <p className="err" style={{ marginTop: 6 }}>{err}</p>}
       </div>
@@ -390,7 +391,7 @@ function Platforms() {
           {enabled.map((p) => (
             <div key={p} className="row" style={{ gap: 10, marginBottom: 8, alignItems: 'center' }}>
               <span style={{ minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <PlatformIcon platform={p} size={18} /> {platformLabel(p, labels)}
+                <PlatformIcon platform={p} size={16} /> {platformLabel(p, labels)}
               </span>
               <select
                 className="select"
@@ -502,7 +503,7 @@ function AITones() {
   function add() {
     setErr('');
     const key = newKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!key) return setErr('أدخل معرّفاً لاتينياً للنبرة (مثل: humorous)');
+    if (!key) return setErr('أدخل معرّفاً لاتينياً للنبرة (مثل: \u2068humorous\u2069)');
     if (tones.some((t) => t.key === key)) return setErr('النبرة موجودة مسبقاً');
     setTones((ts) => [...ts, { key, label: newLabel.trim() || key, prompt: '' }]);
     setNewKey(''); setNewLabel('');
@@ -534,7 +535,7 @@ function AITones() {
               <input className="input" value={t.key} disabled />
             </div>
             <div className="spacer" />
-            <button className="btn danger sm" onClick={() => remove(i)} title="حذف النبرة"><Trash2 size={14} /></button>
+            <button className="btn danger sm" onClick={() => remove(i)} title="حذف النبرة"><Trash2 size={20} /></button>
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label>البرومبت (توجيه النبرة للذكاء الاصطناعي)</label>
@@ -548,7 +549,7 @@ function AITones() {
         <div className="row">
           <input className="input" style={{ flex: 1 }} placeholder="المعرّف (لاتيني)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
           <input className="input" style={{ flex: 1 }} placeholder="الاسم بالعربية" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
-          <button className="btn ghost" onClick={add}><Plus size={15} /> إضافة</button>
+          <button className="btn ghost" onClick={add}><Plus size={20} /> إضافة</button>
         </div>
       </div>
 
@@ -594,7 +595,7 @@ function PlatformPrompts() {
       {enabled.map((k) => (
         <div className="field" key={k}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <PlatformIcon platform={k} size={20} /> {platformLabel(k, labels)}
+            <PlatformIcon platform={k} size={16} /> {platformLabel(k, labels)}
           </label>
           <textarea
             className="textarea"
@@ -799,7 +800,7 @@ function Integrations() {
 
   async function resync() {
     setMsg('جارٍ إعادة المزامنة…');
-    try { const r = await api.post('/basecamp/resync'); setMsg(`تمت جدولة مزامنة ${r.queued} عنصراً`); }
+    try { const r = await api.post('/basecamp/resync'); setMsg(`تمت جدولة مزامنة ${isolate(r.queued)} عنصراً`); }
     catch (e: any) { setMsg(e.message); }
   }
   async function runReport() {
@@ -922,7 +923,7 @@ function IntegrationHealth() {
               <ConnectionBadge kind="linked" on={mappedIds.has(a.id)} />
             </div>
           ))}
-          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا توجد حسابات.</p>}
+          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا حسابات مربوطة بعد.</p>}
         </div>
       )}
 
@@ -951,8 +952,8 @@ function IntegrationHealth() {
           <span className="muted">مواعيد النشر</span>
           <div className="spacer" />
           <span>
-            {L.schedules_pending} بانتظار
-            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}>{L.schedules_failed} فاشل</span>}
+            <bdi>{L.schedules_pending}</bdi> بانتظار
+            {L.schedules_failed > 0 && <span className="badge red" style={{ marginInlineStart: 6 }}><bdi>{L.schedules_failed}</bdi> فاشل</span>}
           </span>
         </div>
       </div>

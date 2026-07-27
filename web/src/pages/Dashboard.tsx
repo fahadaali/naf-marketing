@@ -29,7 +29,7 @@ export default function Dashboard() {
       <div className="grid cols-4" style={{ marginBottom: 20 }}>
         {pipeline.map((p) => (
           <div className="card stat" key={p.status}>
-            <div className="num">{p.count}</div>
+            <div className="num"><bdi>{p.count}</bdi></div>
             <div className="label">
               <StatusBadge status={p.status} />
             </div>
@@ -71,7 +71,7 @@ export default function Dashboard() {
               </tr>
             ))}
             {posts.length === 0 && (
-              <tr><td colSpan={4} className="muted" style={{ textAlign: 'center' }}>لا يوجد محتوى بعد</td></tr>
+              <tr><td colSpan={4} className="muted" style={{ textAlign: 'center' }}>لم تُنشئ أي محتوى بعد. ابدأ بأول محتوى.</td></tr>
             )}
           </tbody>
         </table>
@@ -85,7 +85,7 @@ const STATUS_ORDER = ['draft', 'pending_marketing', 'pending_gm', 'scheduled', '
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="card stat">
-      <div className="num">{typeof value === 'number' ? formatNumber(value) : value}</div>
+      <div className="num"><bdi>{typeof value === 'number' ? formatNumber(value) : value}</bdi></div>
       <div className="label">{label}</div>
     </div>
   );

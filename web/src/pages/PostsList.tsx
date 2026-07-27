@@ -1,8 +1,12 @@
+import { isolate, formatDate } from '../lib/format';
+
+// إزاحة الرياض الثابتة (+3 بلا توقيت صيفي) — كما في api.ts
+const RIYADH_OFFSET = 3 * 60 * 60 * 1000;
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, Download,
-  FolderInput, X, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
+  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, FileOutput,
+  FolderInput, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
@@ -126,15 +130,15 @@ export default function ContentManagement() {
   async function bulkDelete() {
     const targets = selectedPosts().filter(canDelete);
     if (!targets.length) return setErr('لا يمكنك حذف العناصر المحددة');
-    if (!confirm(`حذف ${targets.length} عنصراً نهائياً؟`)) return;
+    if (!confirm(`حذف ${isolate(targets.length)} عنصراً نهائياً؟`)) return;
     let ok = 0;
     for (const p of targets) { try { await api.del(`/posts/${p.id}`); ok++; } catch {} }
-    setSel(new Set()); setMsg(`تم حذف ${ok} عنصراً`); load();
+    setSel(new Set()); setMsg(`تم حذف ${isolate(ok)} عنصراً`); load();
   }
   async function bulkAssign(campaignId: string) {
     let ok = 0;
     for (const p of selectedPosts()) { try { await api.patch(`/posts/${p.id}`, { campaign_id: campaignId || null }); ok++; } catch {} }
-    setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${ok} عنصراً`); load();
+    setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${isolate(ok)} عنصراً`); load();
   }
 
   // السحب والإفلات في كانبان: يحدّد الإجراء المسموح حسب الانتقال، ويحترم التسلسل والصلاحيات (الخادم يتحقق).
@@ -212,15 +216,17 @@ export default function ContentManagement() {
 
       {/* شرائح الحالة (فلترة سريعة) */}
       <div className="row" style={{ margin: '16px 0' }}>
-        <div className={`chip-stat ${fStatus === '' ? 'on' : ''}`} onClick={() => setFStatus('')}>
-          الكل <b>{posts.length}</b>
-        </div>
+        <button type="button" className={`chip-stat ${fStatus === '' ? 'on' : ''}`}
+                aria-pressed={fStatus === ''} onClick={() => setFStatus('')}>
+          الكل <b><bdi>{posts.length}</bdi></b>
+        </button>
         {['draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
           .filter((s) => counts[s])
           .map((s) => (
-            <div key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`} onClick={() => setFStatus(fStatus === s ? '' : s)}>
-              <StatusBadge status={s} /> <b>{counts[s]}</b>
-            </div>
+            <button type="button" key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`}
+                    aria-pressed={fStatus === s} onClick={() => setFStatus(fStatus === s ? '' : s)}>
+              <StatusBadge status={s} /> <b><bdi>{counts[s]}</bdi></b>
+            </button>
           ))}
       </div>
 
@@ -252,16 +258,16 @@ export default function ContentManagement() {
 
         <div className="row" style={{ marginTop: 12 }}>
           <div className="seg">
-            <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}><Table2 size={15} /> جدول</button>
-            <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}><LayoutGrid size={15} /> كانبان</button>
-            <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={15} /> جانت</button>
+            <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}><Table2 size={20} /> جدول</button>
+            <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}><LayoutGrid size={20} /> كانبان</button>
+            <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
           </div>
           <div className="spacer" />
-          <span className="muted" style={{ fontSize: 13 }}>{filtered.length} عنصر</span>
-          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={15} /> استيراد</button>}
+          <span className="muted" style={{ fontSize: 13 }}><bdi>{filtered.length}</bdi> عنصر</span>
+          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={20} /> استيراد</button>}
           <Popover
             render={({ toggle }) => (
-              <button className="btn ghost sm" onClick={toggle}><Download size={15} /> تصدير <ChevronDown size={14} /></button>
+              <button className="btn ghost sm" onClick={toggle}><FileOutput size={20} /> تصدير <ChevronDown size={20} /></button>
             )}
           >
             {({ close }) => (
@@ -272,20 +278,20 @@ export default function ContentManagement() {
               </div>
             )}
           </Popover>
-          {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={15} /> محتوى جديد</button>}
+          {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={20} /> محتوى جديد</button>}
         </div>
       </div>
 
       {/* شريط الإجراءات المجمّعة */}
       {sel.size > 0 && (
         <div className="bulkbar">
-          <CheckSquare size={17} />
+          <CheckSquare size={16} />
           <span>محدّد: {sel.size}</span>
           <div className="spacer" />
-          {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={14} /> نقل إلى حملة</button>}
-          <button className="btn ghost sm" onClick={() => doExport('csv')}><Download size={14} /> تصدير المحدد</button>
-          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={14} /> حذف</button>
-          <button className="btn ghost sm" onClick={() => setSel(new Set())}><X size={14} /> إلغاء</button>
+          {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={20} /> نقل إلى حملة</button>}
+          <button className="btn ghost sm" onClick={() => doExport('csv')}><FileOutput size={20} /> تصدير المحدد</button>
+          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={20} /> حذف</button>
+          <button className="btn ghost sm" onClick={() => setSel(new Set())}>إلغاء</button>
         </div>
       )}
 
@@ -299,7 +305,7 @@ export default function ContentManagement() {
       {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
 
-      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${n} عنصراً`); load(); }} />}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
       {showAssign && (
         <Modal title="نقل العناصر المحددة إلى حملة" onClose={() => setShowAssign(false)}>
           <div className="field">
@@ -323,7 +329,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
       <span className="row" style={{ gap: 4, display: 'inline-flex' }}>
         {label}
         <ArrowUpDown
-          size={12}
+          size={16}
           style={{ opacity: sortKey === k ? 1 : 0.35, transform: sortKey === k && sortDir === 'asc' ? 'rotate(180deg)' : 'none' }}
         />
       </span>
@@ -349,19 +355,21 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
           {rows.map((p: any) => (
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
-              <td style={{ cursor: 'pointer', fontWeight: 500 }} onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</td>
+              <td style={{ fontWeight: 500 }}>
+                <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
+              </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
-              <td className="muted">{SOURCE[p.source] || p.source}</td>
+              <td className="muted"><bdi>{SOURCE[p.source] || p.source}</bdi></td>
               <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
               <td className="muted">{p.campaign_name || '—'}</td>
               <td className="muted">{p.author_name}</td>
               <td className="muted">{formatRiyadh(p.updated_at)}</td>
               <td onClick={(e) => e.stopPropagation()}>
-                {canDelete(p) && <button className="btn danger sm" title="حذف" onClick={() => onDelete(p.id)}><Trash2 size={14} /></button>}
+                {canDelete(p) && <button className="btn danger sm" title="حذف" onClick={() => onDelete(p.id)}><Trash2 size={20} /></button>}
               </td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا يوجد محتوى مطابق</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -396,7 +404,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={14} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
           <div
@@ -448,7 +456,7 @@ function GanttView({ rows, navigate }: any) {
     })
     .sort((a: any, b: any) => a._s - b._s);
 
-  if (items.length === 0) return <div className="card muted" style={{ textAlign: 'center' }}>لا يوجد محتوى لعرضه على المخطط الزمني</div>;
+  if (items.length === 0) return <div className="card muted" style={{ textAlign: 'center' }}>لا محتوى مجدول لعرضه على المخطّط الزمني. جدوِل أول محتوى.</div>;
 
   const min = Math.min(...items.map((i: any) => i._s));
   const max = Math.max(...items.map((i: any) => i._e), Date.now());
@@ -461,7 +469,7 @@ function GanttView({ rows, navigate }: any) {
   const step = Math.max(1, Math.ceil(days / 8));
   for (let d = 0; d <= days; d += step) {
     const t = min + d * 24 * 3600 * 1000;
-    ticks.push({ left: pct(t), label: new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'short', day: 'numeric', timeZone: 'Asia/Riyadh' }).format(new Date(t)) });
+    ticks.push({ left: pct(t), label: formatDate(new Date(t + RIYADH_OFFSET)) });
   }
   const todayLeft = pct(Date.now());
 
@@ -480,19 +488,20 @@ function GanttView({ rows, navigate }: any) {
         return (
           <div className="gantt-row" key={p.id}>
             <div className="gantt-label" title={p.title}>
-              <StatusBadge status={st} size={11} iconOnly />
+              <StatusBadge status={st} size={16} iconOnly />
               {p.title}
             </div>
             <div className="gantt-track">
               {todayLeft >= 0 && todayLeft <= 100 && <div className="gantt-today" style={{ insetInlineStart: `${todayLeft}%` }} />}
-              <div
+              <button
+                type="button"
                 className="gantt-bar"
                 style={{ insetInlineStart: `${left}%`, width: `${width}%`, background: statusColor(st) }}
                 title={`${p.title} — ${STATUS_LABELS[st]}`}
                 onClick={() => navigate(`/editor/${p.id}`)}
               >
                 {STATUS_LABELS[st]}
-              </div>
+              </button>
             </div>
           </div>
         );
@@ -570,20 +579,20 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
         تُنشأ العناصر كمسودات.
       </p>
       <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-      <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={15} /> اختيار ملف</button>
+      <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={20} /> اختيار ملف</button>
 
       {items.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <p className="ok">جاهز للاستيراد: {items.length} عنصراً</p>
+          <p className="ok">جاهز للاستيراد: <bdi>{items.length}</bdi> عنصراً</p>
           <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
             {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
-            {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و{items.length - 20} غيرها</div>}
+            {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و<bdi>{items.length - 20}</bdi> غيرها</div>}
           </div>
         </div>
       )}
       {err && <p className="err">{err}</p>}
       <button className="btn" style={{ marginTop: 12 }} disabled={!items.length || busy} onClick={submit}>
-        {busy ? 'جارٍ الاستيراد…' : `استيراد ${items.length || ''} عنصراً`}
+        {busy ? 'جارٍ الاستيراد…' : `استيراد ${isolate(items.length || '')} عنصراً`}
       </button>
     </Modal>
   );

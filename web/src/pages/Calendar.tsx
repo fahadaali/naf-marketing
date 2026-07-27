@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatRiyadh } from '../api';
 import { platformLabel } from '../platforms';
+import { formatMonth } from '../lib/format';
 
 // تقويم محتوى موحّد بتوقيت الرياض (AST) لعرض مواعيد النشر المجدولة.
 export default function Calendar() {
@@ -21,9 +22,9 @@ export default function Calendar() {
       <div className="row" style={{ marginBottom: 16 }}>
         <h1 className="page-title">التقويم</h1>
         <div className="spacer" />
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}><ChevronRight size={14} /> السابق</button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, -1))}><ChevronRight size={20} /> السابق</button>
         <strong style={{ minWidth: 140, textAlign: 'center' }}>{monthLabel}</strong>
-        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي <ChevronLeft size={14} /></button>
+        <button className="btn ghost sm" onClick={() => setCursor(addMonths(cursor, 1))}>التالي <ChevronLeft size={20} /></button>
       </div>
 
       <div className="card">
@@ -37,9 +38,9 @@ export default function Calendar() {
             <div key={i} className={`cal-cell ${cell.other ? 'other' : ''}`}>
               <div className="cal-day">{cell.day}</div>
               {cell.events.map((e: any) => (
-                <div key={e.id} className="cal-event" title={`${e.title} — ${formatRiyadh(e.scheduled_at)}`} onClick={() => navigate(`/editor/${e.post_id}`)}>
+                <button type="button" key={e.id} className="cal-event" title={`${e.title} — ${formatRiyadh(e.scheduled_at)}`} onClick={() => navigate(`/editor/${e.post_id}`)}>
                   {platformLabel(e.platform)}: {e.title}
-                </div>
+                </button>
               ))}
             </div>
           ))}
@@ -82,6 +83,6 @@ function buildMonth(cursor: Date, schedules: any[]) {
   for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, other: false, events: byDay[d] || [] });
   while (cells.length % 7 !== 0) cells.push({ day: '', other: true, events: [] });
 
-  const monthLabel = new Intl.DateTimeFormat('ar-u-nu-latn', { month: 'long', year: 'numeric' }).format(first);
+  const monthLabel = formatMonth(first);
   return { cells, monthLabel };
 }

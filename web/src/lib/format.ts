@@ -34,6 +34,15 @@ function pad(value: number): string {
   return String(value).padStart(2, "0")
 }
 
+/**
+ * يعزل قيمة اتجاهياً داخل نص عربي — للسلاسل الخام التي لا يصلح فيها <bdi>
+ * مثل رسائل confirm ونصوص الحالة. في JSX استعمل <bdi> لا هذه.
+ * المحرفان U+2068 (عزل أول) و U+2069 (إنهاء العزل).
+ */
+export function isolate(value: string | number): string {
+  return `⁨${value}⁩`
+}
+
 /** المبلغ بلا رمز العملة: 12400 -> "12,400.00" */
 export function formatAmount(value: number): string {
   return AMOUNT_FORMAT.format(value)
@@ -60,6 +69,21 @@ export function formatHijriDate(value: Date | string | number): string {
 /** المزدوج: الميلادي أولاً ثم الهجري بين قوسين */
 export function formatDualDate(value: Date | string | number): string {
   return `${formatDate(value)} (${formatHijriDate(value)})`
+}
+
+/**
+ * الشهر والسنة لعناوين التقويم ومنتقي التاريخ: "2026/07".
+ * مشتقّ من الصيغة الميلادية المسجّلة بحذف اليوم — لا صيغة جديدة.
+ * أسماء الأشهر العربية ليست صيغة مسجّلة، ولا تُستعمل لعرض قيمة تاريخ.
+ */
+export function formatMonth(value: Date | string | number): string {
+  const date = toDate(value)
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}`
+}
+
+/** الميلادي مع الوقت: "2026/07/26 14:30" */
+export function formatDateTime(value: Date | string | number): string {
+  return `${formatDate(value)} ${formatTime(value)}`
 }
 
 /** نظام ٢٤ ساعة: "14:30" */
