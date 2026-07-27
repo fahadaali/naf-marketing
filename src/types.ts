@@ -2,9 +2,13 @@ export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   ASSETS: Fetcher;
+  // الدخول الموحّد (naf-auth): جلسات وكاش مفاتيح وحالة عابرة
+  AUTH_KV?: KVNamespace;
   // vars
   APP_TIMEZONE: string;
   APP_NAME: string;
+  PLATFORM_ID?: string;
+  AUTH_ISSUER?: string;
   // secrets
   CLAUDE_API_KEY?: string;
   PROVIDER_API_KEY?: string; // مفتاح عام (تراجعي) — يُستخدم إن لم يوجد سرّ خاص بالمزوّد
@@ -14,6 +18,7 @@ export type Env = {
   SOCIALAPI_API_KEY?: string;
   AYRSHARE_API_KEY?: string;
   AUTH_SECRET?: string;
+  AUTH_CLIENT_SECRET?: string;
   // basecamp (مركز المعرفة)
   BASECAMP_CLIENT_ID?: string;
   BASECAMP_CLIENT_SECRET?: string;

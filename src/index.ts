@@ -24,8 +24,15 @@ import { subscriberRoutes } from './routes/subscribers';
 import { publicRoutes } from './routes/publicPages';
 import { emailTrackRoutes } from './routes/emailTracking';
 import { handleScheduled } from './cron';
+import { ssoGuard, ssoRoutes } from './sso';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// الدخول الموحّد — يسبق كل شيء.
+// الحارس يمنع افتراضياً، والمستثنى مكتوب صراحةً في src/sso.ts وحده،
+// فأي مسار يُضاف بعد اليوم محمي دون أن يتذكّر أحد حمايته.
+app.route('/', ssoRoutes);
+app.use('*', ssoGuard);
 
 const api = new Hono<{ Bindings: Env; Variables: Variables }>();
 api.route('/auth', authRoutes);

@@ -3,6 +3,7 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { hashPassword, newId } from '../util';
 import { logAudit } from '../services/audit';
+import { notifyAccessChange } from '../sso';
 
 export const userRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -58,6 +59,10 @@ userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
       .bind(body.is_active ? 1 : 0, id)
       .run();
     changes.push(body.is_active ? 'تفعيل' : 'تعطيل');
+    // تبليغ المركز ليظهر السبب للمستخدم في شبكته.
+    // خارج مسار الطلب: تعطيل العضو تمّ في القاعدة فعلاً، وتعذّر الوصول
+    // إلى المركز لا يجوز أن يردّ العملية على المسؤول بخطأ.
+    c.executionCtx.waitUntil(notifyAccessChange(c.env, id, body.is_active));
   }
   if (body.password && body.password.length >= 8) {
     await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
