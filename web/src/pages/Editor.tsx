@@ -17,7 +17,6 @@ import {
   Paperclip,
   ArrowLeft,
   ChevronLeft,
-  Wand2,
   Image as ImageIcon,
   Video,
   Loader,
@@ -310,7 +309,7 @@ export default function Editor() {
                 )}
                 {can('ai.generate') && (
                   <button className="btn ghost sm" type="button" onClick={() => setShowAIMedia(true)}>
-                    <Wand2 size={20} /> توليد صورة/فيديو بالذكاء الاصطناعي
+                    <Sparkles size={20} /> توليد صورة/فيديو بالذكاء الاصطناعي
                   </button>
                 )}
                 <button className="btn ghost sm" type="button" onClick={() => setShowTemplates(true)}>
@@ -828,7 +827,7 @@ function AIMediaModal({
         </p>
       )}
       <button className="btn gold" onClick={run} disabled={busy || !prompt.trim()}>
-        <Wand2 size={20} /> {busy ? 'جارٍ التوليد…' : `توليد ${kind === 'image' ? 'الصورة' : 'الفيديو'} وإدراجه`}
+        <Sparkles size={20} /> {busy ? 'جارٍ التوليد…' : `توليد ${kind === 'image' ? 'الصورة' : 'الفيديو'} وإدراجه`}
       </button>
     </Modal>
   );
