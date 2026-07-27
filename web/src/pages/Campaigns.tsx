@@ -44,8 +44,8 @@ export default function Campaigns() {
               <div className="spacer" />
               <span className={`badge ${c.status === 'active' ? 'green' : 'gray'}`}>{CAMP_STATUS[c.status] || c.status}</span>
             </div>
-            <p className="muted" style={{ fontSize: 13, minHeight: 40 }}>{c.objective || 'بدون هدف محدد'}</p>
-            <div className="row" style={{ fontSize: 12 }}>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', minHeight: 40 }}>{c.objective || 'بدون هدف محدد'}</p>
+            <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
               <span className="muted"><bdi>{c.posts_count}</bdi> منشور</span>
               <div className="spacer" />
               <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><bdi>{c.start_date || '؟'}</bdi><ArrowLeft size={16} /><bdi>{c.end_date || '؟'}</bdi></span>
@@ -58,7 +58,7 @@ export default function Campaigns() {
       {selected && (
         <Modal title={`حملة: ${selected.name}`} onClose={() => setSelected(null)}>
           <p className="muted">{selected.objective}</p>
-          <div className="row" style={{ fontSize: 13, marginBottom: 8 }}>
+          <div className="row" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
             <span className="muted">المنصات:</span>
             {(JSON.parse(selected.target_platforms || '[]') as string[]).map((p) => (
               <span key={p} className="row" style={{ gap: 4 }}>

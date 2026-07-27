@@ -48,11 +48,11 @@ ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
                 display:flex; align-items:center; gap:12px; }
   header.site picture, header.site img { height:36px; width:auto; }
   header.site a { color: var(--primary); text-decoration:none; font-weight:700; }
-  h1 { font-size: 32px; line-height:1.4; margin: 0 0 10px; }
-  .meta { color: var(--muted-foreground); font-size:14px; margin-bottom:24px; }
+  h1 { font-size:var(--text-3xl); line-height:1.4; margin: 0 0 10px; }
+  .meta { color: var(--muted-foreground); font-size:var(--text-sm); margin-bottom:24px; }
   img { max-width:100%; height:auto; border-radius: calc(var(--radius) + 4px); }
   figure { margin: 20px 0; }
-  figcaption { font-size:13px; color: var(--muted-foreground); text-align:center; margin-top:8px; }
+  figcaption { font-size:var(--text-xs); color: var(--muted-foreground); text-align:center; margin-top:8px; }
   blockquote { margin:20px 0; padding:12px 16px;
                border-inline-start:3px solid var(--primary); background: var(--primary-soft); }
   hr { border:none; border-top:1px solid var(--border); margin:28px 0; }
@@ -62,16 +62,16 @@ ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
   .sub { margin-top:44px; padding:20px; border:1px solid var(--border);
          border-radius: calc(var(--radius) + 4px); background: var(--card); }
   .sub input { padding:12px; border:1px solid var(--input); border-radius: var(--radius);
-               font-family:inherit; font-size:15px; width:100%; margin-bottom:8px;
+               font-family:inherit; font-size:var(--text-sm); width:100%; margin-bottom:8px;
                background: var(--background); color: var(--foreground); }
   .sub input:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
   .sub button { background: var(--primary); color: var(--primary-foreground); border:none;
                 padding:12px 20px; border-radius: var(--radius); font-weight:600; cursor:pointer;
-                font-family:inherit; font-size:15px; }
+                font-family:inherit; font-size:var(--text-sm); }
   .sub button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
   .card { border:1px solid var(--border); border-radius: calc(var(--radius) + 4px);
           padding:16px; margin-bottom:12px; background: var(--card); }
-  .card a { color: var(--card-foreground); text-decoration:none; font-weight:700; font-size:19px; }
+  .card a { color: var(--card-foreground); text-decoration:none; font-weight:700; font-size:var(--text-lg); }
   .note { padding:16px; border-radius: calc(var(--radius) + 4px); background: var(--primary-soft); }
 </style>
 </head>
@@ -95,7 +95,7 @@ function publicDate(iso: string): string {
 function subscribeForm(actionBase: string): string {
   return `<div class="sub">
   <h3 style="margin:0 0 6px">اشترك في النشرة</h3>
-  <p style="margin:0 0 12px;color:var(--muted-foreground);font-size:14px">تصلك مقالاتنا القانونية أولاً بأول. يمكنك إلغاء الاشتراك في أي وقت.</p>
+  <p style="margin:0 0 12px;color:var(--muted-foreground);font-size:var(--text-sm)">تصلك مقالاتنا القانونية أولاً بأول. يمكنك إلغاء الاشتراك في أي وقت.</p>
   <form method="POST" action="${escapeHtml(actionBase)}/subscribe">
     <input type="email" name="email" required placeholder="بريدك الإلكتروني" aria-label="البريد الإلكتروني">
     <input type="text" name="name" placeholder="الاسم (اختياري)" aria-label="الاسم">

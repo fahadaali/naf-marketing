@@ -78,7 +78,7 @@ export default function Subscribers() {
       {importing && (
         <div className="card" style={{ marginBottom: 16 }}>
           <h4 style={{ marginTop: 0 }}>استيراد مشتركين</h4>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
             سطر لكل مشترك بصيغة: <code>email@example.com, الاسم</code> — المكرّر يُتخطّى تلقائياً.
           </p>
           <textarea className="input" rows={6} value={importText} onChange={(e) => setImportText(e.target.value)}

@@ -133,7 +133,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div className="avatar">{initials}</div>
             <div style={{ lineHeight: 1.35 }}>
               <div style={{ fontWeight: 600 }}>{user?.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
+              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                 {user ? ROLE_LABELS[user.role_name] : ''}
               </div>
             </div>

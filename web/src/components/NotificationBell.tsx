@@ -44,7 +44,7 @@ export default function NotificationBell() {
       {({ close }) => (
         <div className="menu notif-menu">
           <div className="row" style={{ padding: '4px 6px 8px' }}>
-            <strong style={{ fontSize: 14 }}>الإشعارات</strong>
+            <strong style={{ fontSize: 'var(--text-sm)' }}>الإشعارات</strong>
             <div className="spacer" />
             {unread > 0 && (
               <button className="btn ghost sm" onClick={markAll}><CheckCheck size={20} /> تعليم الكل</button>
@@ -59,9 +59,9 @@ export default function NotificationBell() {
                 style={{ background: n.read_at ? 'transparent' : 'var(--primary-soft)' }}
                 onClick={() => open(n, close)}
               >
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{n.title}</div>
-                {n.body && <div className="muted" style={{ fontSize: 12 }}>{n.body}</div>}
-                <div className="muted" style={{ fontSize: 11 }}>{formatRiyadh(n.created_at)}</div>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-xs)' }}>{n.title}</div>
+                {n.body && <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{n.body}</div>}
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{formatRiyadh(n.created_at)}</div>
               </button>
             ))}
             {items.length === 0 && <p className="muted" style={{ padding: 16, textAlign: 'center', margin: 0 }}>لا إشعارات جديدة.</p>}
