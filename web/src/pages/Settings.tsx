@@ -133,7 +133,7 @@ function Permissions() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>مصفوفة الصلاحيات</h3>
-      <p className="muted" style={{ fontSize: 13 }}>التعديل يسري فوراً على كل العمليات (يُتحقق منه على الخادم).</p>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>التعديل يسري فوراً على كل العمليات (يُتحقق منه على الخادم).</p>
       <table className="table">
         <thead><tr><th>الصلاحية</th>{roles.map((r) => <th key={r} style={{ textAlign: 'center' }}>{ROLE_LABELS[r]}</th>)}</tr></thead>
         <tbody>
@@ -197,7 +197,7 @@ function Feeds() {
           {feeds.map((f) => (
             <tr key={f.id}>
               <td>{f.title}</td>
-              <td className="muted" style={{ fontSize: 12 }}>{f.url}</td>
+              <td className="muted" style={{ fontSize: 'var(--text-xs)' }}>{f.url}</td>
               <td className="muted">{formatRiyadh(f.created_at)}</td>
               <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={20} /></button></td>
             </tr>
@@ -332,7 +332,7 @@ function Platforms() {
                 }}
               >
                 <PlatformIcon platform={p} size={20} />
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{PLATFORM_META[p].label}</span>
+                <span style={{ fontWeight: 600, fontSize: 'var(--text-xs)' }}>{PLATFORM_META[p].label}</span>
                 <div className="spacer" />
                 <ConnectionBadge kind="enabled" on={on} />
               </button>
@@ -373,21 +373,21 @@ function Platforms() {
           <option value="socialapi">SocialAPI.ai</option>
           <option value="ayrshare">Ayrshare</option>
         </select>
-        <p className="muted" style={{ fontSize: 12 }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
+        <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
       </div>
 
       {cfg && (
         <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
           <div className="row" style={{ marginBottom: 8 }}>
-            <strong style={{ fontSize: 14 }}>ربط حسابات {cfg.label}</strong>
+            <strong style={{ fontSize: 'var(--text-sm)' }}>ربط حسابات {cfg.label}</strong>
             <div className="spacer" />
             <button className="btn ghost sm" onClick={fetchAccounts} disabled={acctLoading}>
               {acctLoading ? 'جارٍ الجلب…' : `جلب حسابات ${cfg.label}`}
             </button>
           </div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>{cfg.hint}</p>
-          {acctMsg && <p className="muted" style={{ fontSize: 12 }}>{acctMsg}</p>}
-          {enabled.length === 0 && <p className="muted" style={{ fontSize: 12 }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>{cfg.hint}</p>
+          {acctMsg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{acctMsg}</p>}
+          {enabled.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
           {enabled.map((p) => (
             <div key={p} className="row" style={{ gap: 10, marginBottom: 8, alignItems: 'center' }}>
               <span style={{ minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -461,17 +461,17 @@ function SocialApiWebhook() {
   return (
     <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
-        <strong style={{ fontSize: 14 }}>الاستقبال الفوري (Webhook)</strong>
+        <strong style={{ fontSize: 'var(--text-sm)' }}>الاستقبال الفوري (Webhook)</strong>
         <div className="spacer" />
         <button className="btn ghost sm" onClick={register} disabled={busy}>تسجيل نقطة الاستقبال</button>
       </div>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
         يسجّل نقطة استقبال لدى SocialAPI لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
       </p>
-      {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
+      {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
       {hooks.map((h) => (
         <div key={h.id} className="row" style={{ gap: 10, marginBottom: 6, alignItems: 'center' }}>
-          <span className="muted" style={{ fontSize: 12, flex: 1, wordBreak: 'break-all' }}>{h.url || h.id}</span>
+          <span className="muted" style={{ fontSize: 'var(--text-xs)', flex: 1, wordBreak: 'break-all' }}>{h.url || h.id}</span>
           <button className="btn ghost sm" onClick={() => remove(h.id)} disabled={busy}>حذف</button>
         </div>
       ))}
@@ -519,7 +519,7 @@ function AITones() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>نبرات الذكاء الاصطناعي</h3>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         لكل نبرة برومبت يُرسَل لوكيل الذكاء الاصطناعي عند التوليد. عدّل النص أو أضف/احذف نبرات حسب حاجتك.
       </p>
 
@@ -588,7 +588,7 @@ function PlatformPrompts() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>توجيهات المنصات للتوليد</h3>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         توجيه خاص لكل منصة يُرسَل لوكيل الذكاء الاصطناعي مع النبرة عند التوليد (مثل حد الأحرف للإكس أو الوسوم لإنستغرام).
       </p>
       {enabled.length === 0 && <p className="muted">فعّل منصات من تبويب «المنصات والمزوّد» أولاً.</p>}
@@ -633,7 +633,7 @@ function AIMediaProviders() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>توليد الصور والفيديو بالذكاء الاصطناعي</h3>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         اختر مزوّد التوليد؛ مفاتيحه تُضبط عبر Cloudflare Secrets (<code>IMAGE_PROVIDER_API_KEY</code>، <code>VIDEO_PROVIDER_API_KEY</code>) ولا تُدار من هنا.
       </p>
       <div className="grid cols-2">
@@ -652,7 +652,7 @@ function AIMediaProviders() {
           </select>
         </div>
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         مزوّد الفيديو التجريبي (Mock) يُثبت أن الربط جاهز لكنه لا يُنتج فيديو حقيقياً — اختر Runway (أو مزوّداً آخر لاحقاً) وأضف مفتاحه لتفعيل التوليد الفعلي.
       </p>
       {msg && <p className="ok">{msg}</p>}
@@ -699,7 +699,7 @@ function NotificationSettings() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>الإشعارات</h3>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         الإشعارات داخل التطبيق (جرس الإشعارات) مفعّلة دائماً — تصل تلقائياً عند وصول محتوى لدورك في الاعتماد،
         عند رفض محتواك، أو عند فشل نشر مجدول. الإشعار البريدي اختياري ويحتاج مزوّداً.
       </p>
@@ -716,17 +716,17 @@ function NotificationSettings() {
           <input className="input" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="notifications@naflaw.sa" />
         </div>
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
       </p>
 
       <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginTop: 12, marginBottom: 12 }}>
-        <strong style={{ fontSize: 14 }}>النشرة والمقالات</strong>
+        <strong style={{ fontSize: 'var(--text-sm)' }}>النشرة والمقالات</strong>
         <div className="grid cols-2" style={{ marginTop: 8 }}>
           <div className="field">
             <label>نطاق الموقع العام</label>
             <input className="input" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} placeholder="https://naf.sa" />
-            <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>
               اتركه فارغاً لاستخدام نطاق التطبيق. اضبطه بعد ربط النطاق ليظهر في روابط المقالات والرسائل.
             </p>
           </div>
@@ -735,7 +735,7 @@ function NotificationSettings() {
             <input className="input" value={articlePath} onChange={(e) => setArticlePath(e.target.value)} placeholder="/articles" />
           </div>
         </div>
-        <label className="muted" style={{ fontSize: 13, display: 'inline-flex', gap: 6, cursor: 'pointer', marginTop: 6 }}>
+        <label className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, cursor: 'pointer', marginTop: 6 }}>
           <input type="checkbox" checked={welcomeOn} onChange={(e) => setWelcomeOn(e.target.checked)} />
           إرسال رسالة ترحيب آلية عند الاشتراك
         </label>
@@ -762,7 +762,7 @@ function NotificationSettings() {
           onChange={(e) => setStaleDays(e.target.value)}
         />
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         إن بقي محتوى في مرحلة المراجعة أو الاعتماد النهائي دون حركة لهذه المدة، يُرسل تنبيه تلقائي للمسؤولين عن تلك المرحلة.
       </p>
       {msg && <p className="ok">{msg}</p>}
@@ -812,7 +812,7 @@ function Integrations() {
   return (
     <div className="card">
       <h3 style={{ marginTop: 0 }}>تكامل بيسكامب — «مركز المعرفة»</h3>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         اربط مشروع «مركز المعرفة» في بيسكامب لتوليد المحتوى من ملفاته. المفاتيح السرية (client id/secret/refresh token)
         تُضبط عبر Cloudflare Secrets؛ هنا تضبط معرّف الحساب والمشروع فقط.
       </p>
@@ -823,7 +823,7 @@ function Integrations() {
           <ConnectionBadge kind="configured" on={!!status?.configured} />
         </div>
         {!status?.configured && (
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 0 }}>
             اضبط الأسرار: BASECAMP_CLIENT_ID، BASECAMP_CLIENT_SECRET، BASECAMP_REFRESH_TOKEN عبر Wrangler/لوحة Cloudflare.
             يمكنك الحصول على refresh token عبر فتح <code>/api/basecamp/oauth/start</code> بعد ضبط client id/secret.
           </p>
@@ -844,7 +844,7 @@ function Integrations() {
       <div className="field">
         <label>معرّف مشروع «إدارة التسويق» (للمزامنة والتقارير)</label>
         <input className="input" value={mgmtId} onChange={(e) => setMgmtId(e.target.value)} placeholder="مثال: 34567899" />
-        <p className="muted" style={{ fontSize: 12 }}>
+        <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
           يجب تفعيل أداة <b>«جدول البطاقات» (Card Table)</b> في المشروع. يُزامَن كل محتوى كـ<b>بطاقة</b> تنتقل عبر
           الأعمدة حسب مرحلة الاعتماد، وتاريخ استحقاقها = تاريخ النشر، وتُسند لأعضاء المشروع.
           أسماء الأعمدة المتوقّعة (تُنشأ تلقائياً إن غابت): المسودات، بانتظار اعتماد قسم التسويق، بانتظار اعتماد المدير العام،
@@ -903,19 +903,19 @@ function IntegrationHealth() {
   return (
     <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
       <div className="row" style={{ marginBottom: 8 }}>
-        <strong style={{ fontSize: 14 }}>صحّة التكامل</strong>
+        <strong style={{ fontSize: 'var(--text-sm)' }}>صحّة التكامل</strong>
         <div className="spacer" />
         <button className="btn ghost sm" onClick={load} disabled={busy}>{busy ? 'جارٍ…' : 'تحديث'}</button>
       </div>
 
       {/* الحسابات وحالة ربطها بمنصات المنصة */}
       {h.accounts_error ? (
-        <p className="err" style={{ fontSize: 12 }}>تعذّر جلب الحسابات: {h.accounts_error}</p>
+        <p className="err" style={{ fontSize: 'var(--text-xs)' }}>تعذّر جلب الحسابات: {h.accounts_error}</p>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>الحسابات المربوطة لدى المزوّد</div>
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 4 }}>الحسابات المربوطة لدى المزوّد</div>
           {(h.accounts || []).map((a: any) => (
-            <div key={a.id} className="row" style={{ fontSize: 12, gap: 8, marginBottom: 4 }}>
+            <div key={a.id} className="row" style={{ fontSize: 'var(--text-xs)', gap: 8, marginBottom: 4 }}>
               <PlatformIcon platform={a.platform} size={16} />
               <span>{platformLabel(a.platform)}</span>
               <span className="muted">{a.name}</span>
@@ -923,29 +923,29 @@ function IntegrationHealth() {
               <ConnectionBadge kind="linked" on={mappedIds.has(a.id)} />
             </div>
           ))}
-          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 12 }}>لا حسابات مربوطة بعد.</p>}
+          {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>لا حسابات مربوطة بعد.</p>}
         </div>
       )}
 
       {/* الحصة */}
       {h.usage && (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
           الحصة: منشورات {quota(h.usage.posts_used, h.usage.posts_limit)} ·
           {' '}تفاعلات {quota(h.usage.interactions_used, h.usage.interactions_limit)} ·
           {' '}علامات {quota(h.usage.brands_used, h.usage.brands_limit)}
         </div>
       )}
-      {h.usage_error && <p className="muted" style={{ fontSize: 12 }}>تعذّر جلب الحصة.</p>}
+      {h.usage_error && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>تعذّر جلب الحصة.</p>}
 
       {/* الويب هوك */}
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
         الاستقبال الفوري:{' '}
         {(h.webhooks || []).length > 0
           ? <ConnectionBadge kind="enabled" on /> : <ConnectionBadge kind="enabled" on={false} />}
       </div>
 
       {/* حالة المزامنة المحلية */}
-      <div style={{ fontSize: 12, display: 'grid', gap: 4 }}>
+      <div style={{ fontSize: 'var(--text-xs)', display: 'grid', gap: 4 }}>
         <div className="row"><span className="muted">آخر سحب تحليلات</span><div className="spacer" /><span>{fmt(L.analytics_last)} ({L.analytics_count})</span></div>
         <div className="row"><span className="muted">آخر عنصر في الصندوق</span><div className="spacer" /><span>{fmt(L.inbox_last)} ({L.inbox_count})</span></div>
         <div className="row">

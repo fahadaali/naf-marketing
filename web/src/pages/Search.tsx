@@ -46,7 +46,7 @@ export default function Search() {
             {posts.map((p) => (
               <button type="button" key={p.id} className="row-link" style={{ padding: '9px 0', borderBottom: '1px solid var(--border)' }} onClick={() => navigate(`/editor/${p.id}`)}>
                 <div style={{ fontWeight: 600 }}>{p.title}</div>
-                <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
               </button>
             ))}
             {posts.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}
@@ -56,7 +56,7 @@ export default function Search() {
             {news.map((n) => (
               <div key={n.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
                 <a href={n.link} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{n.title}</a>
-                <div className="muted" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: n.snippet }} />
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }} dangerouslySetInnerHTML={{ __html: n.snippet }} />
               </div>
             ))}
             {news.length === 0 && <p className="muted">لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</p>}

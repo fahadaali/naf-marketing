@@ -142,13 +142,13 @@ export default function Comments() {
                     {c.author_name}
                     {c.rating != null && <RatingScale value={c.rating} size={16} />}
                   </div>
-                  <div className="muted" style={{ fontSize: 12 }}>
+                  <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>
                     {c.is_hidden ? ' · (مخفي)' : ''}{c.post_title ? ` · ${c.post_title}` : ''}
                   </div>
                 </div>
                 <div className="spacer" />
-                <span className="muted" style={{ fontSize: 12 }}>{formatRiyadh(c.created_at)}</span>
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{formatRiyadh(c.created_at)}</span>
               </div>
               <p style={{ margin: '0 0 12px' }}>{c.body}</p>
 
@@ -165,7 +165,7 @@ export default function Comments() {
               {c.reply_body && editing[c.id] === undefined ? (
                 <div className="card" style={{ background: 'var(--primary-soft)', padding: 10 }}>
                   <div className="row" style={{ marginBottom: 4 }}>
-                    <div className="muted" style={{ fontSize: 12 }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
                     <div className="spacer" />
                     {/* التعديل/الحذف مدعومان للتعليقات والتقييمات فقط — الرسائل والإشارات لا تُعدَّل بعد الإرسال */}
                     {canEditReply && (
@@ -214,7 +214,7 @@ export default function Comments() {
                     </button>
                   </div>
                   {isComment && canPrivate && (
-                    <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, marginTop: 6, cursor: 'pointer' }}>
+                    <label className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, marginTop: 6, cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!privateMode[c.id]} onChange={(e) => setPrivateMode((d) => ({ ...d, [c.id]: e.target.checked }))} />
                       <Lock size={16} /> رد خاص (رسالة مباشرة لصاحب التعليق)
                     </label>

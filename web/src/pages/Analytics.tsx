@@ -151,7 +151,7 @@ export default function Analytics() {
           <h4 style={{ marginTop: 0 }}>الأداء حسب المنصة</h4>
           {(data?.byPlatform || []).map((p: any) => (
             <div key={p.platform} style={{ marginBottom: 10 }}>
-              <div className="row" style={{ fontSize: 13 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <PlatformIcon platform={p.platform} size={16} />
                 <span>{platformLabel(p.platform)}</span>
                 <div className="spacer" />
@@ -217,7 +217,7 @@ export default function Analytics() {
           <h4 style={{ marginTop: 0 }}>أداء الحملات</h4>
           {(data?.campaigns || []).map((c: any) => (
             <div key={c.id} style={{ marginBottom: 10 }}>
-              <div className="row" style={{ fontSize: 13 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <span>{c.name}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{formatNumber(c.impressions || 0)}</bdi> انطباع · <bdi>{formatNumber(c.engagement || 0)}</bdi> تفاعل</span>
@@ -256,7 +256,7 @@ export default function Analytics() {
           <h4 style={{ marginTop: 0 }}>إنتاجية الكتّاب</h4>
           {(perf?.writers || []).map((w: any) => (
             <div key={w.id} style={{ marginBottom: 10 }}>
-              <div className="row" style={{ fontSize: 13 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <span>{w.name}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{w.created_count}</bdi> محتوى · <bdi>{w.published_count}</bdi> منشور · <bdi>{w.rejected_count}</bdi> مرفوض</span>
@@ -340,15 +340,15 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
       <button type="button" className="row row-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <h4 style={{ margin: 0 }}><FileOutput size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو (يوتيوب/تيك توك)</h4>
         <div className="spacer" />
-        <span className="muted" style={{ fontSize: 13 }}>{open ? 'إخفاء' : 'عرض'}</span>
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{open ? 'إخفاء' : 'عرض'}</span>
       </button>
       {open && (
         <div style={{ marginTop: 12 }}>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
             تحليلات فيديو أعمق (مشاهدات/تفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك (المجانية: تصديران/شهر، حتى 30 فيديو، تهدئة 7 أيام).
           </p>
           {accounts.length === 0 ? (
-            <p className="muted" style={{ fontSize: 13 }}>لا حسابات فيديو مربوطة. اربط يوتيوب أو تيك توك من الإعدادات.</p>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>لا حسابات فيديو مربوطة. اربط يوتيوب أو تيك توك من الإعدادات.</p>
           ) : (
             <div className="row" style={{ gap: 8, marginBottom: 12 }}>
               <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>
@@ -358,14 +358,14 @@ function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
               <button className="btn sm ghost" onClick={load}><RefreshCw size={20} /> تحديث الحالة</button>
             </div>
           )}
-          {msg && <p className="muted" style={{ fontSize: 12 }}>{msg}</p>}
+          {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
           {exports.length > 0 && (
             <table className="table">
               <thead><tr><th>المعرّف</th><th>الحالة</th><th>فيديوهات</th><th></th></tr></thead>
               <tbody>
                 {exports.map((x) => (
                   <tr key={x.id}>
-                    <td className="muted" style={{ fontSize: 12 }}>{String(x.id).slice(0, 10)}…</td>
+                    <td className="muted" style={{ fontSize: 'var(--text-xs)' }}>{String(x.id).slice(0, 10)}…</td>
                     <td>{x.status}</td>
                     <td>{x.videoCount ?? '—'}</td>
                     <td>
@@ -407,13 +407,13 @@ function ReputationCard() {
 
       <div className="grid cols-2">
         <div>
-          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>توزيع النجوم</div>
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>توزيع النجوم</div>
           {[5, 4, 3, 2, 1].map((star) => {
             const row = dist.find((d) => Number(d.rating) === star);
             const n = row?.count || 0;
             return (
               <div key={star} style={{ marginBottom: 6 }}>
-                <div className="row" style={{ fontSize: 12 }}>
+                <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                   <span><RatingValue value={star} size={16} /></span>
                   <div className="spacer" />
                   <span className="muted">{n}</span>
@@ -426,11 +426,11 @@ function ReputationCard() {
           })}
         </div>
         <div>
-          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>اتجاه المتوسط الشهري</div>
-          {trend.length === 0 && <p className="muted" style={{ fontSize: 12 }}>التقييمات لا تكفي لرسم اتجاه بعد.</p>}
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>اتجاه المتوسط الشهري</div>
+          {trend.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>التقييمات لا تكفي لرسم اتجاه بعد.</p>}
           {trend.map((m) => (
             <div key={m.month} style={{ marginBottom: 6 }}>
-              <div className="row" style={{ fontSize: 12 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <span>{m.month}</span>
                 <div className="spacer" />
                 <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><RatingValue value={m.avg_rating} size={16} /> · <bdi>{m.count}</bdi></span>
@@ -440,7 +440,7 @@ function ReputationCard() {
               </div>
             </div>
           ))}
-          <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 10 }}>
             معدل الرد على كل التفاعلات: <strong>{rep.engagement?.reply_rate}%</strong>
             {' '}({rep.engagement?.replied} من {rep.engagement?.total})
           </div>
@@ -476,21 +476,21 @@ function BestTimesCard({ platform }: { platform: string }) {
       <div className="row">
         <h4 style={{ marginTop: 0, marginBottom: 0 }}>أفضل أوقات النشر</h4>
         <div className="spacer" />
-        <span className="muted" style={{ fontSize: 12 }}>
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
           بتوقيت الرياض · من <bdi>{data.sample}</bdi> منشوراً
         </span>
       </div>
       {!data.enough && (
-        <p className="muted" style={{ fontSize: 12 }}>
+        <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
           البيانات محدودة — التوصية تزداد دقّة كلما نُشر محتوى أكثر.
         </p>
       )}
       <div className="grid cols-2" style={{ marginTop: 10 }}>
         <div>
-          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>حسب اليوم</div>
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>حسب اليوم</div>
           {days.map((d) => (
             <div key={d.day} style={{ marginBottom: 6 }}>
-              <div className="row" style={{ fontSize: 12 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <span>{DAY_AR[d.day] || d.day}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{d.avg_engagement}</bdi> تفاعل · <bdi>{d.posts}</bdi></span>
@@ -502,10 +502,10 @@ function BestTimesCard({ platform }: { platform: string }) {
           ))}
         </div>
         <div>
-          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>أفضل الساعات</div>
+          <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>أفضل الساعات</div>
           {topHours.map((h) => (
             <div key={h.hour} style={{ marginBottom: 6 }}>
-              <div className="row" style={{ fontSize: 12 }}>
+              <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                 <span>{hourLabel(h.hour)}</span>
                 <div className="spacer" />
                 <span className="muted"><bdi>{h.avg_engagement}</bdi> تفاعل · <bdi>{h.posts}</bdi></span>
@@ -516,7 +516,7 @@ function BestTimesCard({ platform }: { platform: string }) {
             </div>
           ))}
           {days[0] && topHours[0] && (
-            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 10 }}>
               الأفضل: <strong>{DAY_AR[days[0].day]}</strong> عند <strong>{hourLabel(topHours[0].hour)}</strong>
             </p>
           )}

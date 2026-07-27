@@ -158,7 +158,7 @@ export function DateTimePicker({
     <>
       <CalGrid month={month} setMonth={setMonth} start={datePart} end="" onPick={(s) => onChange(`${s}T${timePart || '12:00'}`)} />
       <div className="dp-time">
-        <label style={{ fontSize: 12, color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 }}>الوقت</label>
+        <label style={{ fontSize: 'var(--text-xs)', color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 }}>الوقت</label>
         <div className="row" style={{ gap: 8 }}>
           <Clock size={16} />
           <input className="input" style={{ width: 130 }} type="time" value={timePart} onChange={(e) => onChange(`${datePart || ymd(new Date())}T${e.target.value}`)} />

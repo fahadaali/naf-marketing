@@ -1,5 +1,12 @@
 import type { ReactNode } from 'react';
-import { Linkedin, Instagram, Facebook, Youtube, Ghost, Music2, AtSign, Globe, MapPin } from 'lucide-react';
+// Linkedin من Lucide مؤقتاً: لا شعار له في naf-brand-marks لغياب مصدر
+// مفتوح الرخصة، وهو موجود في تثبيتنا الحالي 0.408.0 وحده — حُذف في 1.x.
+// هذا الاستيراد هو ما يحجب رفع التثبيت. انظر naf-icons.md «شعارات المنصات».
+import { Linkedin, Globe, MapPin } from 'lucide-react';
+import {
+  XMark, TikTokMark, SnapchatMark, ThreadsMark,
+  FacebookMark, YouTubeMark, InstagramMark,
+} from './components/brand/brand-marks';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
 // المنصات المعروفة لها أيقونات وألوان رسمية؛ المنصات المخصّصة تأخذ أيقونة عامة.
@@ -17,31 +24,23 @@ export type PlatformMeta = {
 // naf-icons.md الثلاثة من موضع الاستدعاء؛ وهذه نسبة رسم داخلية لا مقاس أيقونة.
 const g = (size: number) => Math.round(size * 0.62);
 
-function XGlyph({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-      <path d="M5 5l14 14M19 5L5 19" />
-    </svg>
-  );
-}
-
 export const PLATFORM_META: Record<string, PlatformMeta> = {
   linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
   linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
-  x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XGlyph size={g(s)} /> },
+  x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XMark size={g(s)} /> },
   // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
   google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
   instagram: {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',
     gradient: 'var(--brand-instagram-gradient)',
-    glyph: (s) => <Instagram size={g(s)} />,
+    glyph: (s) => <InstagramMark size={g(s)} />,
   },
-  snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: (s) => <Ghost size={g(s)} /> },
-  tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: (s) => <Music2 size={g(s)} /> },
-  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: (s) => <Facebook size={g(s)} /> },
-  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: (s) => <Youtube size={g(s)} /> },
-  threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: (s) => <AtSign size={g(s)} /> },
+  snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: (s) => <SnapchatMark size={g(s)} /> },
+  tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: (s) => <TikTokMark size={g(s)} /> },
+  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: (s) => <FacebookMark size={g(s)} /> },
+  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: (s) => <YouTubeMark size={g(s)} /> },
+  threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: (s) => <ThreadsMark size={g(s)} /> },
 };
 
 // المنصات المعروفة القابلة للإضافة من الإعدادات
@@ -97,10 +96,9 @@ export function PlatformIcon({ platform, size = 24 }: { platform: string; size?:
     borderRadius: Math.round(size * 0.28),
     display: 'grid',
     placeItems: 'center',
-    // الأبيض جزء من علامة المنصة نفسها لا من ثيم ناف: الخلفية لون علامة
-    // ثابت في الوضعين، فرمز الثيم هنا ينقلب خطأً في الوضع الداكن.
-    // يقع ضمن استثناء ألوان العلامات الخارجية — CLAUDE.md §1.
-    color: meta?.fg || '#fff',
+    // مقدّمة رقعة العلامة من رمز السجلّ: بيضاء في الوضعين لأن الخلفية
+    // لون علامة ثابت لا سطح ثيم — naf-theme#v1.10.0.
+    color: meta?.fg || 'var(--brand-on-color)',
     background: meta?.gradient || meta?.color || 'var(--muted-foreground)',
     flexShrink: 0,
   };

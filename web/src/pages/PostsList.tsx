@@ -263,7 +263,7 @@ export default function ContentManagement() {
             <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
           </div>
           <div className="spacer" />
-          <span className="muted" style={{ fontSize: 13 }}><bdi>{filtered.length}</bdi> عنصر</span>
+          <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{filtered.length}</bdi> عنصر</span>
           {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={20} /> استيراد</button>}
           <Popover
             render={({ toggle }) => (
@@ -404,7 +404,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
       <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
         {cols.map((col) => (
           <div
@@ -429,7 +429,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
                 onClick={() => navigate(`/editor/${p.id}`)}
               >
                 <div style={{ fontWeight: 500, marginBottom: 6 }}>{p.title}</div>
-                <div className="row" style={{ fontSize: 11 }}>
+                <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
                   <span className="muted">{SOURCE[p.source] || p.source}</span>
                   {p.campaign_name && <span className="badge gray">{p.campaign_name}</span>}
                   <div className="spacer" />
@@ -437,7 +437,7 @@ function KanbanView({ rows, navigate, onMove }: any) {
                 </div>
               </div>
             ))}
-            {col.items.length === 0 && <p className="muted" style={{ fontSize: 12, textAlign: 'center', padding: 8 }}>—</p>}
+            {col.items.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)', textAlign: 'center', padding: 8 }}>—</p>}
           </div>
         ))}
       </div>
@@ -574,7 +574,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
 
   return (
     <Modal title="استيراد محتوى" onClose={onClose}>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         ارفع ملف <b>CSV</b> (بأعمدة: العنوان، المحتوى) أو <b>JSON</b> (مصفوفة عناصر فيها title و body).
         تُنشأ العناصر كمسودات.
       </p>
@@ -585,8 +585,8 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
         <div style={{ marginTop: 14 }}>
           <p className="ok">جاهز للاستيراد: <bdi>{items.length}</bdi> عنصراً</p>
           <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
-            {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
-            {items.length > 20 && <div className="muted" style={{ fontSize: 12 }}>… و<bdi>{items.length - 20}</bdi> غيرها</div>}
+            {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 'var(--text-xs)', padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
+            {items.length > 20 && <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>… و<bdi>{items.length - 20}</bdi> غيرها</div>}
           </div>
         </div>
       )}

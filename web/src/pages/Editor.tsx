@@ -316,7 +316,7 @@ export default function Editor() {
                   <LayoutTemplate size={20} /> القوالب
                 </button>
               </div>
-              <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
+              <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '6px 0 0' }}>
                 لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
               </p>
             </div>
@@ -409,20 +409,20 @@ export default function Editor() {
               <button type="button" className="row row-link" aria-expanded={showVariants} onClick={() => setShowVariants((v) => !v)}>
                 <h4 style={{ margin: 0 }}>نصوص مخصّصة وأول تعليق لكل منصة</h4>
                 <div className="spacer" />
-                <span className="muted" style={{ fontSize: 12 }}>
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                   {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
                 </span>
               </button>
               {showVariants && (
                 <div style={{ marginTop: 10 }}>
-                  <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+                  <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
                     اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
                   </p>
                   {platforms.map((p) => (
                     <div key={p} style={{ marginBottom: 10 }}>
                       <div className="row" style={{ marginBottom: 4 }}>
                         <PlatformIcon platform={p} size={16} />
-                        <span style={{ fontSize: 13 }}>{platformLabel(p, platLabels)}</span>
+                        <span style={{ fontSize: 'var(--text-xs)' }}>{platformLabel(p, platLabels)}</span>
                         <div className="spacer" />
                         <button
                           className="btn sm ghost"
@@ -460,7 +460,7 @@ export default function Editor() {
               {schedules.map((s) => {
                 const late = ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now();
                 return (
-                  <div key={s.id} className="row" style={{ fontSize: 13, marginBottom: 8 }}>
+                  <div key={s.id} className="row" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
                     <PlatformIcon platform={s.platform} size={16} />
                     <span>{platformLabel(s.platform, platLabels)}</span>
                     <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
@@ -494,7 +494,7 @@ export default function Editor() {
               <div className="row">
                 <h4 style={{ marginTop: 0, marginBottom: 0 }}>سجل النسخ</h4>
                 <div className="spacer" />
-                <span className="muted" style={{ fontSize: 12 }}><bdi>{versions.length}</bdi> نسخة</span>
+                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{versions.length}</bdi> نسخة</span>
               </div>
               <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowVersions(true)}>
                 <History size={20} /> عرض واستعادة
@@ -507,7 +507,7 @@ export default function Editor() {
             <div className="card" style={{ marginBottom: notes.length ? 14 : 0 }}>
               <h4 style={{ marginTop: 0 }}>سجل الاعتماد</h4>
               {approvals.map((a) => (
-                <div key={a.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
+                <div key={a.id} style={{ fontSize: 'var(--text-xs)', marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{a.actor_name} <ArrowLeft size={16} /> <StatusBadge status={a.to_status} /></div>
                   {a.note && <div className="muted">{a.note}</div>}
                   <div className="muted">{formatRiyadh(a.created_at)}</div>
@@ -532,13 +532,13 @@ export default function Editor() {
                 </button>
               </div>
               {notes.map((n) => (
-                <div key={n.id} style={{ fontSize: 12, marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
+                <div key={n.id} style={{ fontSize: 'var(--text-xs)', marginBottom: 8, borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
                   <div><strong>{n.author_name || 'بيسكامب'}</strong></div>
                   <div className="muted">{n.body}</div>
                   <div className="muted">{formatRiyadh(n.created_at)}</div>
                 </div>
               ))}
-              {notes.length === 0 && <p className="muted" style={{ fontSize: 12, margin: 0 }}>لا توجد تعليقات بعد. اضغط التحديث لجلب أحدث تعليقات بيسكامب.</p>}
+              {notes.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>لا توجد تعليقات بعد. اضغط التحديث لجلب أحدث تعليقات بيسكامب.</p>}
             </div>
           )}
         </div>
@@ -713,7 +713,7 @@ function MediaGenModal({
 
   return (
     <Modal title="توليد محتوى من وسيط" onClose={onClose}>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         ارفع صورة أو ملف PDF ليحلّله Claude ويولّد منه منشوراً. الأنواع الأخرى (صوت/فيديو/وورد/إكسل) يُستفاد من اسمها كموضوع.
       </p>
       <label className="btn ghost" style={{ cursor: 'pointer' }}>
@@ -922,8 +922,8 @@ function KBModal({
                     background: selected?.id === f.id && selected?.type === f.type ? 'var(--primary-soft)' : 'transparent',
                   }}
                 >
-                  <div style={{ fontSize: 14 }}>{f.title}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{f.type === 'Document' ? 'مستند' : 'ملف مرفوع'}</div>
+                  <div style={{ fontSize: 'var(--text-sm)' }}>{f.title}</div>
+                  <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{f.type === 'Document' ? 'مستند' : 'ملف مرفوع'}</div>
                 </div>
               ))}
             </div>
@@ -981,7 +981,7 @@ function VersionsModal({
             <div className="row">
               <div>
                 <div style={{ fontWeight: 600 }}>{v.title}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{v.editor_name} — {formatRiyadh(v.created_at)}</div>
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{v.editor_name} — {formatRiyadh(v.created_at)}</div>
               </div>
               <div className="spacer" />
               <button
@@ -1055,8 +1055,8 @@ function TemplatesModal({
           {templates.map((t) => (
             <div key={t.id} className="row" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
-                <div className="muted" style={{ fontSize: 12 }}>{t.creator_name}</div>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{t.name}</div>
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{t.creator_name}</div>
               </div>
               <div className="spacer" />
               <button className="btn sm" onClick={() => onInsert(t.body)}>إدراج</button>
