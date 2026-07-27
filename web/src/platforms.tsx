@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react';
-import { Linkedin, Instagram, Facebook, Youtube, Globe, MapPin } from 'lucide-react';
-import { XMark, TikTokMark, SnapchatMark, ThreadsMark } from './components/brand/brand-marks';
+// Linkedin من Lucide مؤقتاً: لا شعار له في naf-brand-marks لغياب مصدر
+// مفتوح الرخصة، وهو موجود في تثبيتنا الحالي 0.408.0 وحده — حُذف في 1.x.
+// هذا الاستيراد هو ما يحجب رفع التثبيت. انظر naf-icons.md «شعارات المنصات».
+import { Linkedin, Globe, MapPin } from 'lucide-react';
+import {
+  XMark, TikTokMark, SnapchatMark, ThreadsMark,
+  FacebookMark, YouTubeMark, InstagramMark,
+} from './components/brand/brand-marks';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
 // المنصات المعروفة لها أيقونات وألوان رسمية؛ المنصات المخصّصة تأخذ أيقونة عامة.
@@ -28,12 +34,12 @@ export const PLATFORM_META: Record<string, PlatformMeta> = {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',
     gradient: 'var(--brand-instagram-gradient)',
-    glyph: (s) => <Instagram size={g(s)} />,
+    glyph: (s) => <InstagramMark size={g(s)} />,
   },
   snapchat: { label: 'سناب شات', color: 'var(--brand-snapchat)', fg: 'var(--brand-snapchat-foreground)', glyph: (s) => <SnapchatMark size={g(s)} /> },
   tiktok: { label: 'تيك توك', color: 'var(--brand-tiktok)', glyph: (s) => <TikTokMark size={g(s)} /> },
-  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: (s) => <Facebook size={g(s)} /> },
-  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: (s) => <Youtube size={g(s)} /> },
+  facebook: { label: 'فيسبوك', color: 'var(--brand-facebook)', glyph: (s) => <FacebookMark size={g(s)} /> },
+  youtube: { label: 'يوتيوب', color: 'var(--brand-youtube)', glyph: (s) => <YouTubeMark size={g(s)} /> },
   threads: { label: 'ثريدز', color: 'var(--brand-threads)', glyph: (s) => <ThreadsMark size={g(s)} /> },
 };
 
