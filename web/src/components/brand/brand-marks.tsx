@@ -13,6 +13,16 @@ import * as React from "react"
  *
  * المسارات من simple-icons بترخيص CC0-1.0 (ملك عام، بلا شرط نسبة).
  * عند التحديث خُذ المسار من هناك لا من الذاكرة ولا من بحث صور.
+ *
+ * استثناء واحد: لينكدإن. حذفته simple-icons بطلب من مالك العلامة،
+ * فمصدره lucide-react@0.408.0 بترخيص ISC — وهو الرسم الذي كانت
+ * المنصات تشحنه فعلاً قبل حذف Lucide لشعارات العلامات، فنقله يحفظ
+ * المظهر حرفياً ولا يغيّر شيئاً لدى القارئ.
+ *
+ *   ISC License — Copyright (c) Lucide Contributors 2022
+ *   https://github.com/lucide-icons/lucide/blob/main/LICENSE
+ *
+ * وهو الوحيد المرسوم بحدٍّ لا بملء، ولذلك مُصيِّرٌ مستقل أدناه.
  */
 
 type MarkProps = React.SVGProps<SVGSVGElement> & { size?: number }
@@ -37,6 +47,41 @@ function mark(name: string, d: string) {
   C.displayName = name
   return C
 }
+
+/** مُصيِّر للشعارات المرسومة بحدٍّ لا بملء — لينكدإن وحده اليوم. */
+function strokeMark(name: string, children: React.ReactNode) {
+  const C = React.forwardRef<SVGSVGElement, MarkProps>(
+    ({ size = 20, ...props }, ref) => (
+      <svg
+        ref={ref}
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        focusable="false"
+        {...props}
+      >
+        {children}
+      </svg>
+    )
+  )
+  C.displayName = name
+  return C
+}
+
+export const LinkedInMark = strokeMark(
+  "LinkedInMark",
+  <>
+    <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+    <rect width="4" height="12" x="2" y="9" />
+    <circle cx="4" cy="4" r="2" />
+  </>
+)
 
 export const XMark = mark(
   "XMark",
@@ -82,10 +127,8 @@ export const BRAND_MARKS = {
   facebook: FacebookMark,
   youtube: YouTubeMark,
   instagram: InstagramMark,
+  linkedin: LinkedInMark,
 } as const
 
-/* لينكدإن ناقص عمداً: لا مصدر مفتوح الرخصة له — حذفته simple-icons،
-   وليس في Lucide 1.x. لا تخترع له مساراً ولا تستعمل أقرب أيقونة شكلاً:
-   شعار خاطئ لعلامة مملوكة أسوأ من غيابه. القرار معلّق. */
 
 export type BrandMarkKey = keyof typeof BRAND_MARKS
