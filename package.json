@@ -25,6 +25,7 @@
     "wrangler": "^3.60.0"
   },
   "dependencies": {
-    "hono": "^4.4.6"
+    "hono": "^4.4.6",
+    "naf-auth": "file:../naf-auth"
   }
 }

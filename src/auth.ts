@@ -32,7 +32,39 @@ export async function destroySession(env: Env, token: string): Promise<void> {
   await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(token).run();
 }
 
+// وصلة الدخول الموحّد: جلسة المنصة صارت في KV بمفتاح sess:{sid}، وتحمل
+// sub القادم من المركز — وهو نفسه users.id بعد الترحيل.
+//
+// وُضعت هنا وحدها لأن كل قارئ للمستخدم يمرّ بهذه الدالة: requireAuth
+// و/api/auth/me وكل المسارات. فبقيت المسارات العشرون بلا تعديل.
+const SSO_COOKIE = 'naf_sid';
+
+async function getSsoUser(env: Env, req: Request): Promise<User | null> {
+  if (!env.AUTH_KV) return null;
+
+  const cookie = req.headers.get('cookie') || '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SSO_COOKIE}=([^;]*)`));
+  if (!match) return null;
+
+  const session = await env.AUTH_KV.get(`sess:${decodeURIComponent(match[1])}`, 'json');
+  if (!session || typeof session !== 'object') return null;
+  const sub = (session as { sub?: string }).sub;
+  if (!sub) return null;
+
+  const row = await env.DB.prepare(
+    'SELECT id, name, email, role_name, is_active, created_at FROM users WHERE id = ?',
+  )
+    .bind(sub)
+    .first<User>();
+
+  if (!row || !row.is_active) return null;
+  return row;
+}
+
 export async function getUserFromRequest(env: Env, req: Request): Promise<User | null> {
+  const ssoUser = await getSsoUser(env, req);
+  if (ssoUser) return ssoUser;
+
   const token = getSessionToken(req);
   if (!token) return null;
   const row = await env.DB.prepare(

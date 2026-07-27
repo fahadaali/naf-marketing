@@ -9,6 +9,12 @@ directory = "./web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+# جلسات الدخول الموحّد وكاش مفاتيح المركز والحالة العابرة
+# أنشئها بـ: wrangler kv namespace create AUTH_KV
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "ضع-المعرّف-العائد-من-الأمر"
+
 # قاعدة بيانات D1
 [[d1_databases]]
 binding = "DB"
@@ -34,7 +40,23 @@ crons = ["*/2 * * * *"]
 APP_TIMEZONE = "Asia/Riyadh"
 APP_NAME = "منصة ناف للتسويق"
 
+# الدخول الموحّد عبر naf-id. هذا القسم وحده هو ما يختلف بين منصة وأخرى.
+PLATFORM_ID = "naf-marketing"
+AUTH_ISSUER = "https://naf-id.pages.dev"
+
+# مخطّط جدول الأعضاء: المنصة لها users قائم لا members جديد.
+MEMBERS_TABLE = "users"
+MEMBERS_ID_COLUMN = "id"
+MEMBERS_NAME_COLUMN = "name"
+MEMBERS_ROLE_COLUMN = "role_name"
+MEMBERS_TIME_FORMAT = "iso"
+# الصلاحيات الدقيقة في مصفوفة roles_permissions لا في عمود — و`-` تعني: لا عمود.
+MEMBERS_PERMS_COLUMN = "-"
+# أقلّ الأدوار الثلاثة صلاحية، فأول دخول لا يمنح شيئاً حتى يرقّيه المدير العام.
+DEFAULT_ROLE = "writer"
+
 # المفاتيح السرية تُضبط عبر Secrets ولا تُخزَّن هنا:
 #   wrangler secret put CLAUDE_API_KEY
 #   wrangler secret put PROVIDER_API_KEY
 #   wrangler secret put AUTH_SECRET
+#   wrangler secret put AUTH_CLIENT_SECRET   # سرّ المنصة لدى naf-id

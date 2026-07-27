@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Denied from './pages/Denied';
 import Dashboard from './pages/Dashboard';
 import PostsList from './pages/PostsList';
 import Editor from './pages/Editor';
@@ -29,6 +30,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* عامة في حارس الدخول الموحّد — تُفتح بلا جلسة */}
+      <Route path="/denied" element={<Denied />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/posts" element={<Protected><PostsList /></Protected>} />
       <Route path="/editor" element={<Protected><Editor /></Protected>} />
