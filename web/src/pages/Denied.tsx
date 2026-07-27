@@ -6,6 +6,13 @@
 // والحالة غير مبلَّغة باللون.
 
 // المصطلحات كما وردت في naf-terms.md — لا تُصَغ محلياً.
+//
+// ولا سطر إرشاد تحتها: «راجع مسؤول المنصة» صيغَ هنا محلياً ولا مقابل له
+// في السجلّ، فحُذف. إعادته تبدأ بتسجيله في naf-ui لا بكتابته هنا.
+//
+// ولا leading-*: رمز المقاس يحمل ارتفاع سطره معه
+// (--text-xl--line-height: 1.65)، وleading-relaxed يدوسه بـ1.625 —
+// أي يقصّر سطراً عربياً وُسّع عمداً لأجل الحركات والنزلات.
 const DENIED_TERMS: Record<string, string> = {
   inactive: 'معطّل',
   not_member: 'لا تملك صلاحية الوصول لهذه المنصة',
@@ -29,10 +36,7 @@ export default function Denied() {
   return (
     <main className="min-h-full grid place-items-center p-6">
       <div className="max-w-prose text-center">
-        <h1 className="text-xl font-semibold text-foreground leading-relaxed">
-          {reasonText(raw)}
-        </h1>
-        <p className="mt-3 text-muted-foreground leading-loose">راجع مسؤول المنصة.</p>
+        <h1 className="text-xl font-semibold text-foreground">{reasonText(raw)}</h1>
       </div>
     </main>
   );

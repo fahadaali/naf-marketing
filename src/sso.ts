@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
-import { createConfig, handleCallback, authenticate } from 'naf-auth';
+import { createConfig, handleCallback, authenticate, reportAccessChange } from 'naf-auth';
 import type { Env, Variables } from './types';
 
 type Bindings = { Bindings: Env; Variables: Variables };
@@ -139,4 +139,29 @@ ssoRoutes.get('/auth/callback', (c) => handleCallback(c.req.raw, c.env, ssoConfi
 // naf-theme.css ومصطلحات naf-terms.md. وصفحة تُبنى في الخادم لا تحمّل
 // ورقة أنماط المنصة، فتضطرّ إلى قيم لون حرفية — وهذا سياق غير مستثنى
 // في قواعد ناف، والاستثناءات أربعة ليس هذا منها.
+/**
+ * التبليغ العكسي (§٦-٤): إيقاف عضو من إعدادات المنصة يُبلَّغ المركز
+ * ليظهر السبب للمستخدم في شبكته بدل أن يجد الباب مغلقاً بلا تفسير.
+ *
+ * لا يرمي: يُستدعى من waitUntil بعد أن تمّ التعطيل في القاعدة، فتعذّر
+ * الوصول إلى المركز خلل في التبليغ لا في العملية. ولا يُسجَّل السرّ ولا
+ * نصّ استجابة المركز — قد يعيد ما أُرسل إليه.
+ */
+export async function notifyAccessChange(
+  env: Env,
+  userId: string,
+  isActive: boolean,
+): Promise<void> {
+  if (!env.AUTH_CLIENT_SECRET || !env.AUTH_ISSUER || !env.PLATFORM_ID) return;
+  try {
+    await reportAccessChange(env, ssoConfig(env), {
+      userId,
+      status: isActive ? 'active' : 'revoked',
+      reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
+    });
+  } catch {
+    // يُبتلع عمداً — انظر تعليق الدالة.
+  }
+}
+
 export { PUBLIC_PATHS, PUBLIC_PREFIXES, USER_REFERENCES, DEFAULT_ROLE };
