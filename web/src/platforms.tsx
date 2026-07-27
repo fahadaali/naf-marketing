@@ -1,11 +1,8 @@
 import type { ReactNode } from 'react';
-// Linkedin من Lucide مؤقتاً: لا شعار له في naf-brand-marks لغياب مصدر
-// مفتوح الرخصة، وهو موجود في تثبيتنا الحالي 0.408.0 وحده — حُذف في 1.x.
-// هذا الاستيراد هو ما يحجب رفع التثبيت. انظر naf-icons.md «شعارات المنصات».
-import { Linkedin, Globe, MapPin } from 'lucide-react';
+import { Globe, MapPin } from 'lucide-react';
 import {
   XMark, TikTokMark, SnapchatMark, ThreadsMark,
-  FacebookMark, YouTubeMark, InstagramMark,
+  FacebookMark, YouTubeMark, InstagramMark, LinkedInMark,
 } from './components/brand/brand-marks';
 
 // بيانات المنصات: التسمية العربية، اللون الرسمي، والأيقونة.
@@ -25,8 +22,8 @@ export type PlatformMeta = {
 const g = (size: number) => Math.round(size * 0.62);
 
 export const PLATFORM_META: Record<string, PlatformMeta> = {
-  linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
-  linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <Linkedin size={g(s)} /> },
+  linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: (s) => <LinkedInMark size={g(s)} /> },
+  linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <LinkedInMark size={g(s)} /> },
   x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XMark size={g(s)} /> },
   // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
   google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
