@@ -9,6 +9,7 @@ import {
   createConfig,
   handleCallback,
   handleLogout,
+  handleBackchannelLogout,
   authenticate,
   reportAccessChange,
 } from 'naf-auth';
@@ -174,6 +175,21 @@ export const ssoLogout: MiddlewareHandler<Bindings> = (c) =>
 // مسجَّل قبل الحارس عمداً: الخروج يجب أن يعمل لمن جلسته انتهت أصلاً،
 // وإلا حُوِّل الخارجُ إلى المركز ليدخل قبل أن يُسمح له بالخروج.
 ssoRoutes.post('/auth/logout', ssoLogout);
+
+/**
+ * إشعار الخروج الخلفي — المركز يُنهي جلسات عضوٍ هنا.
+ *
+ * الخروج من هذه المنصة محليّ، أمّا الخروج من المركز فهو الباب نفسه: يُنهي
+ * جلسات صاحبه في المنصات الخمس. وبلا هذا المسار تبقى جلسته هنا حيّة حتى
+ * ينتهي رمزها، فيفتح رابط المنصة بعد خروجه من المركز فيدخل.
+ *
+ * وهو قبل الحارس كالخروج، ولسببٍ أقوى: المنادي هو المركز خادماً لخادم، لا
+ * متصفّح له جلسة هنا. وحراستُه توقيعُ المركز نفسه — تتحقّق منه الحزمة
+ * بمفتاح `JWKS` الذي تعرفه أصلاً.
+ */
+ssoRoutes.post('/auth/backchannel-logout', (c) =>
+  handleBackchannelLogout(c.req.raw, c.env, ssoConfig(c.env)),
+);
 
 // صفحة /denied لا تُخدَم من هنا عمداً.
 // هي مسار عام في الحارس، فتصلها واجهة React كأي شاشة أخرى وتقرأ
