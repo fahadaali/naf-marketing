@@ -14,6 +14,7 @@
     "db:seed:remote": "wrangler d1 execute naf_marketing --remote --file=./migrations/9999_seed.sql",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit && npm --prefix web run typecheck",
+    "check:sso": "node audit/sso-contract-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
