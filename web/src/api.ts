@@ -11,6 +11,27 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
+
+  // انتهاء الجلسة: الحارس يفحص رمز المركز في كل طلب، وعمر الرمز ربع ساعة —
+  // فالجلسة تنتهي أثناء العمل لا قبل بدئه. والحارس يردّ على طلبات fetch
+  // بـ401 ومعها رابط الباب، لا بتحويل ٣٠٢: التحويل يتبعه المتصفح إلى نطاق
+  // المركز، ولا ترويسات CORS عليه عمداً، فيسقط الطلب بخطأ شبكة لا يُقرأ.
+  //
+  // ونقل النافذة كلّها لا نداء داخلي: الدخول يقع في المركز لا هنا.
+  if (res.status === 401 && typeof data.login === 'string') {
+    window.location.assign(data.login);
+    // وعدٌ لا يُحلّ: الصفحة تُغادر، وردّ خطأ هنا يومض رسالةً قبل المغادرة.
+    return new Promise<T>(() => {});
+  }
+
+  // ومنعُ الدخول من المركز يُعرض في شاشة الرفض بمصطلحها المسجَّل، لا برمزه
+  // التقني في رسالة خطأ. والفحص على حقل `denied` لأن المنصة نفسها تردّ 403
+  // على من لا صلاحية له بجملة عربية لا برمز — وهاتان حالتان مختلفتان.
+  if (res.status === 403 && typeof data.denied === 'string') {
+    window.location.assign(data.denied);
+    return new Promise<T>(() => {});
+  }
+
   if (!res.ok) throw new Error(data.error || `خطأ (${res.status})`);
   return data as T;
 }

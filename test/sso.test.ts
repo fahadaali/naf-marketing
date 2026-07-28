@@ -2,7 +2,14 @@
 // في معاملة واحدة. يُختبر على بديل بسيط لـ D1 يسجّل ما نُفّذ.
 
 import { describe, it, expect } from 'vitest';
-import { linkOrCreateUser, USER_REFERENCES, DEFAULT_ROLE } from '../src/sso';
+import {
+  linkOrCreateUser,
+  notifyAccessChange,
+  PUBLIC_PATHS,
+  PUBLIC_PREFIXES,
+  USER_REFERENCES,
+  DEFAULT_ROLE,
+} from '../src/sso';
 import type { Env } from '../src/types';
 
 type Recorded = { sql: string; args: unknown[] };
@@ -117,5 +124,124 @@ describe('الترحيل الكسول', () => {
     expect(USER_REFERENCES.map(([t]) => t)).toContain('platform_comments');
     expect(USER_REFERENCES.map(([t]) => t)).not.toContain('platform_comments_new');
     expect(USER_REFERENCES.map(([t]) => t)).not.toContain('sessions');
+  });
+});
+
+// التبليغ العكسي — الموضع الثاني الذي يمسّ عقد المركز.
+// المركز يطابق العضو على البريد في هذا المسار وحده، ويقبل `granted`
+// و`revoked` لا غيرهما. ومعرّفٌ مكان بريد يردّه بـ`invalid_body` صامتاً،
+// فتبقى بطاقة الموقوف تدعوه إلى باب لا يفتح.
+describe('التبليغ العكسي', () => {
+  function ssoEnv(email: string | null) {
+    const db = {
+      prepare: (sql: string) => ({
+        bind: () => ({
+          first: async () => (sql.includes('SELECT email') && email ? { email } : null),
+        }),
+      }),
+    };
+    return {
+      DB: db,
+      AUTH_KV: { get: async () => null, put: async () => {}, delete: async () => {} },
+      AUTH_ISSUER: 'https://naf-id.pages.dev',
+      PLATFORM_ID: 'naf-marketing',
+      AUTH_CLIENT_SECRET: 'shhh',
+      MEMBERS_TABLE: 'users',
+      MEMBERS_ID_COLUMN: 'id',
+      MEMBERS_NAME_COLUMN: 'name',
+      MEMBERS_ROLE_COLUMN: 'role_name',
+      MEMBERS_PERMS_COLUMN: '-',
+      MEMBERS_TIME_FORMAT: 'iso',
+      DEFAULT_ROLE: 'writer',
+    } as unknown as Env;
+  }
+
+  function captureFetch() {
+    const calls: Array<{ url: string; body: any }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init: any = {}) => {
+      calls.push({
+        url: typeof input === 'string' ? input : input.url,
+        body: init.body ? JSON.parse(init.body) : null,
+      });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    return { calls, restore: () => { globalThis.fetch = original; } };
+  }
+
+  it('يرسل البريد وحالة المركز إلى المسار الداخلي', async () => {
+    const net = captureFetch();
+    try {
+      await notifyAccessChange(ssoEnv('Fahad@Example.com'), 'sub-1', false);
+
+      expect(net.calls).toHaveLength(1);
+      expect(net.calls[0].url).toBe('https://naf-id.pages.dev/api/internal/access');
+      expect(net.calls[0].body).toMatchObject({
+        platformId: 'naf-marketing',
+        secret: 'shhh',
+        email: 'Fahad@Example.com',
+        state: 'revoked',
+      });
+      // لا معرّف ولا `active` — كلاهما يردّه المركز.
+      expect(net.calls[0].body.userId).toBeUndefined();
+      expect(net.calls[0].body.status).toBeUndefined();
+    } finally {
+      net.restore();
+    }
+  });
+
+  it('إعادة التفعيل ترسل granted لا active', async () => {
+    const net = captureFetch();
+    try {
+      await notifyAccessChange(ssoEnv('f@example.com'), 'sub-1', true);
+      expect(net.calls[0].body.state).toBe('granted');
+    } finally {
+      net.restore();
+    }
+  });
+
+  it('عضو بلا بريد لا يُبلَّغ عنه، ولا يرمي', async () => {
+    const net = captureFetch();
+    try {
+      await expect(notifyAccessChange(ssoEnv(null), 'sub-1', false)).resolves.toBeUndefined();
+      expect(net.calls).toHaveLength(0);
+    } finally {
+      net.restore();
+    }
+  });
+
+  it('تعذّر الوصول إلى المركز لا يردّ العملية على المسؤول', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('{}', { status: 503 })) as typeof fetch;
+    try {
+      await expect(notifyAccessChange(ssoEnv('f@example.com'), 'sub-1', false)).resolves.toBeUndefined();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+// الحارس: ما يُعرض لزائرٍ لم يبادل رمزاً، وما لا يُعرض.
+// الإذن بالمسار العام وحده لا يكفي — صفحةٌ عامة بأصول محميّة تُخدَم مكسورة.
+describe('قائمة الحارس', () => {
+  const isPublic = (path: string) =>
+    PUBLIC_PATHS.includes(path) || PUBLIC_PREFIXES.some((p) => path.startsWith(p));
+
+  it('كل ما تطلبه صفحة المقال العامة مسموح', () => {
+    for (const path of [
+      '/articles/some-slug',
+      '/naf-public.css',
+      '/brand/naf-mark.svg',
+      '/fonts/arabic-400.css',
+      '/fonts/files/arabic-400.woff2',
+    ]) {
+      expect(isPublic(path), `${path} تطلبه صفحة عامة`).toBe(true);
+    }
+  });
+
+  it('ما عدا المُعلَن محميّ — ولا استثناء لمسار إدارة', () => {
+    for (const path of ['/', '/api/posts', '/api/users', '/api/settings', '/api/auth/login', '/api/audit']) {
+      expect(isPublic(path), `${path} يجب أن يكون محمياً`).toBe(false);
+    }
   });
 });

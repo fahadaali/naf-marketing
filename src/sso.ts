@@ -17,11 +17,21 @@ type Bindings = { Bindings: Env; Variables: Variables };
  * الزائر، وبكسل يفتحه عميل البريد، وخطّاف يستدعيه مزوّد النشر، وفحص صحة.
  * حمايتها تعني كسرها، لا تأمينها.
  */
-const PUBLIC_PATHS = ['/auth/callback', '/denied', '/api/health'];
+const PUBLIC_PATHS = [
+  '/auth/callback',
+  '/denied',
+  '/api/health',
+  // ورقة أنماط الصفحات العامة. تُطلب من صفحة مقالٍ يقرؤها زائر بلا جلسة،
+  // فحمايتها تجعله يقرأ صفحة بلا أنماط ولا خطّ عربي — أي أن الصفحة تُخدَم
+  // ثم تُعرض مكسورة، وهو أسوأ من ألّا تُخدَم.
+  '/naf-public.css',
+];
 
 const PUBLIC_PREFIXES = [
   '/assets/', // أصول الواجهة المبنية
   '/articles', // المدوّنة العامة والتغذية والاشتراك
+  '/brand/', // العلامة — أيقونة الصفحة العامة وشعارها
+  '/fonts/', // الخطّ الذي تستورده ورقة الأنماط العامة
   '/e/', // تتبّع البريد — يفتحه عميل البريد لا المستخدم
   '/api/webhooks/', // يستدعيها المزوّد خارجياً
 ];
@@ -143,6 +153,10 @@ ssoRoutes.get('/auth/callback', (c) => handleCallback(c.req.raw, c.env, ssoConfi
  * التبليغ العكسي (§٦-٤): إيقاف عضو من إعدادات المنصة يُبلَّغ المركز
  * ليظهر السبب للمستخدم في شبكته بدل أن يجد الباب مغلقاً بلا تفسير.
  *
+ * والمركز يطابق العضو على **البريد** في هذا المسار وحده — لا على المعرّف،
+ * ولو كان المعرّف هو `sub` نفسه بعد الترحيل. فيُقرأ البريد من القاعدة هنا
+ * ليبقى النداء في المسارات كما هو: معرّفٌ وحالة.
+ *
  * لا يرمي: يُستدعى من waitUntil بعد أن تمّ التعطيل في القاعدة، فتعذّر
  * الوصول إلى المركز خلل في التبليغ لا في العملية. ولا يُسجَّل السرّ ولا
  * نصّ استجابة المركز — قد يعيد ما أُرسل إليه.
@@ -154,9 +168,15 @@ export async function notifyAccessChange(
 ): Promise<void> {
   if (!env.AUTH_CLIENT_SECRET || !env.AUTH_ISSUER || !env.PLATFORM_ID) return;
   try {
+    const row = await env.DB.prepare('SELECT email FROM users WHERE id = ?')
+      .bind(userId)
+      .first<{ email: string }>();
+    if (!row?.email) return;
+
     await reportAccessChange(env, ssoConfig(env), {
-      userId,
-      status: isActive ? 'active' : 'revoked',
+      email: row.email,
+      // حالتا المركز `granted` و`revoked` — لا `active`.
+      state: isActive ? 'granted' : 'revoked',
       reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
     });
   } catch {
