@@ -7,10 +7,19 @@
 // ووُضعت القراءة هنا وحدها لأن كل قارئ للمستخدم يمرّ بهذه الدالة: requireAuth
 // و`/api/auth/me` وكل المسارات. فبقيت المسارات العشرون بلا تعديل.
 
-import { clearCookie, readCookie, sessionKey } from 'naf-auth';
+import { clearCookie, readCookie } from 'naf-auth';
 import type { Env, User } from './types';
 import { ssoConfig } from './sso';
 import { nowIso } from './util';
+
+/**
+ * مفتاح الجلسة في KV — كما تكتبه الحزمة في مسار الاستقبال.
+ *
+ * مكتوب هنا لأن الحزمة لا تصدّره: صيغةٌ واحدة في طرفين، فتغييرها هناك دون
+ * هنا يجعل الجلسة تُكتب بمفتاح وتُقرأ بآخر — أي «لا جلسة» في كل طلب، ودورةَ
+ * تحويلٍ إلى المركز لا تنتهي. فإن صدّرتها الحزمة يوماً، تُستورد ويُحذف هذا.
+ */
+const sessionKey = (sid: string) => `sess:${sid}`;
 
 /**
  * المستخدم الحالي، أو `null`.
