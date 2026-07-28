@@ -8,6 +8,10 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# بدونه تخدم طبقة الأصول index.html قبل تشغيل الـ Worker، فيصل الزائر إلى
+# الجذر دون المرور بحارس الدخول الموحّد إطلاقاً — واللوحة تُحمَّل له كاملةً
+# ثم تفشل نداءاتها وحدها. الحارس يجب أن يسبق كل شيء، وهذا ما يجعله يسبقه.
+run_worker_first = true
 
 # جلسات الدخول الموحّد وكاش مفاتيح المركز والحالة العابرة
 # أنشئها بـ: wrangler kv namespace create AUTH_KV

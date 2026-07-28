@@ -5,7 +5,14 @@
 
 import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
-import { createConfig, handleCallback, authenticate, reportAccessChange } from 'naf-auth';
+import {
+  createConfig,
+  handleCallback,
+  authenticate,
+  clearCookie,
+  readCookie,
+  reportAccessChange,
+} from 'naf-auth';
 import type { Env, Variables } from './types';
 
 type Bindings = { Bindings: Env; Variables: Variables };
@@ -142,6 +149,33 @@ export const ssoGuard: MiddlewareHandler<Bindings> = async (c, next) => {
 export const ssoRoutes = new Hono<Bindings>();
 
 ssoRoutes.get('/auth/callback', (c) => handleCallback(c.req.raw, c.env, ssoConfig(c.env)));
+
+/**
+ * الخروج: تُحذف الجلسة من KV ثم يُمسح الكوكي.
+ *
+ * والحذف من KV هو الخروج فعلاً — مسحُ الكوكي وحده يترك الجلسة حيّة في
+ * المساحة إلى أن ينتهي عمرها، فمن نسخ الكوكي قبل الخروج يبقى داخلاً.
+ *
+ * ولا يُبطَل الرمز مركزياً من هنا: الخروج محليّ من هذه المنصة وحدها،
+ * وإنهاء الجلسة المركزية موضعه المركز لا المنصة.
+ */
+export const ssoLogout: MiddlewareHandler<Bindings> = async (c) => {
+  const config = ssoConfig(c.env);
+  const sid = readCookie(c.req.raw, config.cookieName);
+  if (sid) await config.kv(c.env).delete(`sess:${sid}`);
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'set-cookie': clearCookie(config.cookieName),
+      'cache-control': 'no-store',
+    },
+  });
+};
+
+// مسجَّل قبل الحارس عمداً: الخروج يجب أن يعمل لمن جلسته انتهت أصلاً،
+// وإلا حُوِّل الخارجُ إلى المركز ليدخل قبل أن يُسمح له بالخروج.
+ssoRoutes.post('/auth/logout', ssoLogout);
 
 // صفحة /denied لا تُخدَم من هنا عمداً.
 // هي مسار عام في الحارس، فتصلها واجهة React كأي شاشة أخرى وتقرأ
