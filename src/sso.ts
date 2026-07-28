@@ -87,8 +87,12 @@ export async function linkOrCreateUser(
   // دخول بها لأن الهاش الفارغ لا يطابق شيئاً.
   if (!existing) {
     await env.DB.prepare(
+      // `DO NOTHING`: دخولان متزامنان لعضوٍ جديد يبلغان هنا معاً، فيُنشئ
+      // أحدهما الصفّ ويجد الآخر تعارضاً — وهو سباقٌ لا خطأ. وبلا هذا يصل
+      // الثاني «تعذّر التحقق من دخولك» على صفٍّ أُنشئ له فعلاً.
       `INSERT INTO users (id, name, email, password_hash, role_name, is_active)
-       VALUES (?, ?, ?, '', ?, 1)`,
+       VALUES (?, ?, ?, '', ?, 1)
+       ON CONFLICT(id) DO NOTHING`,
     )
       .bind(claims.sub, claims.name ?? '', (claims.email ?? '').toLowerCase(), DEFAULT_ROLE)
       .run();
