@@ -1,78 +1,27 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { api } from '../api';
-import { useAuth } from '../auth';
+import { useEffect } from 'react';
 import { NafLogo } from '../components/brand/NafLogo';
 
+/* شاشة الدخول لم تعد تسأل عن بريد ولا كلمة مرور: المصادقة كلها في المركز.
+   وما كان هنا — نموذجُ كلمة مرور و«التهيئة الأولى» — كان طريق دخول ثانياً
+   لا يمرّ بالمركز، وقد أُغلقت مساراته في الخادم.
+
+   والباب يُفتح بتحميلٍ كامل للجذر لا بتنقّل داخل React: الحارس في الـWorker
+   هو من يقرأ الجلسة ويحوّل إلى المركز، وتنقّلُ الموجّه لا يغادر الصفحة
+   فلا يمرّ به أصلاً.
+
+   والنصّ «جارٍ الدخول» من naf-terms.md §١٠ — انتظار الدخول. */
+
 export default function Login() {
-  const { needsSetup, refresh, user } = useAuth();
-  const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  if (user) {
-    navigate('/');
-    return null;
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr('');
-    setBusy(true);
-    try {
-      if (needsSetup) {
-        await api.post('/auth/setup', { name, email, password });
-      } else {
-        await api.post('/auth/login', { email, password });
-      }
-      await refresh();
-      navigate('/');
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  useEffect(() => {
+    window.location.replace('/');
+  }, []);
 
   return (
-    <div className="auth-wrap">
-      <form className="auth-card" onSubmit={submit}>
-        <div className="auth-brand">
-          <NafLogo variant="mark" className="h-20" />
-          <h1>منصة ناف للتسويق</h1>
-        </div>
-        <p className="sub">
-          {needsSetup ? 'التهيئة الأولى — إنشاء حساب المدير العام' : 'شركة ناف للاستشارات القانونية'}
-        </p>
-
-        {needsSetup && (
-          <div className="field">
-            <label>الاسم</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
-        )}
-        <div className="field">
-          <label>البريد الإلكتروني</label>
-          <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </div>
-        <div className="field">
-          <label>كلمة المرور</label>
-          <input
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-        {err && <p className="err">{err}</p>}
-        <button className="btn" style={{ width: '100%', marginTop: 8 }} disabled={busy}>
-          {busy ? '…' : needsSetup ? 'إنشاء الحساب والدخول' : 'تسجيل الدخول'}
-        </button>
-      </form>
-    </div>
+    <main className="min-h-full grid place-items-center p-6">
+      <div className="grid justify-items-center gap-4 text-center">
+        <NafLogo variant="mark" className="h-20" />
+        <p className="text-base text-muted-foreground">جارٍ الدخول</p>
+      </div>
+    </main>
   );
 }

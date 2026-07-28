@@ -12,7 +12,6 @@ type AuthState = {
   user: User | null;
   permissions: Record<string, boolean>;
   loading: boolean;
-  needsSetup: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
   can: (key: string) => boolean;
@@ -24,17 +23,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
 
   async function refresh() {
+    // صفحة الرفض لا تسأل عن العضو عند الإقلاع. هي عامة فتُحمَّل اللوحة
+    // عليها بلا جلسة؛ ولو سألت `/api/me` لردّ الوسيط ٤٠١ فحوّل إلى المركز،
+    // فيسقط الاستقبال، فيعود إلى الرفض — دورة لا تُقرأ فيها الرسالة أصلاً.
+    if (window.location.pathname === '/denied') {
+      setLoading(false);
+      return;
+    }
     try {
-      const [me, setup] = await Promise.all([
-        api.get('/auth/me'),
-        api.get('/auth/setup-status').catch(() => ({ needsSetup: false })),
-      ]);
+      const me = await api.get('/auth/me');
       setUser(me.user);
       setPermissions(me.permissions || {});
-      setNeedsSetup(setup.needsSetup);
     } catch {
       setUser(null);
     } finally {
@@ -47,15 +48,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function logout() {
-    await api.post('/auth/logout');
+    // الخروج خارج بادئة `/api` — مسجَّل قبل الحارس ليعمل لمن جلسته انتهت.
+    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     setUser(null);
     setPermissions({});
+    // تحميلٌ كامل للجذر: الكوكي مُسح، فالحارس يردّ التنقّل إلى باب المركز.
+    window.location.href = '/';
   }
 
   const can = (key: string) => !!permissions[key];
 
   return (
-    <AuthContext.Provider value={{ user, permissions, loading, needsSetup, refresh, logout, can }}>
+    <AuthContext.Provider value={{ user, permissions, loading, refresh, logout, can }}>
       {children}
     </AuthContext.Provider>
   );

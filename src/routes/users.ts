@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { hashPassword, newId } from '../util';
 import { logAudit } from '../services/audit';
 import { notifyAccessChange } from '../sso';
 
@@ -16,36 +15,19 @@ userRoutes.get('/', requirePermission('users.manage'), async (c) => {
   return c.json({ users: results });
 });
 
-userRoutes.post('/', requirePermission('users.manage'), async (c) => {
-  const { name, email, password, role_name } = await c.req.json<{
-    name: string;
-    email: string;
-    password: string;
-    role_name: string;
-  }>();
-  const roles = ['writer', 'marketing_manager', 'general_manager'];
-  if (!name || !email || !password || password.length < 8 || !roles.includes(role_name)) {
-    return c.json({ error: 'بيانات غير مكتملة أو كلمة مرور قصيرة' }, 400);
-  }
-  const exists = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?')
-    .bind(email.toLowerCase())
-    .first();
-  if (exists) return c.json({ error: 'البريد مستخدم مسبقاً' }, 400);
+/* لا إنشاء عضو من هنا، ولا إعادة تعيين كلمة مرور.
 
-  const id = newId('usr');
-  await c.env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role_name) VALUES (?, ?, ?, ?, ?)',
-  )
-    .bind(id, name, email.toLowerCase(), await hashPassword(password), role_name)
-    .run();
-  const actor = c.get('user');
-  c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'user_create', 'user', id, `${email} (${role_name})`));
-  return c.json({ ok: true, id });
-});
+   العضوية تأتي من نظام الدخول الموحّد والصلاحية تُقرّر هنا: العضو يظهر
+   في القائمة بعد أوّل دخول له من المركز، فيُنشأ سجلّه بالدور الافتراضي.
+   وسجلٌّ يُنشأ هنا ببريد لا يطابق ما في المركز حرفياً يبقى معلّقاً إلى
+   الأبد — لا يدخله صاحبه ولا يُربط به.
+
+   وكلمة المرور لم يبقَ لها قارئ بعد إغلاق الدخول المحلي، فإعادة تعيينها
+   تعطي المسؤول إحساس فعلٍ لا أثر له. */
 
 userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
   const id = c.req.param('id');
-  const body = await c.req.json<{ role_name?: string; is_active?: boolean; password?: string }>();
+  const body = await c.req.json<{ role_name?: string; is_active?: boolean }>();
   const roles = ['writer', 'marketing_manager', 'general_manager'];
   const actor = c.get('user');
   const changes: string[] = [];
@@ -63,12 +45,6 @@ userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
     // خارج مسار الطلب: تعطيل العضو تمّ في القاعدة فعلاً، وتعذّر الوصول
     // إلى المركز لا يجوز أن يردّ العملية على المسؤول بخطأ.
     c.executionCtx.waitUntil(notifyAccessChange(c.env, id, body.is_active));
-  }
-  if (body.password && body.password.length >= 8) {
-    await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-      .bind(await hashPassword(body.password), id)
-      .run();
-    changes.push('إعادة تعيين كلمة المرور');
   }
   if (changes.length) {
     c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'user_update', 'user', id, changes.join('، ')));

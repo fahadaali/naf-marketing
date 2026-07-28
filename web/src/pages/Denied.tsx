@@ -1,42 +1,66 @@
-// شاشة الرفض — تُفتح بلا جلسة، فهي مسار عام في حارس الدخول الموحّد.
-//
-// النصوص من naf-terms.md حصراً. وبلا أيقونة عمداً: السجلّ يسجّل لـ«بلا
-// صلاحية» و«الوصول منتهٍ» أيقونةً `—`، وينصّ على أن «حرمان المستخدم
-// وانتهاء وصوله لا شارة لهما… ومعه السبب نصاً». فالسبب هنا نصّ وحده،
-// والحالة غير مبلَّغة باللون.
+import { CircleAlert, CircleSlash, ShieldX } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
-// المصطلحات كما وردت في naf-terms.md — لا تُصَغ محلياً.
-//
-// ولا سطر إرشاد تحتها: «راجع مسؤول المنصة» صيغَ هنا محلياً ولا مقابل له
-// في السجلّ، فحُذف. إعادته تبدأ بتسجيله في naf-ui لا بكتابته هنا.
-//
-// ولا leading-*: رمز المقاس يحمل ارتفاع سطره معه
-// (--text-xl--line-height: 1.65)، وleading-relaxed يدوسه بـ1.625 —
-// أي يقصّر سطراً عربياً وُسّع عمداً لأجل الحركات والنزلات.
-const DENIED_TERMS: Record<string, string> = {
-  inactive: 'معطّل',
-  not_member: 'لا تملك صلاحية الوصول لهذه المنصة',
-  bad_state: 'لا تملك صلاحية الوصول لهذه المنصة',
-  auth_failed: 'لا تملك صلاحية الوصول لهذه المنصة',
-  expired: 'انتهت صلاحية وصولك',
+/* شاشة الرفض — تُفتح بلا جلسة، فهي مسار عام في حارس الدخول الموحّد.
+
+   النصوص والأيقونات والألوان من naf-terms.md §١٠ «منع الدخول إلى منصة»
+   حرفياً. أربعة رموز لا خامس لها، والصفحة تترجم الرمز إلى المصطلح
+   المسجَّل — الحزمة تمرّر رمزاً لا جملة، ولو حملت الجملة لصارت مصدر نصّ
+   ثانياً خارج السجلّ.
+
+   وكانت هذه الشاشة بلا أيقونة وبنصوص لا تطابق السجلّ: صيغت حين كان
+   المثبَّت v1.11.0، وسُجّلت هذه الحالات الأربع بأيقوناتها وألوانها بعده.
+   والحالة لا تُبلَّغ باللون وحده — أيقونة ونصّ معها في كل حال.
+
+   والعنوان «تعذّر الدخول» لا «رفض الدخول»: اثنتان من الأربع عطل تقني في
+   المحاولة نفسها لا حكمٌ على القارئ.
+
+   ولا رمز خطأ تقنياً يُعرض، ولا تلميح إلى أنّ للمنصة أعضاء غيره. */
+
+type DeniedCase = { text: string; Icon: LucideIcon; tone: string };
+
+const DENIED_CASES: Record<string, DeniedCase> = {
+  inactive: {
+    text: 'عضويتك في هذه المنصة معطّلة. راجع مسؤول المنصة.',
+    Icon: CircleSlash,
+    tone: 'text-muted-foreground',
+  },
+  not_member: {
+    text: 'لا تملك صلاحية الوصول لهذه المنصة',
+    Icon: ShieldX,
+    tone: 'text-destructive',
+  },
+  bad_state: {
+    text: 'انتهت جلسة دخولك. سجّل الدخول من جديد',
+    Icon: CircleAlert,
+    tone: 'text-destructive',
+  },
+  auth_failed: {
+    text: 'تعذّر التحقق من دخولك. أعد المحاولة.',
+    Icon: CircleAlert,
+    tone: 'text-destructive',
+  },
 };
 
 /** رمز مسجَّل يُترجَم من السجلّ؛ وسبب نصّي قادم من المركز يُعرض كما هو. */
-function reasonText(raw: string): string {
-  if (!raw) return DENIED_TERMS.not_member;
-  if (DENIED_TERMS[raw]) return DENIED_TERMS[raw];
+function resolve(raw: string): DeniedCase {
+  if (!raw) return DENIED_CASES.not_member;
+  if (DENIED_CASES[raw]) return DENIED_CASES[raw];
   // رمز غير معروف لا يُعرض للمستخدم كما هو — قد يكون رمزاً تقنياً.
-  if (/^[a-z_]+$/.test(raw)) return DENIED_TERMS.not_member;
-  return raw;
+  if (/^[a-z_]+$/.test(raw)) return DENIED_CASES.not_member;
+  return { ...DENIED_CASES.not_member, text: raw };
 }
 
 export default function Denied() {
   const raw = new URLSearchParams(window.location.search).get('r') || '';
+  const { text, Icon, tone } = resolve(raw);
 
   return (
     <main className="min-h-full grid place-items-center p-6">
-      <div className="max-w-prose text-center">
-        <h1 className="text-xl font-semibold text-foreground">{reasonText(raw)}</h1>
+      <div className="grid justify-items-center gap-4 max-w-prose text-center">
+        <Icon className={tone} size={40} aria-hidden="true" />
+        <h1 className="text-xl font-semibold text-foreground">تعذّر الدخول</h1>
+        <p className="text-base text-muted-foreground">{text}</p>
       </div>
     </main>
   );

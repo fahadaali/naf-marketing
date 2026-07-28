@@ -63,7 +63,6 @@ function TopSearch() {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
-  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const sz = 24; // مقاس التنقّل — naf-icons.md «المقاسات»
 
@@ -140,10 +139,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               className="icon-btn"
               title="تسجيل الخروج"
-              onClick={async () => {
-                await logout();
-                navigate('/login');
-              }}
+              onClick={() => logout()}
             >
               <LogOut size={20} />
             </button>

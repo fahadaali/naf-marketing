@@ -5,7 +5,14 @@
 
 import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
-import { createConfig, handleCallback, authenticate, reportAccessChange } from 'naf-auth';
+import {
+  createConfig,
+  handleCallback,
+  authenticate,
+  clearCookie,
+  readCookie,
+  reportAccessChange,
+} from 'naf-auth';
 import type { Env, Variables } from './types';
 
 type Bindings = { Bindings: Env; Variables: Variables };
@@ -113,6 +120,15 @@ export function ssoConfig(env: Env) {
     publicPaths: PUBLIC_PATHS,
     publicPrefixes: PUBLIC_PREFIXES,
     onClaims: (claims: { sub: string; email?: string; name?: string }) => linkOrCreateUser(env, claims),
+    // رمز الخطأ وحده لا يكفي: كل فشل مبادلة يصل رمزه `exchange_failed`،
+    // وحالةُ ردّ المركز هي ما يفرّق بين سرّ خاطئ (401) وصفّ وصول ناقص
+    // (403) ورمز عبور مستهلَك (400). ورسالة AuthError تحمل الحالة.
+    // ولا يُسجَّل السرّ ولا نصّ استجابة المركز — قد يعيد ما أُرسل إليه.
+    onError: (code: string, err: unknown) => {
+      const detail =
+        err instanceof Error && err.message && err.message !== code ? ` — ${err.message}` : '';
+      console.error(`naf-auth: ${code}${detail}`);
+    },
   });
 }
 
@@ -134,6 +150,33 @@ export const ssoRoutes = new Hono<Bindings>();
 
 ssoRoutes.get('/auth/callback', (c) => handleCallback(c.req.raw, c.env, ssoConfig(c.env)));
 
+/**
+ * الخروج: تُحذف الجلسة من KV ثم يُمسح الكوكي.
+ *
+ * والحذف من KV هو الخروج فعلاً — مسحُ الكوكي وحده يترك الجلسة حيّة في
+ * المساحة إلى أن ينتهي عمرها، فمن نسخ الكوكي قبل الخروج يبقى داخلاً.
+ *
+ * ولا يُبطَل الرمز مركزياً من هنا: الخروج محليّ من هذه المنصة وحدها،
+ * وإنهاء الجلسة المركزية موضعه المركز لا المنصة.
+ */
+export const ssoLogout: MiddlewareHandler<Bindings> = async (c) => {
+  const config = ssoConfig(c.env);
+  const sid = readCookie(c.req.raw, config.cookieName);
+  if (sid) await config.kv(c.env).delete(`sess:${sid}`);
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'set-cookie': clearCookie(config.cookieName),
+      'cache-control': 'no-store',
+    },
+  });
+};
+
+// مسجَّل قبل الحارس عمداً: الخروج يجب أن يعمل لمن جلسته انتهت أصلاً،
+// وإلا حُوِّل الخارجُ إلى المركز ليدخل قبل أن يُسمح له بالخروج.
+ssoRoutes.post('/auth/logout', ssoLogout);
+
 // صفحة /denied لا تُخدَم من هنا عمداً.
 // هي مسار عام في الحارس، فتصلها واجهة React كأي شاشة أخرى وتقرأ
 // naf-theme.css ومصطلحات naf-terms.md. وصفحة تُبنى في الخادم لا تحمّل
@@ -153,14 +196,26 @@ export async function notifyAccessChange(
   isActive: boolean,
 ): Promise<void> {
   if (!env.AUTH_CLIENT_SECRET || !env.AUTH_ISSUER || !env.PLATFORM_ID) return;
+
+  // العضو يُعرَّف بالبريد لا بمعرّفه المركزي: جدول الوصول في المركز
+  // يُطابَق بالبريد وحده. ومعرّفنا المحلي — ولو صار sub بعد الترحيل —
+  // لا يُقرأ هناك، فتبليغٌ به يمرّ بلا أثر.
+  const row = await env.DB.prepare('SELECT email FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ email: string }>();
+  if (!row?.email) return;
+
   try {
     await reportAccessChange(env, ssoConfig(env), {
-      userId,
-      status: isActive ? 'active' : 'revoked',
+      // granted أو revoked حصراً — وما عداهما يردّ عليه المركز invalid_state.
+      state: isActive ? 'granted' : 'revoked',
+      email: row.email,
       reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
     });
-  } catch {
-    // يُبتلع عمداً — انظر تعليق الدالة.
+  } catch (err) {
+    // يُبتلع عمداً — انظر تعليق الدالة. ويُسجَّل ليُقرأ من اللوغ:
+    // تبليغٌ يفشل صامتاً يترك بطاقة المستخدم في شبكته تدعوه إلى باب لا يفتح.
+    console.error(`naf-auth: access_report_failed — ${err instanceof Error ? err.message : ''}`);
   }
 }
 
