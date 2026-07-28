@@ -27,6 +27,15 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     return new Promise<T>(() => {});
   }
 
+  // ومنعُ الدخول يُعرض في شاشة الرفض بمصطلحه المسجَّل، لا برمزه التقني في
+  // رسالة خطأ. والفحص على حقل `denied` لأن المنصة نفسها تردّ 403 على من لا
+  // صلاحية له بجملة عربية بلا هذا الحقل — وهاتان حالتان مختلفتان: الأولى
+  // «لا تدخل هذه المنصة»، والثانية «ادخلها ولا تفعل هذا».
+  if (res.status === 403 && typeof data.denied === 'string') {
+    window.location.assign(data.denied);
+    return new Promise<T>(() => {});
+  }
+
   if (!res.ok) throw new Error(data.error || `خطأ (${res.status})`);
   return data as T;
 }
