@@ -35,6 +35,12 @@ userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
   if (body.role_name && roles.includes(body.role_name)) {
     await c.env.DB.prepare('UPDATE users SET role_name = ? WHERE id = ?').bind(body.role_name, id).run();
     changes.push(`الدور: ${body.role_name}`);
+    // تبليغ المركز بالدور وحده — بلا حالة، فالمنح لم يتغيّر. يعرضه المركز
+    // في صفّ الوصول ولا يقرّره. وخارج مسار الطلب: الترقية تمّت في القاعدة
+    // فعلاً، وتعذّر الوصول إلى المركز خلل في العرض لا في العملية.
+    if (typeof body.is_active !== 'boolean') {
+      c.executionCtx.waitUntil(notifyAccessChange(c.env, id));
+    }
   }
   if (typeof body.is_active === 'boolean') {
     await c.env.DB.prepare('UPDATE users SET is_active = ? WHERE id = ?')
