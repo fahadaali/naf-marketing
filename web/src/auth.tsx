@@ -13,7 +13,7 @@ type AuthState = {
   permissions: Record<string, boolean>;
   loading: boolean;
   refresh: () => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => void;
   can: (key: string) => boolean;
 };
 
@@ -47,25 +47,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, []);
 
-  async function logout() {
+  function logout() {
     // الخروج خارج بادئة `/api` — مسجَّل قبل الحارس ليعمل لمن جلسته انتهت.
     //
-    // والوجهة يقولها الخادم، وهي المركز لا جذر هذه المنصة. كان الجذر:
-    // وهو محميّ، فيحوّله الحارس إلى المركز، وجلسة المركز لم تُمسّ فتُصدر
-    // رمزاً جديداً — فيعود الخارجُ إلى شاشته قبل أن يقرأ شيئاً، ويقرأ من
-    // ذلك أن الزرّ لا يعمل.
-    let next = '/';
-    try {
-      const res = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
-      const data = await res.json().catch(() => null);
-      if (data && typeof data.next === 'string' && data.next) next = data.next;
-    } catch {
-      // تعذّر النداء: الوجهة تبقى الجذر، والحارس يردّه إلى الباب.
-    }
-    setUser(null);
-    setPermissions({});
-    // تنقّلٌ كامل لا `router.push`: الوجهة أصلٌ آخر، ونداء `fetch` لا يبلغه.
-    window.location.href = next;
+    // ═══ تنقّلٌ كامل بـ POST، لا نداء `fetch` ثم قفزة ═══
+    //
+    // كان: `fetch` يقرأ الوجهة من `next` في الردّ، فإن تعذّر النداء أو لم
+    // يُقرأ جسمه بقيت الوجهة الجذر. والجذر محميّ، فيحوّله الحارس إلى المركز،
+    // وجلسة المركز لم تُمسّ فتُصدر رمزاً جديداً — فيعود الخارجُ إلى الشاشة
+    // التي خرج منها. أي أن كل فشلٍ في ذلك النداء، أياً كان سببه، يُخرج
+    // بالمستخدم إلى المشهد نفسه بالضبط: «ضغطتُ خروج فبقيتُ مكاني».
+    //
+    // ومسارُ التنقّل لا يمرّ بشيء من ذلك: الخادم يردّ التنقّل بـ٣٠٢ إلى
+    // المركز مباشرةً — لا جسم يُقرأ ولا وجهة تُستنتج ولا احتياطيّ يخطئ.
+    // ويعمل ولو لم يصل الردّ أصلاً، لأن المتصفّح هو من يتنقّل لا الشيفرة.
+    //
+    // و`POST` لا `GET`: رابطٌ يُخرج صاحبَه بمجرّد فتحه تكفي صورةٌ في صفحة
+    // لتشغيله.
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/auth/logout';
+    document.body.appendChild(form);
+    form.submit();
   }
 
   const can = (key: string) => !!permissions[key];
