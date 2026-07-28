@@ -49,11 +49,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     // الخروج خارج بادئة `/api` — مسجَّل قبل الحارس ليعمل لمن جلسته انتهت.
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    //
+    // والوجهة يقولها الخادم، وهي المركز لا جذر هذه المنصة. كان الجذر:
+    // وهو محميّ، فيحوّله الحارس إلى المركز، وجلسة المركز لم تُمسّ فتُصدر
+    // رمزاً جديداً — فيعود الخارجُ إلى شاشته قبل أن يقرأ شيئاً، ويقرأ من
+    // ذلك أن الزرّ لا يعمل.
+    let next = '/';
+    try {
+      const res = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => null);
+      if (data && typeof data.next === 'string' && data.next) next = data.next;
+    } catch {
+      // تعذّر النداء: الوجهة تبقى الجذر، والحارس يردّه إلى الباب.
+    }
     setUser(null);
     setPermissions({});
-    // تحميلٌ كامل للجذر: الكوكي مُسح، فالحارس يردّ التنقّل إلى باب المركز.
-    window.location.href = '/';
+    // تنقّلٌ كامل لا `router.push`: الوجهة أصلٌ آخر، ونداء `fetch` لا يبلغه.
+    window.location.href = next;
   }
 
   const can = (key: string) => !!permissions[key];

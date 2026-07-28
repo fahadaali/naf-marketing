@@ -8,9 +8,8 @@ import type { MiddlewareHandler } from 'hono';
 import {
   createConfig,
   handleCallback,
+  handleLogout,
   authenticate,
-  clearCookie,
-  readCookie,
   reportAccessChange,
 } from 'naf-auth';
 import type { Env, Variables } from './types';
@@ -151,27 +150,22 @@ export const ssoRoutes = new Hono<Bindings>();
 ssoRoutes.get('/auth/callback', (c) => handleCallback(c.req.raw, c.env, ssoConfig(c.env)));
 
 /**
- * الخروج: تُحذف الجلسة من KV ثم يُمسح الكوكي.
+ * الخروج — في الحزمة، ووجهته المركز.
  *
- * والحذف من KV هو الخروج فعلاً — مسحُ الكوكي وحده يترك الجلسة حيّة في
- * المساحة إلى أن ينتهي عمرها، فمن نسخ الكوكي قبل الخروج يبقى داخلاً.
+ * كان هنا تنفيذٌ محلي يحذف الجلسة ويمسح الكوكي ويعيد `{ ok: true }`، ثم
+ * تنتقل اللوحة إلى `‎/`. والحذف والمسح كانا يقعان فعلاً، ولا أثر يراه
+ * المستخدم: جذر المنصة محميّ، فيحوّله الحارس إلى المركز، وجلسة المركز لم
+ * تُمسّ فتُصدر رمزاً جديداً، فيعود إلى الشاشة التي خرج منها قبل أن يقرأ
+ * شيئاً. فيقرأ من ذلك أن الزرّ لا يعمل.
  *
- * ولا يُبطَل الرمز مركزياً من هنا: الخروج محليّ من هذه المنصة وحدها،
- * وإنهاء الجلسة المركزية موضعه المركز لا المنصة.
+ * و`handleLogout` يخرج بالمتصفّح إلى `‎{issuer}/` — خارج السياج — ويعيد
+ * الوجهة في `next` لأن نداء `fetch` لا يتبع تحويلةً إلى أصل آخر.
+ *
+ * ولا تُبطَل جلسة المركز من هنا: الخروج من هذه المنصة لا يُخرج صاحبه من
+ * الأربع الأخرى وهو لم يطلب.
  */
-export const ssoLogout: MiddlewareHandler<Bindings> = async (c) => {
-  const config = ssoConfig(c.env);
-  const sid = readCookie(c.req.raw, config.cookieName);
-  if (sid) await config.kv(c.env).delete(`sess:${sid}`);
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'set-cookie': clearCookie(config.cookieName),
-      'cache-control': 'no-store',
-    },
-  });
-};
+export const ssoLogout: MiddlewareHandler<Bindings> = (c) =>
+  handleLogout(c.req.raw, c.env, ssoConfig(c.env));
 
 // مسجَّل قبل الحارس عمداً: الخروج يجب أن يعمل لمن جلسته انتهت أصلاً،
 // وإلا حُوِّل الخارجُ إلى المركز ليدخل قبل أن يُسمح له بالخروج.
@@ -193,24 +187,34 @@ ssoRoutes.post('/auth/logout', ssoLogout);
 export async function notifyAccessChange(
   env: Env,
   userId: string,
-  isActive: boolean,
+  isActive?: boolean,
 ): Promise<void> {
   if (!env.AUTH_CLIENT_SECRET || !env.AUTH_ISSUER || !env.PLATFORM_ID) return;
 
   // العضو يُعرَّف بالبريد لا بمعرّفه المركزي: جدول الوصول في المركز
   // يُطابَق بالبريد وحده. ومعرّفنا المحلي — ولو صار sub بعد الترحيل —
   // لا يُقرأ هناك، فتبليغٌ به يمرّ بلا أثر.
-  const row = await env.DB.prepare('SELECT email FROM users WHERE id = ?')
+  //
+  // والدور يُقرأ معه: المركز يعرضه في صفّ الوصول ولا يقرّره — فمسؤول
+  // النظام يرى ماذا صار يرى من منحه بدل أن يسأل مسؤول المنصة.
+  const row = await env.DB.prepare('SELECT email, role_name FROM users WHERE id = ?')
     .bind(userId)
-    .first<{ email: string }>();
+    .first<{ email: string; role_name: string }>();
   if (!row?.email) return;
 
   try {
     await reportAccessChange(env, ssoConfig(env), {
-      // granted أو revoked حصراً — وما عداهما يردّ عليه المركز invalid_state.
-      state: isActive ? 'granted' : 'revoked',
       email: row.email,
-      reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
+      // بلا حالة حين يكون التبليغ عن دورٍ تغيّر وحده: كتابةُ `granted` مع
+      // كل ترقية تمحو سحباً صادراً من المركز.
+      ...(typeof isActive === 'boolean'
+        ? {
+            // granted أو revoked حصراً — وما عداهما يردّ عليه المركز invalid_state.
+            state: (isActive ? 'granted' : 'revoked') as 'granted' | 'revoked',
+            reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
+          }
+        : {}),
+      role: row.role_name,
     });
   } catch (err) {
     // يُبتلع عمداً — انظر تعليق الدالة. ويُسجَّل ليُقرأ من اللوغ:
