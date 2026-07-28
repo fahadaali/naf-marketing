@@ -113,6 +113,15 @@ export function ssoConfig(env: Env) {
     publicPaths: PUBLIC_PATHS,
     publicPrefixes: PUBLIC_PREFIXES,
     onClaims: (claims: { sub: string; email?: string; name?: string }) => linkOrCreateUser(env, claims),
+    // رمز الخطأ وحده لا يكفي: كل فشل مبادلة يصل رمزه `exchange_failed`،
+    // وحالةُ ردّ المركز هي ما يفرّق بين سرّ خاطئ (401) وصفّ وصول ناقص
+    // (403) ورمز عبور مستهلَك (400). ورسالة AuthError تحمل الحالة.
+    // ولا يُسجَّل السرّ ولا نصّ استجابة المركز — قد يعيد ما أُرسل إليه.
+    onError: (code: string, err: unknown) => {
+      const detail =
+        err instanceof Error && err.message && err.message !== code ? ` — ${err.message}` : '';
+      console.error(`naf-auth: ${code}${detail}`);
+    },
   });
 }
 
@@ -153,14 +162,26 @@ export async function notifyAccessChange(
   isActive: boolean,
 ): Promise<void> {
   if (!env.AUTH_CLIENT_SECRET || !env.AUTH_ISSUER || !env.PLATFORM_ID) return;
+
+  // العضو يُعرَّف بالبريد لا بمعرّفه المركزي: جدول الوصول في المركز
+  // يُطابَق بالبريد وحده. ومعرّفنا المحلي — ولو صار sub بعد الترحيل —
+  // لا يُقرأ هناك، فتبليغٌ به يمرّ بلا أثر.
+  const row = await env.DB.prepare('SELECT email FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ email: string }>();
+  if (!row?.email) return;
+
   try {
     await reportAccessChange(env, ssoConfig(env), {
-      userId,
-      status: isActive ? 'active' : 'revoked',
+      // granted أو revoked حصراً — وما عداهما يردّ عليه المركز invalid_state.
+      state: isActive ? 'granted' : 'revoked',
+      email: row.email,
       reason: isActive ? 'أُعيد تفعيله من إعدادات المنصة' : 'أُوقف من إعدادات المنصة',
     });
-  } catch {
-    // يُبتلع عمداً — انظر تعليق الدالة.
+  } catch (err) {
+    // يُبتلع عمداً — انظر تعليق الدالة. ويُسجَّل ليُقرأ من اللوغ:
+    // تبليغٌ يفشل صامتاً يترك بطاقة المستخدم في شبكته تدعوه إلى باب لا يفتح.
+    console.error(`naf-auth: access_report_failed — ${err instanceof Error ? err.message : ''}`);
   }
 }
 
