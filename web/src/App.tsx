@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { useAuth } from './auth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -20,17 +21,20 @@ import Audit from './pages/Audit';
 
 /* شاشة «لا صلاحية» — naf-terms.md §٧ · الأخطاء · «لا صلاحية».
 
-   بلا أيقونة عمداً: `naf-icons.md` تُسجّل `ShieldX` لـ«منع الوصول إلى منصة»
-   وحدها — بابٌ لا يدخله القارئ أصلاً — ولا مقابل مسجَّل لصفحةٍ داخل منصة
-   يدخلها. واختيار الأقرب شكلاً هو ما تمنعه القاعدة، فتُترك حتى تُسجَّل.
+   والأيقونة `Lock` من `naf-icons.md`: «محتوى مقفل يراه المستخدم ولا يفتحه»
+   — وهي حال هذه الشاشة بالضبط. ولا تُستعار `ShieldX`: تلك لمن رُدّ على باب
+   منصة فلم يدخلها، واستعارتها هنا تجعل من يقف داخلها يقرأ أنه مُنع منها.
 
-   ولا لون حالة: المعنى في النصّ وحده، فلا يُبلَّغ باللون بلا أيقونة معه. */
+   ولا تُقلب في الاتجاه: قفلٌ لا سهم. */
 function NoPermission() {
   return (
     <main className="min-h-full grid place-items-center p-6">
-      <p className="max-w-prose text-center text-base text-muted-foreground" role="status">
-        لا تملك صلاحية الوصول لهذه الصفحة
-      </p>
+      <div className="grid justify-items-center gap-4 max-w-prose text-center">
+        <Lock className="text-muted-foreground" size={40} aria-hidden="true" />
+        <p className="text-base text-muted-foreground" role="status">
+          لا تملك صلاحية الوصول لهذه الصفحة
+        </p>
+      </div>
     </main>
   );
 }
