@@ -78,7 +78,8 @@ a:hover { text-decoration: underline; }
 .topbar .user-chip { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
-  background: var(--primary-soft); color: var(--primary);
+  /* الأحرف الأولى نصّ على خلفية -soft — الرمز -strong لا الأساسي. §٦ */
+  background: var(--primary-soft); color: var(--primary-strong);
   display: grid; place-items: center; font-weight: 700; font-size: var(--text-sm);
 }
 .icon-btn {
@@ -180,11 +181,16 @@ a:hover { text-decoration: underline; }
   padding: var(--space-1) var(--space-3); border-radius: 999px; font-size: var(--text-xs); font-weight: 600;
   border: 1px solid transparent;
 }
+/* النصّ والأيقونة بالرمز `-strong` لا بالأساسي: الشارة نصّها --text-xs
+   بوزن 600، ورمزُ الحالة على خلفيته -soft يبلغ ٣٫٧–٣٫٨:١ — دون AA لهذا
+   المقاس. والرموز -strong هي الدرجةُ نفسها عند لمعان مقيس ليتجاوز ٤٫٥:١
+   في الوضعين، فلا يُغمَّق لون حالة يدوياً لبلوغ التباين. CLAUDE.md §٦.
+   والخلفية تبقى -soft: المصلَح هو المقدّمة وحدها. */
 .badge.gray   { background: var(--muted); color: var(--muted-foreground); }
-.badge.blue   { background: var(--info-soft); color: var(--info); }
-.badge.amber  { background: var(--warning-soft); color: var(--warning); }
-.badge.green  { background: var(--success-soft); color: var(--success); }
-.badge.red    { background: var(--destructive-soft); color: var(--destructive); }
+.badge.blue   { background: var(--info-soft); color: var(--info-strong); }
+.badge.amber  { background: var(--warning-soft); color: var(--warning-strong); }
+.badge.green  { background: var(--success-soft); color: var(--success-strong); }
+.badge.red    { background: var(--destructive-soft); color: var(--destructive-strong); }
 
 /* ===== المؤشرات ===== */
 .stat .num { font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.02em; }
@@ -243,7 +249,8 @@ h3, h4 { letter-spacing: -0.01em; }
 .cal-cell.other { background: color-mix(in oklab, var(--muted) 40%, transparent); opacity: .6; }
 .cal-day { font-weight: 600; color: var(--muted-foreground); margin-bottom: var(--space-1); }
 .cal-event {
-  background: var(--primary-soft); color: var(--primary); border-radius: var(--radius);
+  /* عنوان الموعد نصّ --text-xs على خلفية -soft — الرمز -strong. §٦ */
+  background: var(--primary-soft); color: var(--primary-strong); border-radius: var(--radius);
   padding: var(--space-1) var(--space-2); margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: 500; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
