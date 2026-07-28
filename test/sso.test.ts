@@ -10,6 +10,7 @@ import {
   USER_REFERENCES,
   DEFAULT_ROLE,
 } from '../src/sso';
+import { getUserFromRequest } from '../src/auth';
 import type { Env } from '../src/types';
 
 type Recorded = { sql: string; args: unknown[] };
@@ -243,5 +244,56 @@ describe('قائمة الحارس', () => {
     for (const path of ['/', '/api/posts', '/api/users', '/api/settings', '/api/auth/login', '/api/audit']) {
       expect(isPublic(path), `${path} يجب أن يكون محمياً`).toBe(false);
     }
+  });
+});
+
+// الباب الثاني، بعد إزالته.
+// كان `getUserFromRequest` يقبل كوكي `naf_session` وجدول `sessions` من نظام
+// الدخول المحلي. وبقاؤه كان يعني حارساً واحداً وبابين: الثاني لا يعرفه
+// المركز، ولا يسري عليه إيقافُه، ولا ينتهي بانتهاء رمزه.
+describe('لا مصدر ثانٍ للمستخدم', () => {
+  function env(session: Record<string, unknown> | null) {
+    const asked: string[] = [];
+    const e = {
+      DB: {
+        prepare(sql: string) {
+          asked.push(sql);
+          return { bind: () => ({ first: async () => ({ id: 'sub-1', name: 'فهد', is_active: 1 }) }) };
+        },
+      },
+      AUTH_KV: {
+        get: async () => session,
+        put: async () => {},
+        delete: async () => {},
+      },
+      AUTH_ISSUER: 'https://naf-id.pages.dev',
+      PLATFORM_ID: 'naf-marketing',
+      MEMBERS_TABLE: 'users',
+      MEMBERS_ID_COLUMN: 'id',
+      MEMBERS_ROLE_COLUMN: 'role_name',
+      MEMBERS_PERMS_COLUMN: '-',
+    } as unknown as Env;
+    return { env: e, asked };
+  }
+
+  const req = (cookie: string) =>
+    new Request('https://platform.example/api/posts', { headers: { cookie } });
+
+  it('كوكي الجلسة المحلية القديمة لا يعرّف أحداً', async () => {
+    const { env: e, asked } = env(null);
+    expect(await getUserFromRequest(e, req('naf_session=old-token'))).toBeNull();
+    // ولا يُستعلَم عن جدول الجلسات أصلاً.
+    expect(asked.some((s) => s.includes('sessions'))).toBe(false);
+  });
+
+  it('جلسة المركز وحدها هي ما يعرّف المستخدم', async () => {
+    const { env: e } = env({ sub: 'sub-1' });
+    const user = await getUserFromRequest(e, req('naf_sid=s1'));
+    expect(user?.id).toBe('sub-1');
+  });
+
+  it('بلا كوكي المركز لا مستخدم، ولو حمل الطلب كوكيات أخرى', async () => {
+    const { env: e } = env({ sub: 'sub-1' });
+    expect(await getUserFromRequest(e, req('theme=dark; naf_session=old'))).toBeNull();
   });
 });

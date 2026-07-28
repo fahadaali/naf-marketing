@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { hashPassword, newId } from '../util';
+import { newId } from '../util';
 import { logAudit } from '../services/audit';
 import { notifyAccessChange } from '../sso';
 
@@ -16,16 +16,25 @@ userRoutes.get('/', requirePermission('users.manage'), async (c) => {
   return c.json({ users: results });
 });
 
+/**
+ * إضافة عضو قبل أول دخوله — لتحديد دوره سلفاً لا لإنشاء حساب.
+ *
+ * فلا كلمة مرور: لا شيء يفحصها بعد اليوم. والصفّ يُنشأ بمعرّف محلي مؤقّت،
+ * ثم يحلّ `sub` القادم من المركز محلّه عند أول دخول — يطابقه الترحيل الكسول
+ * بالبريد، وهو الحقل المشترك الوحيد بين الطرفين.
+ *
+ * و`password_hash` هنا `NOT NULL`، فتُكتب فيه قيمة فارغة صريحة كما يفعل
+ * `linkOrCreateUser` — والهاش الفارغ لا يطابق شيئاً أصلاً.
+ */
 userRoutes.post('/', requirePermission('users.manage'), async (c) => {
-  const { name, email, password, role_name } = await c.req.json<{
+  const { name, email, role_name } = await c.req.json<{
     name: string;
     email: string;
-    password: string;
     role_name: string;
   }>();
   const roles = ['writer', 'marketing_manager', 'general_manager'];
-  if (!name || !email || !password || password.length < 8 || !roles.includes(role_name)) {
-    return c.json({ error: 'بيانات غير مكتملة أو كلمة مرور قصيرة' }, 400);
+  if (!name || !email || !roles.includes(role_name)) {
+    return c.json({ error: 'بيانات غير مكتملة' }, 400);
   }
   const exists = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?')
     .bind(email.toLowerCase())
@@ -34,9 +43,9 @@ userRoutes.post('/', requirePermission('users.manage'), async (c) => {
 
   const id = newId('usr');
   await c.env.DB.prepare(
-    'INSERT INTO users (id, name, email, password_hash, role_name) VALUES (?, ?, ?, ?, ?)',
+    "INSERT INTO users (id, name, email, password_hash, role_name) VALUES (?, ?, ?, '', ?)",
   )
-    .bind(id, name, email.toLowerCase(), await hashPassword(password), role_name)
+    .bind(id, name, email.toLowerCase(), role_name)
     .run();
   const actor = c.get('user');
   c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'user_create', 'user', id, `${email} (${role_name})`));
@@ -45,7 +54,7 @@ userRoutes.post('/', requirePermission('users.manage'), async (c) => {
 
 userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
   const id = c.req.param('id');
-  const body = await c.req.json<{ role_name?: string; is_active?: boolean; password?: string }>();
+  const body = await c.req.json<{ role_name?: string; is_active?: boolean }>();
   const roles = ['writer', 'marketing_manager', 'general_manager'];
   const actor = c.get('user');
   const changes: string[] = [];
@@ -63,12 +72,6 @@ userRoutes.patch('/:id', requirePermission('users.manage'), async (c) => {
     // خارج مسار الطلب: تعطيل العضو تمّ في القاعدة فعلاً، وتعذّر الوصول
     // إلى المركز لا يجوز أن يردّ العملية على المسؤول بخطأ.
     c.executionCtx.waitUntil(notifyAccessChange(c.env, id, body.is_active));
-  }
-  if (body.password && body.password.length >= 8) {
-    await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-      .bind(await hashPassword(body.password), id)
-      .run();
-    changes.push('إعادة تعيين كلمة المرور');
   }
   if (changes.length) {
     c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'user_update', 'user', id, changes.join('، ')));

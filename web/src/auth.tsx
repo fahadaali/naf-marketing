@@ -12,7 +12,6 @@ type AuthState = {
   user: User | null;
   permissions: Record<string, boolean>;
   loading: boolean;
-  needsSetup: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
   can: (key: string) => boolean;
@@ -24,17 +23,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
 
   async function refresh() {
     try {
-      const [me, setup] = await Promise.all([
-        api.get('/auth/me'),
-        api.get('/auth/setup-status').catch(() => ({ needsSetup: false })),
-      ]);
+      const me = await api.get('/auth/me');
       setUser(me.user);
       setPermissions(me.permissions || {});
-      setNeedsSetup(setup.needsSetup);
     } catch {
       setUser(null);
     } finally {
@@ -46,16 +40,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, []);
 
+  // الخروج ينهي جلسة المنصة في الخادم، ثم تُعاد الصفحة ليقرّر الحارس الوجهة —
+  // ولا حالة محلية تُصفَّر: مسحُها هنا يعرض واجهةً بلا مستخدم للحظة قبل المغادرة.
   async function logout() {
     await api.post('/auth/logout');
-    setUser(null);
-    setPermissions({});
+    window.location.assign('/');
   }
 
   const can = (key: string) => !!permissions[key];
 
   return (
-    <AuthContext.Provider value={{ user, permissions, loading, needsSetup, refresh, logout, can }}>
+    <AuthContext.Provider value={{ user, permissions, loading, refresh, logout, can }}>
       {children}
     </AuthContext.Provider>
   );

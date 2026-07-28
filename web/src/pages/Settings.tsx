@@ -88,7 +88,7 @@ function Users() {
 }
 
 function NewUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ name: '', email: '', password: '', role_name: 'writer' });
+  const [f, setF] = useState({ name: '', email: '', role_name: 'writer' });
   const [err, setErr] = useState('');
   async function save() {
     setErr('');
@@ -98,7 +98,6 @@ function NewUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => voi
     <Modal title="مستخدم جديد" onClose={onClose}>
       <div className="field"><label>الاسم</label><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
       <div className="field"><label>البريد</label><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-      <div className="field"><label>كلمة المرور (8 أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
       <div className="field">
         <label>الدور</label>
         <select className="select" value={f.role_name} onChange={(e) => setF({ ...f, role_name: e.target.value })}>

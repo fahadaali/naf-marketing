@@ -96,7 +96,6 @@ npm run dev
 # المفاتيح السرية عبر Secrets (لا تُخزَّن في الكود إطلاقاً)
 npx wrangler secret put CLAUDE_API_KEY
 npx wrangler secret put PROVIDER_API_KEY
-npx wrangler secret put AUTH_SECRET
 npx wrangler secret put AUTH_CLIENT_SECRET    # سرّ المنصة لدى naf-id
 
 # تطبيق الهجرات على قاعدة الإنتاج

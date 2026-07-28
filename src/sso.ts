@@ -87,8 +87,8 @@ export async function linkOrCreateUser(
 
   // عضو جديد تماماً: يُنشأ سجلّه هنا لا في الحزمة، لأن password_hash
   // في هذا الجدول NOT NULL ولا تعرفه الحزمة — ومستخدم الدخول الموحّد
-  // بلا كلمة مرور. قيمة فارغة صريحة، وverifyPassword يردّ أي محاولة
-  // دخول بها لأن الهاش الفارغ لا يطابق شيئاً.
+  // بلا كلمة مرور. قيمة فارغة صريحة، والعمود بقيّةٌ من نظام دخولٍ أُزيل:
+  // لا شيء يقرؤه اليوم، والهجرات للأمام فقط فلا يُسقَط.
   if (!existing) {
     await env.DB.prepare(
       `INSERT INTO users (id, name, email, password_hash, role_name, is_active)

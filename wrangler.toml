@@ -58,5 +58,4 @@ DEFAULT_ROLE = "writer"
 # المفاتيح السرية تُضبط عبر Secrets ولا تُخزَّن هنا:
 #   wrangler secret put CLAUDE_API_KEY
 #   wrangler secret put PROVIDER_API_KEY
-#   wrangler secret put AUTH_SECRET
 #   wrangler secret put AUTH_CLIENT_SECRET   # سرّ المنصة لدى naf-id

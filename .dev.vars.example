@@ -10,8 +10,9 @@ PROVIDER_API_KEY="xxxxxxxx"
 # مزوّد النشر المفعّل: mock | zernio | late | ayrshare
 PROVIDER_NAME="mock"
 
-# سرّ توقيع الجلسات (نصّ عشوائي طويل)
-AUTH_SECRET="change-me-to-a-long-random-string"
+# سرّ هذه المنصة لدى naf-id — يعرضه المركز مرة واحدة عند إنشاء صفّ المنصة.
+# لا يمرّ بالمتصفح: المبادلة على /api/token من الخادم وحده.
+AUTH_CLIENT_SECRET=""
 
 # تكامل بيسكامب (مركز المعرفة) — اختياري. أنشئ تطبيق OAuth في بيسكامب:
 #   https://launchpad.37signals.com/integrations

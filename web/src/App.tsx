@@ -1,7 +1,6 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './auth';
 import Layout from './components/Layout';
-import Login from './pages/Login';
 import Denied from './pages/Denied';
 import Dashboard from './pages/Dashboard';
 import PostsList from './pages/PostsList';
@@ -20,16 +19,19 @@ import Audit from './pages/Audit';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
-  const location = useLocation();
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>جارٍ التحميل…</div>;
-  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  // لا شاشة دخول محلية يُحوَّل إليها: الباب في المركز، والحارس على الخادم هو
+  // من يقرّر — فتُعاد الصفحة من الخادم ليقرّر هو، بدل أن تخمّن الواجهة.
+  if (!user) {
+    window.location.reload();
+    return null;
+  }
   return <Layout>{children}</Layout>;
 }
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
       {/* عامة في حارس الدخول الموحّد — تُفتح بلا جلسة */}
       <Route path="/denied" element={<Denied />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />

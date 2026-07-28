@@ -1,52 +1,32 @@
-import type { Env, User } from './types';
-import { newId, nowIso } from './util';
-
-const SESSION_COOKIE = 'naf_session';
-const SESSION_DAYS = 14;
-
-export function getSessionToken(req: Request): string | null {
-  const cookie = req.headers.get('cookie') || '';
-  const match = cookie.match(new RegExp(`(?:^|; )${SESSION_COOKIE}=([^;]+)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-export function sessionCookie(token: string): string {
-  const maxAge = SESSION_DAYS * 24 * 60 * 60;
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
-}
-
-export function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
-}
-
-export async function createSession(env: Env, userId: string): Promise<string> {
-  const token = newId('sess');
-  const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  await env.DB.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
-    .bind(token, userId, expires)
-    .run();
-  return token;
-}
-
-export async function destroySession(env: Env, token: string): Promise<void> {
-  await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(token).run();
-}
-
-// وصلة الدخول الموحّد: جلسة المنصة صارت في KV بمفتاح sess:{sid}، وتحمل
-// sub القادم من المركز — وهو نفسه users.id بعد الترحيل.
+// قراءة المستخدم من الجلسة. مصدرٌ واحد لا مصدران.
 //
-// وُضعت هنا وحدها لأن كل قارئ للمستخدم يمرّ بهذه الدالة: requireAuth
-// و/api/auth/me وكل المسارات. فبقيت المسارات العشرون بلا تعديل.
-const SSO_COOKIE = 'naf_sid';
+// المصادقة كلُّها في `naf-id`: لا كلمة مرور تُفحص هنا، ولا جلسة تُصنع هنا.
+// جلسة المنصة يكتبها مسار الاستقبال في `AUTH_KV` بمفتاح `sess:{sid}`، وتحمل
+// `sub` القادم من المركز — وهو نفسه `users.id` بعد الترحيل الكسول.
+//
+// ووُضعت القراءة هنا وحدها لأن كل قارئ للمستخدم يمرّ بهذه الدالة: requireAuth
+// و`/api/auth/me` وكل المسارات. فبقيت المسارات العشرون بلا تعديل.
 
-async function getSsoUser(env: Env, req: Request): Promise<User | null> {
+import { clearCookie, readCookie, sessionKey } from 'naf-auth';
+import type { Env, User } from './types';
+import { ssoConfig } from './sso';
+import { nowIso } from './util';
+
+/**
+ * المستخدم الحالي، أو `null`.
+ *
+ * ولا مسار ثانٍ إليه: كان هنا فرعٌ يقرأ كوكي `naf_session` وجدول `sessions`
+ * من نظام الدخول المحلي، وقد أُزيل مع النظام كلّه. وبقاؤه كان يعني بابين
+ * لبيتٍ حارسُه واحد — والثاني لا يعرفه المركز ولا يسري عليه إيقافُه.
+ */
+export async function getUserFromRequest(env: Env, req: Request): Promise<User | null> {
   if (!env.AUTH_KV) return null;
 
-  const cookie = req.headers.get('cookie') || '';
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SSO_COOKIE}=([^;]*)`));
-  if (!match) return null;
+  const config = ssoConfig(env);
+  const sid = readCookie(req, config.cookieName);
+  if (!sid) return null;
 
-  const session = await env.AUTH_KV.get(`sess:${decodeURIComponent(match[1])}`, 'json');
+  const session = await env.AUTH_KV.get(sessionKey(sid), 'json');
   if (!session || typeof session !== 'object') return null;
   const sub = (session as { sub?: string }).sub;
   if (!sub) return null;
@@ -61,34 +41,20 @@ async function getSsoUser(env: Env, req: Request): Promise<User | null> {
   return row;
 }
 
-export async function getUserFromRequest(env: Env, req: Request): Promise<User | null> {
-  const ssoUser = await getSsoUser(env, req);
-  if (ssoUser) return ssoUser;
-
-  const token = getSessionToken(req);
-  if (!token) return null;
-  const row = await env.DB.prepare(
-    `SELECT u.id, u.name, u.email, u.role_name, u.is_active, u.created_at, s.expires_at
-     FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.id = ?`,
-  )
-    .bind(token)
-    .first<User & { expires_at: string }>();
-
-  if (!row) return null;
-  if (new Date(row.expires_at).getTime() < Date.now()) {
-    await destroySession(env, token);
-    return null;
-  }
-  if (!row.is_active) return null;
-  const { expires_at, ...user } = row;
-  return user as User;
-}
-
-// عدد المستخدمين — لدعم التهيئة الأولى (bootstrap لأول مدير عام)
-export async function userCount(env: Env): Promise<number> {
-  const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM users').first<{ c: number }>();
-  return row?.c ?? 0;
+/**
+ * إنهاء جلسة المنصة.
+ *
+ * تُحذف من `AUTH_KV` ولا يُكتفى بمحو الكوكي: كوكي محذوف وجلسةٌ حيّة يعني أن
+ * نسخةً من المعرّف — في سجلّ وكيل أو في متصفّح آخر — لا تزال تفتح الباب.
+ *
+ * ولا يمسّ هذا جلسةَ المركز: الخروج من المنصة خروجٌ منها وحدها، ومن أراد
+ * الخروج من الشبكة كلّها يخرج من المركز.
+ */
+export async function endSession(env: Env, req: Request): Promise<string> {
+  const config = ssoConfig(env);
+  const sid = readCookie(req, config.cookieName);
+  if (sid && env.AUTH_KV) await env.AUTH_KV.delete(sessionKey(sid));
+  return clearCookie(config.cookieName);
 }
 
 export { nowIso };
