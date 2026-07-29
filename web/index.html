@@ -7,12 +7,21 @@
     <link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg" />
     <title>منصة ناف للتسويق</title>
     <script>
-      // تثبيت السمة قبل الرسم لتفادي وميض التبديل
+      // تثبيت المظهر قبل أول رسم لتفادي وميض التبديل.
+      //
+      // غياب المفتاح معناه «يتبع النظام» لا «الوضع الفاتح» — وهو العقد
+      // المسجَّل في naf-theme-toggle. كان الافتراض هنا 'light' صراحةً،
+      // فقارئٌ نظامه داكن ولم يختر شيئاً يُفتح له الفاتح ثم يقفز إلى
+      // الداكن حين يصل المكوّن، وهو الوميض نفسه الذي يمنعه هذا السطر.
+      //
+      // وسمة data-theme أُسقطت: لم تكن تقرأها ورقة أنماط واحدة، والآلية
+      // المسجَّلة صنف .dark على الجذر وحده.
       (function () {
         try {
-          var t = localStorage.getItem('naf-theme') || 'light';
-          document.documentElement.setAttribute('data-theme', t);
-          if (t === 'dark') document.documentElement.classList.add('dark');
+          var v = localStorage.getItem('naf-theme');
+          var dark = v === 'dark' || (v !== 'light' &&
+            matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
         } catch (e) {}
       })();
     </script>

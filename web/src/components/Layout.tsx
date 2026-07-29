@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard,
@@ -11,9 +11,6 @@ import {
   BarChart3,
   MessageCircle,
   Settings,
-  LogOut,
-  Sun,
-  Moon,
   Search,
   ShieldCheck,
   Mails,
@@ -23,36 +20,40 @@ import { useAuth } from '../auth';
 import { ROLE_LABELS } from '../api';
 import NotificationBell from './NotificationBell';
 import { NafLogo } from './brand/NafLogo';
+import {
+  AppShell,
+  AppMain,
+  AppHeader,
+  HeaderStart,
+  HeaderEnd,
+  AppContent,
+  Sidebar,
+  SidebarHeader,
+  SidebarNav,
+  ShellBackdrop,
+  MenuButton,
+  AccountMenu,
+  navLinkClassName,
+  useShell,
+} from '../naf/ui/app-shell';
+import { ThemeToggle } from '../naf/ui/theme-toggle';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
-
-function useTheme() {
-  const [theme, setTheme] = useState<string>(
-    () => document.documentElement.getAttribute('data-theme') || 'light',
-  );
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    // ثيم ناف يعتمد صنف `.dark`؛ نبقي السمة للأنماط المحلية حتى اكتمال النقل
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    try {
-      localStorage.setItem('naf-theme', theme);
-    } catch {}
-  }, [theme]);
-  return { theme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')) };
-}
 
 function TopSearch() {
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   return (
     <form
-      style={{ position: 'relative', width: 280 }}
-      onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}
+      className="top-search"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`);
+      }}
     >
-      <Search size={20} style={{ position: 'absolute', insetInlineStart: 11, top: 10, color: 'var(--muted-foreground)' }} />
+      <Search size={20} className="top-search-icon" aria-hidden="true" />
       <input
-        className="input"
-        style={{ paddingInlineStart: 32, height: 34 }}
+        className="input top-search-input"
         placeholder="بحث في المحتوى والأخبار…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
@@ -61,9 +62,18 @@ function TopSearch() {
   );
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+/** يغلق الدرج عند الانتقال — وإلا بقي مفتوحاً فوق الشاشة الجديدة. */
+function CloseDrawerOnNavigate() {
+  const { setOpen } = useShell();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+  return null;
+}
+
+function ShellBody({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
-  const { theme, toggle } = useTheme();
   const sz = 24; // مقاس التنقّل — naf-icons.md «المقاسات»
 
   const items: NavItem[] = [
@@ -87,20 +97,21 @@ export default function Layout({ children }: { children: ReactNode }) {
     },
   ];
 
-  const initials = (user?.name || '؟').trim().charAt(0);
-
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
+    <>
+      <CloseDrawerOnNavigate />
+      <ShellBackdrop />
+
+      <Sidebar>
+        <SidebarHeader>
           <NafLogo variant="mark" className="h-12 shrink-0" />
-          <div className="brand-text">
-            <b>منصة ناف</b>
-            <small>لإدارة التسويق</small>
+          <div>
+            <div className="naf-sidebar-brand-name">منصة ناف</div>
+            <div className="naf-sidebar-brand-sub">لإدارة التسويق</div>
           </div>
-        </div>
-        <div className="nav-section">القائمة</div>
-        <nav>
+        </SidebarHeader>
+        <SidebarNav>
+          <div className="naf-nav-section">القائمة</div>
           {items
             .filter((i) => i.show === undefined || i.show)
             .map((i) => (
@@ -108,45 +119,45 @@ export default function Layout({ children }: { children: ReactNode }) {
                 key={i.to}
                 to={i.to}
                 end={i.to === '/'}
-                className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}
+                className={({ isActive }) => navLinkClassName(isActive)}
               >
-                <span className="nav-icon">{i.icon}</span>
+                {i.icon}
                 <span>{i.label}</span>
               </NavLink>
             ))}
-        </nav>
-      </aside>
+        </SidebarNav>
+      </Sidebar>
 
-      <div className="main">
-        <header className="topbar">
-          <TopSearch />
-          <div className="user-chip">
+      <AppMain>
+        <AppHeader>
+          <HeaderStart>
+            <MenuButton />
+            <TopSearch />
+          </HeaderStart>
+          <HeaderEnd>
             <NotificationBell />
-            <button
-              className="icon-btn"
-              onClick={toggle}
-              title={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
-            >
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <div className="avatar">{initials}</div>
-            <div style={{ lineHeight: 1.35 }}>
-              <div style={{ fontWeight: 600 }}>{user?.name}</div>
-              <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                {user ? ROLE_LABELS[user.role_name] : ''}
-              </div>
-            </div>
-            <button
-              className="icon-btn"
-              title="تسجيل الخروج"
-              onClick={() => logout()}
-            >
-              <LogOut size={20} />
-            </button>
-          </div>
-        </header>
-        <main className="content">{children}</main>
-      </div>
-    </div>
+            {/* الخروج داخل القائمة لا أيقونةً مفردة بجوار الجرس: كانت
+                أيقونةً وحدها بلا نصّ، فتُقرأ سهماً غامضاً وتُنقر سهواً —
+                وإنهاء الجلسة لا رجعة فيه. */}
+            <AccountMenu
+              name={user?.name ?? 'مستخدم'}
+              email={user?.email}
+              role={user ? ROLE_LABELS[user.role_name] : undefined}
+              appearance={<ThemeToggle />}
+              onLogout={() => logout()}
+            />
+          </HeaderEnd>
+        </AppHeader>
+        <AppContent>{children}</AppContent>
+      </AppMain>
+    </>
+  );
+}
+
+export default function Layout({ children }: { children: ReactNode }) {
+  return (
+    <AppShell>
+      <ShellBody>{children}</ShellBody>
+    </AppShell>
   );
 }

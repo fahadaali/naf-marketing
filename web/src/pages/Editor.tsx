@@ -523,7 +523,7 @@ export default function Editor() {
                 <h4 style={{ margin: 0 }}>ملاحظات بيسكامب</h4>
                 <div className="spacer" />
                 <button
-                  className="icon-btn"
+                  className="naf-icon-btn"
                   onClick={syncNotes}
                   disabled={syncingNotes}
                   title="تحديث التعليقات من بيسكامب الآن"

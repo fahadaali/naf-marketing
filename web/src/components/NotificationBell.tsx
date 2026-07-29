@@ -35,7 +35,7 @@ export default function NotificationBell() {
   return (
     <Popover
       render={({ toggle }) => (
-        <button className="icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
+        <button className="naf-icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
           <Bell size={20} />
           {unread > 0 && <span className="notif-dot">{unread > 9 ? '9+' : unread}</span>}
         </button>

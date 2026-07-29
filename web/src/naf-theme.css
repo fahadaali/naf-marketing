@@ -194,6 +194,17 @@
   --space-6: calc(var(--spacing) * 6);   /* 24 */
   --space-7: calc(var(--spacing) * 7);   /* 28 */
   --space-9: calc(var(--spacing) * 9);   /* 36 */
+
+  /* [جديد] مقاسات الهيكل — منقولة من السجلّ مع بند naf-app-shell.
+     نُقلت هذه وحدها لا الملفُّ كلّه: نسخة هذه المنصة تسبق السجلّ
+     بفروق أخرى (منها تصحيح لوحة الرسوم الخمس)، ومزامنتها كاملةً
+     تغيّر ألوان شاشات التحليلات — وهي هجرة لها مراجعتها، لا تُدسّ
+     في توحيد الهيكل. */
+  --shell-sidebar: 17.5rem;  /* 280 */
+  --shell-header: 3.75rem;   /* 60  */
+  --page-narrow: 36rem;      /* 576  */
+  --page-default: 75rem;     /* 1200 */
+  --page-wide: 87.5rem;      /* 1400 */
 }
 
 .dark {
@@ -351,6 +362,13 @@
   --spacing-6: var(--space-6);
   --spacing-7: var(--space-7);
   --spacing-9: var(--space-9);
+
+  /* [جديد] مقاسات الهيكل */
+  --spacing-shell-sidebar: var(--shell-sidebar);
+  --spacing-shell-header: var(--shell-header);
+  --container-page-narrow: var(--page-narrow);
+  --container-page-default: var(--page-default);
+  --container-page-wide: var(--page-wide);
 
   --color-border: var(--border);
   --color-input: var(--input);

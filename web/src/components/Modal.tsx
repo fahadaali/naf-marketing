@@ -16,7 +16,7 @@ export default function Modal({
         <div className="row" style={{ marginBottom: 18 }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
           <div className="spacer" />
-          <button className="icon-btn" onClick={onClose} aria-label="إغلاق">
+          <button className="naf-icon-btn" onClick={onClose} aria-label="إغلاق">
             <X size={20} />
           </button>
         </div>
