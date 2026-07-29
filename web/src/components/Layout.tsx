@@ -140,7 +140,7 @@ function ShellBody({ children }: { children: ReactNode }) {
                 أيقونةً وحدها بلا نصّ، فتُقرأ سهماً غامضاً وتُنقر سهواً —
                 وإنهاء الجلسة لا رجعة فيه. */}
             <AccountMenu
-              name={user?.name ?? 'مستخدم'}
+              name={user?.name}
               email={user?.email}
               role={user ? ROLE_LABELS[user.role_name] : undefined}
               appearance={<ThemeToggle />}
