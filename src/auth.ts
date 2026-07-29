@@ -1,34 +1,72 @@
-import type { Env, User } from './types';
+import type { Context } from 'hono';
+import { authenticate } from 'naf-auth';
+import type { Env, User, Variables } from './types';
+import { ssoConfig } from './sso';
 
-/* ═══ قارئ المستخدم — من جلسة المركز وحدها ═══
+/* ═══ قارئ المستخدم — من الحارس، لا من مفتاح KV ═══
 
-   جلسة المنصة في KV بمفتاح `sess:{sid}`، تحمل `sub` القادم من المركز —
-   وهو نفسه `users.id` بعد الترحيل الكسول في `sso.ts`.
+   كان هنا قارئٌ يفتح جلسة المركز بنفسه: يقرأ الكوكي، ويبني اسم المفتاح
+   `sess:` + قيمة الكوكي حرفياً، ويأخذ `sub` مما يجده. واسمُ المفتاح تفصيلٌ
+   داخلي في naf-auth لا عقدٌ معها — وقد تغيّر في v3.3.0: صار اسمه تجزئةَ
+   المعرّف لا المعرّف، كي لا تعطي قراءةُ المساحة كوكيّات جلسات الأعضاء.
 
-   ولا قارئ ثانٍ هنا. كان جدول `sessions` المحلي يُقرأ احتياطاً، فمن يحمل
-   كوكي جلسة قديمة يُقبل بلا مرور بالمركز ولا سريان إيقاف. وعمرها أربعة
-   عشر يوماً في مقابل رمزٍ عمره ربع ساعة، فكانت هي الحقيقة عملياً لا
-   الرمز — وهو نقض للسبب الذي جُعل الرمز قصيراً لأجله. حُذف القارئ،
-   وبقي الجدول في مكانه لا يُقرأ ولا يُكتب.
+   فافترق الطرفان في المنصة الواحدة: الحارس يقرأ الجلسة بالاسم الجديد
+   فيسمح بالمرور، وهذا القارئ يسأل عن اسمٍ لا وجود له فيردّ «لا مستخدم».
 
-   ووُضع هذا كلُّه في دالة واحدة لأن كل قارئ للمستخدم يمرّ بها:
-   `requireAuth` و`‎/api/auth/me` وكل المسارات. فبقيت المسارات بلا تعديل. */
+   والأثر ليس خطأً يُقرأ ولا شاشةَ رفض: `‎/api/auth/me` يردّ `{ user: null }`
+   بـ٢٠٠، فتحوّل اللوحة إلى `‎/login`، وشاشةُ الدخول تعيد تحميل الجذر
+   تحميلاً كاملاً — فيمرّ الحارسُ ثانيةً، وتُقلع اللوحة، وتسأل `me` من جديد.
+   دورةُ تحميلٍ كاملة لا تنتهي ولا تعرض المنصة، ولا يقطعها المتصفّح لأنها
+   تنقّلاتٌ من الشيفرة لا سلسلةُ تحويلات.
 
-const SSO_COOKIE = 'naf_sid';
+   فلم يعد هنا مفتاحٌ يُشتقّ ولا كوكي يُقرأ. الهوية تأتي ممّن تحقّق منها:
+   الحارس يضع `sub` في السياق بعد أن فحص الرمز في هذا الطلب نفسه، وما لم
+   يمرّ بالحارس تُسأل عنه الحزمة. والجدول المحلي وحده يُقرأ هنا.
 
-export async function getUserFromRequest(env: Env, req: Request): Promise<User | null> {
-  if (!env.AUTH_KV) return null;
+   ولا قارئ ثانٍ. كان جدول `sessions` المحلي يُقرأ احتياطاً، فمن يحمل كوكي
+   جلسة قديمة يُقبل بلا مرور بالمركز ولا سريان إيقاف. وعمرها أربعة عشر
+   يوماً في مقابل رمزٍ عمره ربع ساعة، فكانت هي الحقيقة عملياً لا الرمز —
+   وهو نقض للسبب الذي جُعل الرمز قصيراً لأجله. حُذف القارئ، وبقي الجدول
+   في مكانه لا يُقرأ ولا يُكتب. */
 
-  const cookie = req.headers.get('cookie') || '';
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SSO_COOKIE}=([^;]*)`));
-  if (!match) return null;
+type Ctx = Context<{ Bindings: Env; Variables: Variables }>;
 
-  const session = await env.AUTH_KV.get(`sess:${decodeURIComponent(match[1])}`, 'json');
-  if (!session || typeof session !== 'object') return null;
-  const sub = (session as { sub?: string }).sub;
+/**
+ * المعرّف المركزي (`sub`) بعد التحقق.
+ *
+ * الغالب أن يكون في السياق: الحارس عامّ على كل مسار غير مُعلَن، وقد تحقّق
+ * من الرمز في هذا الطلب نفسه — فلا قراءةَ جلسةٍ ثانية ولا تحقّقَ ثانٍ.
+ *
+ * وما لم يمرّ بالحارس تُسأل عنه الحزمة، وهو اليوم مسارٌ واحد: إدارة الويب
+ * هوك. هي تحت البادئة العامة `‎/api/webhooks/` لأن المزوّد ينادي أختها من
+ * خارج، فتُستثنى معها من الحارس ولا يبقى عليها إلا `requireAuth`.
+ *
+ * وتُسأل الحزمة بلا استثناءات — القائمتان فارغتان — وإلا ردّت «مسار عام»
+ * بلا هوية، وهو الاستثناء نفسه الذي أوصلنا إلى هنا.
+ */
+async function verifiedSub(c: Ctx): Promise<string | null> {
+  const fromGuard = c.get('sub');
+  if (fromGuard) return fromGuard;
+
+  const result = await authenticate(c.req.raw, c.env, {
+    ...ssoConfig(c.env),
+    publicPaths: [],
+    publicPrefixes: [],
+  });
+
+  // ردُّ المنع يُهمَل هنا: من ينادي هذه الدالة يقرّر شكل ردّه بنفسه.
+  return result.claims?.sub ?? null;
+}
+
+/**
+ * العضو كما يعرفه هذا الجدول. `sub` القادم من المركز هو `users.id` بعد
+ * الترحيل الكسول في `sso.ts`.
+ */
+export async function getUser(c: Ctx): Promise<User | null> {
+  const sub = await verifiedSub(c);
   if (!sub) return null;
 
-  const row = await env.DB.prepare(
+  const row = await c.env.DB.prepare(
     'SELECT id, name, email, role_name, is_active, created_at FROM users WHERE id = ?',
   )
     .bind(sub)
