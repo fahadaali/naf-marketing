@@ -24,8 +24,13 @@ const CALLBACK_URL = 'https://naf-marketing.naflaw-sa.workers.dev/auth/callback'
 const AUTH_ISSUER = 'https://naf-id.pages.dev';
 /* الوسم يوافق ما في `package.json` — يُرفع معه في الترقية نفسها.
    وكان `v3.0.0` بينما المنصة على `v3.2.0`، فيسقط الفاحص على مستودعٍ صحيح
-   ويُقرأ سقوطُه على أنه خلل في الربط. */
-const AUTH_TAG = 'v3.2.0';
+   ويُقرأ سقوطُه على أنه خلل في الربط.
+
+   وفحصُ القفل معه ليس تزيّداً: تغييرُ الوسم في `package.json` وحده يترك
+   `resolved` في القفل على عقدة الإصدار السابق، فيثبّت `npm ci` القديمَ
+   بينما يقول الملفُّ الجديد — وهو أسوأ من ألّا تُرفع. وقد وقع فعلاً في
+   هذه الترقية، وهذا السطر هو ما أمسكه. */
+const AUTH_TAG = 'v3.3.0';
 
 const results = [];
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null);
