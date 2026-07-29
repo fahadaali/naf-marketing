@@ -22,7 +22,10 @@ import { execFileSync } from 'node:child_process';
 const PLATFORM_ID = 'naf-marketing';
 const CALLBACK_URL = 'https://naf-marketing.naflaw-sa.workers.dev/auth/callback';
 const AUTH_ISSUER = 'https://naf-id.pages.dev';
-const AUTH_TAG = 'v3.0.0';
+/* الوسم يوافق ما في `package.json` — يُرفع معه في الترقية نفسها.
+   وكان `v3.0.0` بينما المنصة على `v3.2.0`، فيسقط الفاحص على مستودعٍ صحيح
+   ويُقرأ سقوطُه على أنه خلل في الربط. */
+const AUTH_TAG = 'v3.2.0';
 
 const results = [];
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null);
@@ -167,10 +170,21 @@ check('onError يسجّل رمز الخطأ ورسالته معاً', () => {
 /* ── ١١ — توقيع التبليغ العكسي (الخطأ التاسع) ── */
 check('reportAccessChange يُستدعى بـ{ email, state }', () => {
   if (!/reportAccessChange/.test(sso)) return true; // لا تبليغ عكسي — بند لا ينطبق
-  if (/\buserId\s*[,:]/.test(sso.split('reportAccessChange')[1]?.slice(0, 400) ?? '')) {
+
+  /* موضعُ الاستدعاء لا موضعُ الاستيراد.
+     كان يُقتطع ما بعد **أوّل** ورودٍ للاسم، وأوّلُ ورودٍ هو سطرُ الاستيراد —
+     فيُفحص كلامٌ عن أنواعٍ ووارداتٍ لا عن النداء، ويسقط البند على مستودعٍ
+     صحيح. فيُلتقط الاستدعاء بقوسه. */
+  const callSite = sso.match(/reportAccessChange\s*\([\s\S]{0,400}/)?.[0] ?? '';
+  if (/\buserId\s*[,:]/.test(callSite)) {
     return 'يُمرَّر userId — والمركز يطابق صفّ الوصول بالبريد وحده';
   }
-  if (!/state:\s*\w+\s*\?\s*'granted'\s*:\s*'revoked'|state:\s*'(granted|revoked)'/.test(sso)) {
+  /* والقيمة قد تُلفّ بقوسين أو يلحقها تحويلُ نوعٍ في TypeScript:
+     `state: (isActive ? 'granted' : 'revoked') as 'granted' | 'revoked'`
+     شكلٌ صحيح كان النمطُ يردّه. فالمطلوب أن تكون القيمة من الاثنتين
+     حصراً — لا أن تُكتب بصيغةٍ بعينها. */
+  const stateAssign = /state:\s*\(?\s*(?:[\w.]+\s*\?\s*)?'(granted|revoked)'(?:\s*:\s*'(granted|revoked)')?/;
+  if (/state:/.test(callSite) && !stateAssign.test(sso)) {
     return "state يجب أن تكون 'granted' أو 'revoked' حصراً — وما عداهما invalid_state";
   }
   if (!/email:/.test(sso)) return 'البريد لا يُمرَّر';
