@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { deniedResponse } from 'naf-auth';
 import type { Env, Variables } from '../types';
-import { getUserFromRequest } from '../auth';
+import { getUser } from '../auth';
+import { ssoConfig } from '../sso';
 import { permissionMap } from '../permissions';
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -28,8 +30,25 @@ export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // المستخدم الحالي + صلاحياته (لتكييف الواجهة — التحقق الفعلي يبقى على الخادم)
 authRoutes.get('/me', async (c) => {
-  const user = await getUserFromRequest(c.env, c.req.raw);
-  if (!user) return c.json({ user: null });
+  const user = await getUser(c);
+
+  /* ═══ ولا يُردّ `{ user: null }` بـ٢٠٠ ═══
+
+     كان يُردّ، فتقرؤه اللوحة «لا جلسة» وتحوّل إلى `‎/login`، وشاشةُ الدخول
+     تعيد تحميل الجذر تحميلاً كاملاً — فيمرّره الحارس لأن الجلسة صحيحة
+     عنده، وتُقلع اللوحة وتسأل هذا المسار من جديد فيردّ الجواب نفسه.
+     دورةُ تحميلٍ لا تنتهي ولا تعرض شيئاً ولا تقول سبباً، وهي ما أوقف
+     المنصة حين افترق قارئ المستخدم عن الحارس (انظر `src/auth.ts`).
+
+     والمسار خلف الحارس: بلوغُه أصلاً يعني أن الجلسة صحيحة وأن المركز
+     تحقّق من الرمز. فبلوغُه بلا عضو يعني صفّاً مفقوداً في الجدول المحلي —
+     حالٌ مسجَّلة في شاشة الرفض بنصّها، وهي الحال التي يردّ بها الحارس
+     نفسه على العضو المفقود. فيُقال للقارئ ما جرى بدل أن يُدار في حلقة. */
+  if (!user) {
+    const config = ssoConfig(c.env);
+    return deniedResponse(c.req.raw, config, config.reasons.notMember);
+  }
+
   const permissions = await permissionMap(c.env, user.role_name);
   return c.json({ user, permissions });
 });

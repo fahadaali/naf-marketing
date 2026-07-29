@@ -162,12 +162,19 @@ export function ssoConfig(env: Env) {
  * الحارس العام. يسبق كل شيء عدا المسارات العامة، فيتحقّق من الجلسة
  * ويحوّل غير المسجَّل إلى المركز.
  *
- * ولا يحقن المستخدم في السياق هنا: المنصة تقرأه عبر getUserFromRequest
- * كما كانت، وقد صارت تلك الدالة تعرف جلسة KV. فبقيت المسارات كما هي.
+ * ويضع المعرّف المركزي في السياق: هو ثمرةُ تحقّقٍ تمّ في هذا الطلب نفسه،
+ * فتقرؤه `getUser` بدل أن تفتح جلسة KV بنفسها. وفتحُها كان يعني اشتقاق
+ * اسم مفتاح الحزمة — تفصيلٌ داخلي تغيّر في v3.3.0 فافترق القارئان،
+ * ودارت اللوحة في تحميلٍ لا ينتهي. الشرح في `src/auth.ts`.
+ *
+ * ولا يُحقن العضو نفسه: الحارس يقرأ منه المعرّف والدور والتفعيل، واللوحة
+ * تحتاج الاسم والبريد وتاريخ الإنشاء — فيبقى صفّ الجدول المحلي مقروءاً
+ * حيث كان.
  */
 export const ssoGuard: MiddlewareHandler<Bindings> = async (c, next) => {
   const result = await authenticate(c.req.raw, c.env, ssoConfig(c.env));
   if (result.response) return result.response;
+  if (result.claims?.sub) c.set('sub', result.claims.sub);
   await next();
 };
 

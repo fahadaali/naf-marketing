@@ -1,13 +1,13 @@
 import type { MiddlewareHandler } from 'hono';
 import type { Env, Variables } from './types';
-import { getUserFromRequest } from './auth';
+import { getUser } from './auth';
 import { hasPermission } from './permissions';
 
 type Bindings = { Bindings: Env; Variables: Variables };
 
 // يتطلّب جلسة صالحة
 export const requireAuth: MiddlewareHandler<Bindings> = async (c, next) => {
-  const user = await getUserFromRequest(c.env, c.req.raw);
+  const user = await getUser(c);
   if (!user) return c.json({ error: 'غير مصرّح: الرجاء تسجيل الدخول' }, 401);
   c.set('user', user);
   await next();
