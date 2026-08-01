@@ -39,6 +39,9 @@ import {
 import { ThemeToggle } from '../naf/ui/theme-toggle';
 
 type NavItem = { to: string; label: string; icon: ReactNode; show?: boolean };
+/* مجموعات التنقّل الأربع — أسماؤها في `naf-terms.md` §٢، ولوحةُ التحكم
+   خارجها: هي أوّل ما يُفتح ولا تنتمي إلى ما بعدها. */
+type NavGroup = { key: string; label: string | null; items: NavItem[] };
 
 function TopSearch() {
   const navigate = useNavigate();
@@ -76,26 +79,60 @@ function ShellBody({ children }: { children: ReactNode }) {
   const { user, logout, can } = useAuth();
   const sz = 24; // مقاس التنقّل — naf-icons.md «المقاسات»
 
-  const items: NavItem[] = [
-    { to: '/', label: 'لوحة التحكم', icon: <LayoutDashboard size={sz} /> },
-    { to: '/posts', label: 'إدارة المحتوى', icon: <FileText size={sz} /> },
-    { to: '/editor', label: 'إنشاء محتوى', icon: <PenLine size={sz} />, show: can('draft.edit') },
-    { to: '/calendar', label: 'التقويم', icon: <Calendar size={sz} /> },
-    { to: '/campaigns', label: 'الحملات', icon: <Target size={sz} /> },
-    { to: '/queue', label: 'طابور الاعتماد', icon: <ListChecks size={sz} />, show: can('content.review') },
-    { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
-    { to: '/analytics', label: 'التحليلات', icon: <BarChart3 size={sz} />, show: can('analytics.view') },
-    { to: '/comments', label: 'التعليقات والرسائل', icon: <MessageCircle size={sz} />, show: can('comments.manage') },
-    { to: '/newsletters', label: 'النشرات والمقالات', icon: <Mails size={sz} />, show: can('newsletter.manage') },
-    { to: '/subscribers', label: 'المشتركون', icon: <Users size={sz} />, show: can('newsletter.manage') },
-    { to: '/audit', label: 'سجل التدقيق', icon: <ShieldCheck size={sz} />, show: can('audit.view') },
+  /* أربعُ مجموعاتٍ بدل ثلاثة عشر عنصراً في عمودٍ واحد. من يبحث عن
+     «المشتركين» كان يقرأ الثلاثة عشر كلَّها لأن لا شيء يقول أين يبحث. */
+  const groups: NavGroup[] = [
     {
-      to: '/settings',
-      label: 'الإعدادات والمستخدمون',
-      icon: <Settings size={sz} />,
-      show: can('settings.manage') || can('users.manage'),
+      key: 'home',
+      label: null,
+      items: [{ to: '/', label: 'لوحة التحكم', icon: <LayoutDashboard size={sz} /> }],
+    },
+    {
+      key: 'content',
+      label: 'المحتوى',
+      items: [
+        { to: '/posts', label: 'إدارة المحتوى', icon: <FileText size={sz} /> },
+        { to: '/editor', label: 'إنشاء محتوى', icon: <PenLine size={sz} />, show: can('draft.edit') },
+        { to: '/calendar', label: 'التقويم', icon: <Calendar size={sz} /> },
+        { to: '/campaigns', label: 'الحملات', icon: <Target size={sz} /> },
+        { to: '/queue', label: 'طابور الاعتماد', icon: <ListChecks size={sz} />, show: can('content.review') },
+        { to: '/news', label: 'خلاصة الأخبار', icon: <Newspaper size={sz} /> },
+      ],
+    },
+    {
+      key: 'measurement',
+      label: 'القياس',
+      items: [{ to: '/analytics', label: 'التحليلات', icon: <BarChart3 size={sz} />, show: can('analytics.view') }],
+    },
+    {
+      key: 'communication',
+      label: 'التواصل',
+      items: [
+        { to: '/comments', label: 'التعليقات والرسائل', icon: <MessageCircle size={sz} />, show: can('comments.manage') },
+        { to: '/newsletters', label: 'النشرات والمقالات', icon: <Mails size={sz} />, show: can('newsletter.manage') },
+        { to: '/subscribers', label: 'المشتركون', icon: <Users size={sz} />, show: can('newsletter.manage') },
+      ],
+    },
+    {
+      key: 'system',
+      label: 'النظام',
+      items: [
+        { to: '/audit', label: 'سجل التدقيق', icon: <ShieldCheck size={sz} />, show: can('audit.view') },
+        {
+          to: '/settings',
+          label: 'الإعدادات والمستخدمون',
+          icon: <Settings size={sz} />,
+          show: can('settings.manage') || can('users.manage'),
+        },
+      ],
     },
   ];
+
+  /* المجموعة الفارغة تسقط بعنوانها: عضوٌ لا يملك تصاريح «النظام» لا يرى
+     عنوانه معلّقاً فوق فراغ. */
+  const visible = groups
+    .map((g) => ({ ...g, items: g.items.filter((i) => i.show === undefined || i.show) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <>
@@ -111,20 +148,22 @@ function ShellBody({ children }: { children: ReactNode }) {
           </div>
         </SidebarHeader>
         <SidebarNav>
-          <div className="naf-nav-section">القائمة</div>
-          {items
-            .filter((i) => i.show === undefined || i.show)
-            .map((i) => (
-              <NavLink
-                key={i.to}
-                to={i.to}
-                end={i.to === '/'}
-                className={({ isActive }) => navLinkClassName(isActive)}
-              >
-                {i.icon}
-                <span>{i.label}</span>
-              </NavLink>
-            ))}
+          {visible.map((g) => (
+            <div key={g.key}>
+              {g.label && <div className="naf-nav-section">{g.label}</div>}
+              {g.items.map((i) => (
+                <NavLink
+                  key={i.to}
+                  to={i.to}
+                  end={i.to === '/'}
+                  className={({ isActive }) => navLinkClassName(isActive)}
+                >
+                  {i.icon}
+                  <span>{i.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          ))}
         </SidebarNav>
       </Sidebar>
 

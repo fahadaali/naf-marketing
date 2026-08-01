@@ -11,6 +11,7 @@
     "build:public-css": "node scripts/build-public-css.mjs"
   },
   "dependencies": {
+    "@emran-alhaddad/saudi-riyal-font": "1.1.0",
     "@fontsource/ibm-plex-sans-arabic": "^5.3.0",
     "clsx": "^2.1.1",
     "lucide-react": "1.27.0",

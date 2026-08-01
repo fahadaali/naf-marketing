@@ -7,6 +7,7 @@ import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel, DEFAULT_PLATFORM_PROMPTS } from '../platforms';
 import { DEFAULT_TONES, type Tone } from '../tones';
+import MetricSources from '../components/MetricSources';
 
 export default function Settings() {
   const { can } = useAuth();
@@ -35,7 +36,7 @@ export default function Settings() {
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
       {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /><div style={{ height: 16 }} /><AIMediaProviders /></>}
-      {tab === 'integrations' && <Integrations />}
+      {tab === 'integrations' && <><Integrations /><MetricSources /></>}
       {tab === 'notifications' && <NotificationSettings />}
     </div>
   );

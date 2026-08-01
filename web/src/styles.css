@@ -1,6 +1,9 @@
 /* ثيم ناف وخطه من السجلّ fahadaali/naf-ui#v1.4.0 — لا تعدّل الملفين. */
 @import "./naf-theme.css";
 @import "./naf-font.css";
+/* رمز الريال — بعد الثيم لا قبله: الملفّ يبني قائمة الخطوط على
+   var(--font-sans) التي يعرّفها الثيم، والترتيب ملزم. */
+@import "./naf-currency.css";
 @import "./naf-app-shell.css";
 @import "./naf-safe-area.css";
 
@@ -492,3 +495,64 @@ button.gantt-bar { display: flex; }
    الكتلتان انتقلتا إلى `naf-app-shell.css` في السجلّ. كانتا هنا وحدهما
    من بين المنصات الخمس — والقاعدة مكتوبة في naf-icons.md منذ البدء —
    فسهم الخروج يشير خارجاً هنا وداخلاً في الأربع الباقية. */
+
+/* ==========================================================================
+   المؤشرات — بطاقة الرقم وتبويبات الطبقات.
+   القيم كلها رموزٌ من السجلّ، والاتجاه منطقي لا فيزيائي.
+   ========================================================================== */
+
+/* شريط تبويبات الطبقات — اثنتا عشرة طبقة لا تسع شاشة ٣٧٥ بكسل، فيمرّر
+   الشريطُ وحده أفقياً. والصفحة تحته لا تتحرّك: جسمُ الصفحة لا يمرَّر أفقياً أبداً. */
+.metric-tabs {
+  display: flex; gap: var(--space-1); overflow-x: auto; scrollbar-width: thin;
+  border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); padding-bottom: var(--space-1);
+}
+.metric-tabs button {
+  flex: 0 0 auto; border: none; background: transparent; color: var(--muted-foreground);
+  font-family: inherit; font-size: var(--text-sm); font-weight: 600; white-space: nowrap;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius); cursor: pointer;
+}
+.metric-tabs button:hover { color: var(--foreground); background: var(--muted); }
+.metric-tabs button.on { color: var(--primary); background: var(--primary-soft); }
+.metric-tabs button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.metric-card { display: flex; flex-direction: column; gap: var(--space-2); text-align: start; }
+button.metric-card { width: 100%; font-family: inherit; cursor: pointer; }
+button.metric-card:hover { border-color: var(--primary); }
+button.metric-card:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.metric-head { gap: var(--space-2); }
+.metric-name { font-size: var(--text-sm); font-weight: 600; }
+.metric-class { display: inline-flex; color: var(--muted-foreground); }
+
+.metric-value {
+  font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.metric-empty { color: var(--muted-foreground); font-size: var(--text-xs); margin: var(--space-2) 0; }
+
+.metric-foot { gap: var(--space-2); font-size: var(--text-xs); }
+
+/* الاتجاه: الرقم محايد بلا لون، ويأخذ لونه من اتجاه المستهدف لا من السهم. */
+.metric-trend {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  font-size: var(--text-xs); font-weight: 600; color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.metric-trend.is-good { color: var(--success-strong); }
+.metric-trend.is-bad { color: var(--destructive-strong); }
+
+.metric-breakdown { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.metric-breakdown li {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-xs); padding: var(--space-1) 0;
+  border-top: 1px solid var(--border);
+}
+.metric-breakdown-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* جدول دليل المؤشرات يتّسع بعمود الاسم، فيمرَّر داخل غلافه لا مع الصفحة. */
+.table-scroll { overflow-x: auto; }
+
+@media (max-width: 900px) {
+  .metric-value { font-size: var(--text-2xl); }
+}
