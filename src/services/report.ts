@@ -1,6 +1,8 @@
 import type { Env } from '../types';
 import { buildXlsx, type Sheet } from './xlsx';
 import { isConfigured, getMgmtProjectId, createAttachment, getRootVaultId, ensureSubVault, createUpload } from './basecamp';
+import { readBoard, readLayer } from './metrics';
+import { periodOf } from './period';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const REPORT_FOLDER = 'تقارير الأداء الأسبوعية (آلي)';
@@ -13,6 +15,29 @@ const STATUS_AR: Record<string, string> = {
   approved: 'معتمد', scheduled: 'مجدول', published: 'منشور', archived: 'مؤرشف', rejected: 'مرفوض',
 };
 const SOURCE_AR: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
+
+/* مفردات المؤشرات — كلها من `naf-terms.md` §١٣. ولا تُشتقّ من الواجهة:
+   هذا الملفّ يعمل في `Cron` بلا متصفّح، ونسخُها هنا نسخةٌ من السجلّ لا منها. */
+const LAYER_AR: Record<string, string> = {
+  reach: 'الوصول والظهور', engagement: 'التفاعل والمحتوى', web: 'الموقع والبحث',
+  funnel: 'التحويل ومسار البيع', cost: 'التكلفة والعائد', retention: 'الاحتفاظ والنمو',
+  audience: 'الجمهور والاستهداف', email: 'البريد والتواصل', attribution: 'الإسناد والقياس',
+  operations: 'التشغيل وجودة البيانات',
+};
+const CLASS_AR: Record<string, string> = {
+  north_star: 'مؤشر قيادي', operational: 'مؤشر تشغيل', vanity: 'مؤشر غرور',
+};
+const SOURCE_AR_METRIC: Record<string, string> = {
+  auto: 'محتسب', integration: 'من تكامل', manual: 'مُدخَل',
+};
+const CADENCE_AR: Record<string, string> = {
+  weekly: 'أسبوعياً', monthly: 'شهرياً', quarterly: 'ربعياً', annual: 'سنوياً',
+};
+const UNIT_AR: Record<string, string> = {
+  count: 'عدد', percentage: 'نسبة مئوية', currency: 'ريال', ratio: 'نسبة إلى واحد',
+  days: 'يوم', hours: 'ساعة', minutes: 'دقيقة', seconds: 'ثانية',
+  rank: 'ترتيب', score: 'درجة', rating: 'تقييم',
+};
 
 function riyadh(iso: string | null): string {
   if (!iso) return '';
@@ -89,8 +114,66 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
     ...byPost.map((r: any) => [r.title || '', r.platform, r.via_platform ? 'عبر المنصة' : 'خارجي', r.reach || 0, r.impressions || 0, r.engagement || 0, riyadh(r.captured_at)]),
   ];
 
+  /* ═══ المؤشرات ═══
+     التقرير كان يحمل ما تعرفه المنصة عن منشوراتها وحدها — وهي الطبقتان
+     الأوليان من عشر. ومن يقرؤه شهرياً لا يرى فيه رقماً واحداً من الطبقة
+     الرابعة، وهي أهمّها لشركة استشارات قانونية. */
+  const metricPeriod = periodOf(period === 'month' ? 'monthly' : 'weekly');
+  const board = await readBoard(env, metricPeriod);
+  const boardRows: (string | number)[][] = [
+    [`اللوحة المختصرة — ${period === 'month' ? 'الشهر' : 'الأسبوع'} المنتهي`],
+    ['الفترة', `${metricPeriod.start} — ${metricPeriod.end}`],
+    [],
+    ['#', 'المؤشر', 'القيمة', 'الوحدة', 'المستهدف', 'المعيار القطاعي', 'الفترة السابقة', 'المصدر', 'القرار المحتمل'],
+    ...board.map((m) => [
+      m.board_rank ?? '',
+      m.name_ar,
+      // القيمة الغائبة تُكتب صراحةً: خانةٌ فارغة في جدول تُقرأ صفراً
+      m.value === null ? 'لا قيمة مسجّلة' : m.value,
+      UNIT_AR[m.unit] ?? m.unit,
+      m.target_value ?? 'لا مستهدف',
+      m.benchmark_value ?? '',
+      m.previous ?? 'لا مقارنة',
+      SOURCE_AR_METRIC[m.value_source ?? ''] ?? '',
+      m.decision ?? '',
+    ]),
+  ];
+
+  const allMetrics = await readLayer(env, metricPeriod);
+  const layerRows: (string | number)[][] = [
+    ['الطبقة', 'المؤشر', 'الفئة', 'القيمة', 'الوحدة', 'المستهدف', 'المعيار القطاعي', 'المصدر', 'حجم العيّنة'],
+    ...allMetrics.map((m) => [
+      LAYER_AR[m.layer] ?? m.layer,
+      m.name_ar,
+      CLASS_AR[m.class] ?? m.class,
+      m.value === null ? 'لا قيمة مسجّلة' : m.value,
+      UNIT_AR[m.unit] ?? m.unit,
+      m.target_value ?? 'لا مستهدف',
+      m.benchmark_value ?? '',
+      SOURCE_AR_METRIC[m.value_source ?? ''] ?? '',
+      m.sample ?? '',
+    ]),
+  ];
+
+  /* ورقةُ المستحقّ للمراجعة — الدورية وحدها لا تُنبّه. والتقرير هو موضع
+     التنبيه الطبيعي: يُفتح في موعده، ومن يفتحه هو من يراجع. */
+  const due = allMetrics.filter((m) => m.review_due);
+  const dueRows: (string | number)[][] = [
+    ['المؤشر', 'الطبقة', 'الدورية', 'آخر مراجعة', 'القيمة الحالية'],
+    ...due.map((m) => [
+      m.name_ar,
+      LAYER_AR[m.layer] ?? m.layer,
+      CADENCE_AR[m.cadence] ?? m.cadence,
+      m.reviewed_at ? riyadh(m.reviewed_at) : 'لم يُراجع بعد',
+      m.value === null ? 'لا قيمة مسجّلة' : m.value,
+    ]),
+  ];
+
   const sheets: Sheet[] = [
+    { name: 'اللوحة المختصرة', rows: boardRows },
     { name: 'ملخص الأعمال', rows: summary },
+    { name: 'المؤشرات', rows: layerRows },
+    { name: 'مستحقّ المراجعة', rows: dueRows },
     { name: 'المحتوى', rows: content },
     { name: 'سجل الاعتمادات', rows: approvals },
     { name: 'تحليلات المنصات', rows: platforms },

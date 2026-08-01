@@ -7,6 +7,35 @@ import { checkStaleContent } from './services/alerts';
 import { syncCardCommentsSafe } from './services/basecampSync';
 import { runDuePublishes } from './services/publish';
 import { sendQueuedBatch, syncNewsletterAnalytics } from './services/newsletterSend';
+import { syncAllSources } from './services/metricSync';
+import { syncCrm } from './services/crmSync';
+import { computeAuto } from './services/metrics';
+import { periodOf, previousPeriod } from './services/period';
+
+/**
+ * سحبُ المصادر واحتسابُ المؤشرات — مرّةً في اليوم.
+ *
+ * والفترة الجارية والسابقة معاً: مصدرٌ خارجيّ يُثبّت أرقام يومٍ بعد انقضائه
+ * بساعات — تحليلات الموقع تُراجع أرقامها ليومين — فاحتسابُ الجارية وحدها
+ * يترك آخر يومٍ في الشهر المنصرم على قيمةٍ ناقصة إلى الأبد.
+ *
+ * وأنواع الفترات الثلاث تُحتسب كلُّها: اللوحة الأسبوعية تقرأ الأسبوع،
+ * وأكثر الطبقات شهريّ، والاحتفاظ والقيمة العمرية ربعيّة. وترْكُ نوعٍ بلا
+ * احتساب يجعل تبويبَه فارغاً بلا سبب ظاهر.
+ */
+async function runMetricsDaily(env: Env): Promise<void> {
+  for (const kind of ['weekly', 'monthly', 'quarterly'] as const) {
+    const current = periodOf(kind);
+    const previous = previousPeriod(current);
+    for (const p of [previous, current]) {
+      // السحب أوّلاً ثم الاحتساب: مؤشرات مشتقّة تقرأ ما وصل للتوّ
+      await Promise.allSettled([syncAllSources(env, p), syncCrm(env)]);
+      try {
+        await computeAuto(env, p);
+      } catch { /* فترةٌ تفشل لا تمنع أختها */ }
+    }
+  }
+}
 
 // معالج المهام المجدولة — مشغّل cron واحد فقط في wrangler.toml: "*/2 * * * *"
 // (حساب Cloudflare محدود بـ ٥ مهام cron إجمالاً، فدمجنا كل شيء في مشغّل واحد ونتحكّم بالتوقيت هنا)
@@ -36,6 +65,12 @@ export async function handleScheduled(_event: ScheduledController, env: Env): Pr
       syncNewsletterAnalytics(env),
       checkStaleContent(env),
     ]);
+
+    /* سحب المؤشرات واحتسابها عند ٠١:٠٠ UTC (≈ ٠٤:٠٠ بتوقيت الرياض) — قبل
+       أوّل من يفتح اللوحة، وبعد أن تُثبّت المصادر الخارجية أرقام أمس. */
+    if (hour === 1) {
+      try { await runMetricsDaily(env); } catch { /* لا تعطّل بقية المهام */ }
+    }
 
     // التقارير عند الساعة ١٨:٠٠ UTC (≈ ٢١:٠٠ بتوقيت الرياض)
     if (hour === 18) {

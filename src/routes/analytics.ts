@@ -113,6 +113,20 @@ analyticsRoutes.get('/dashboard', async (c) => {
   });
 });
 
+/* رابط خريطة الحرارة — يقرؤه من يفتح طبقة التفاعل، وضبطُه في التكاملات.
+   ولا يمرّ بـ`/integrations`: ذاك يتطلّب `integrations.manage`، وقارئُ
+   التحليلات لا يملكه — فيرى تبويبةً ينقصها زرٌّ بلا سبب ظاهر. */
+analyticsRoutes.get('/heatmap', async (c) => {
+  const row = await c.env.DB.prepare(
+    "SELECT config_json FROM integrations WHERE key = 'web_analytics'",
+  ).first<{ config_json: string }>();
+  let url = '';
+  try {
+    url = String(JSON.parse(row?.config_json || '{}').heatmap_url ?? '');
+  } catch { url = ''; }
+  return c.json({ url });
+});
+
 // السمعة: متوسط التقييم وتوزيع النجوم ومعدل الرد والاتجاه الشهري ومعدل الاستجابة
 analyticsRoutes.get('/reputation', async (c) => {
   const totals = await c.env.DB.prepare(
