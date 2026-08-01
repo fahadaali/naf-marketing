@@ -569,7 +569,7 @@
 | `romi` | العائد على الاستثمار التسويقي | `percentage` | `north_star` |
 | `ltv` | القيمة العمرية للعميل | `currency` | `north_star` |
 | `ltv_cac_ratio` | نسبة القيمة العمرية إلى تكلفة الاكتساب | `ratio` | `north_star` |
-| `cac_payback_months` | فترة استرداد تكلفة الاكتساب | `days` | `north_star` |
+| `cac_payback` | فترة استرداد تكلفة الاكتساب | `days` | `north_star` |
 | `spend_of_revenue` | نسبة الإنفاق التسويقي إلى الإيراد | `percentage` | `north_star` |
 | `ad_spend` | الإنفاق الإعلاني | `currency` | `operational` |
 | `team_cost` | أجور الفريق | `currency` | `operational` |

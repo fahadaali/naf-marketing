@@ -104,15 +104,28 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   follow_up_date  TEXT,
   created_at      TEXT,                              -- ISO 8601 بعد التحويل من ثوانٍ
   updated_at      TEXT,
+  -- تحويل المحتمل إلى عميل في تلك المنصة يُنشئ العميل ويحذف المحتمل، فالسجلّ
+  -- الأصلي يزول ومعه تاريخُ أول تواصل. وزمن دورة البيع كلُّه هو الفرق بين
+  -- ذلك التاريخ وتاريخ التعاقد — فلو حذفنا الصفّ من المرآة كما حُذف هناك
+  -- لسقط المؤشر نهائياً ولا سبيل لاستعادته.
+  -- فالصفّ يبقى موسوماً `is_present = 0`، ويُربط بالعميل الذي صار إليه.
+  is_present      INTEGER NOT NULL DEFAULT 1,
+  disappeared_at  TEXT,
+  converted_client_id TEXT,
   synced_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_crm_leads_created ON crm_leads(created_at);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_present ON crm_leads(is_present);
 CREATE INDEX IF NOT EXISTS idx_crm_leads_source ON crm_leads(source);
 CREATE INDEX IF NOT EXISTS idx_crm_leads_status ON crm_leads(status);
 
 CREATE TABLE IF NOT EXISTS crm_clients (
   id          TEXT PRIMARY KEY,
   full_name   TEXT,
+  -- الهاتف والبريد ليسا للعرض بل للمطابقة: بهما يُعرف أيُّ محتملٍ صار هذا
+  -- العميل حين يزول صفّه من المصدر، ومن المطابقة وحدها يُحسب زمن دورة البيع.
+  phone       TEXT,
+  email       TEXT,
   client_type TEXT,
   status      TEXT,                                  -- current|former
   join_date   TEXT,
@@ -294,7 +307,7 @@ INSERT OR IGNORE INTO metric_definitions
 ('romi','cost','العائد على الاستثمار التسويقي','Return on Marketing Investment','percentage','north_star','auto',NULL,'quarterly','',NULL,'higher_better',NULL,NULL,NULL,511),
 ('ltv','cost','القيمة العمرية للعميل','Customer Lifetime Value','currency','north_star','auto',NULL,'quarterly','',NULL,'higher_better',NULL,NULL,NULL,512),
 ('ltv_cac_ratio','cost','نسبة القيمة العمرية إلى تكلفة الاكتساب','LTV to CAC Ratio','ratio','north_star','auto',NULL,'weekly','',3,'higher_better',NULL,NULL,6,513),
-('cac_payback_months','cost','فترة استرداد تكلفة الاكتساب','CAC Payback Period','days','north_star','auto',NULL,'quarterly','',NULL,'lower_better',NULL,NULL,NULL,514),
+('cac_payback','cost','فترة استرداد تكلفة الاكتساب','CAC Payback Period','days','north_star','auto',NULL,'quarterly','',NULL,'lower_better',NULL,NULL,NULL,514),
 ('spend_of_revenue','cost','نسبة الإنفاق التسويقي إلى الإيراد','Marketing Spend as % of Revenue','percentage','north_star','auto',NULL,'quarterly','',NULL,'lower_better',NULL,NULL,NULL,515),
 
 -- ── الطبقة السادسة: الاحتفاظ ونمو العميل القائم ──

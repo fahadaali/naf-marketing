@@ -28,6 +28,20 @@ export type Env = {
   VIDEO_PROVIDER_API_KEY?: string;
   // إشعارات بريدية
   EMAIL_PROVIDER_API_KEY?: string;
+  /* ═══ مصادر المؤشرات الخارجية ═══
+     كلها اختيارية: مصدرٌ بلا مفتاح يبقى «غير مربوط» في شاشة التكاملات،
+     ولا يُسحب منه شيء، ولا تسقط المنصة لغيابه. */
+  // منصة إدارة المكتب (`naf-manger`) — مفتاح خدمة للقراءة
+  CRM_API_KEY?: string;
+  /* حساب خدمة جوجل — ملفّ JSON كاملاً في سرٍّ واحد. ثلاثة مصادر تقرأ منه:
+     تحليلات الموقع، وأدوات مشرفي المواقع، والملف التجاري. وتفريقُه ثلاثة
+     أسرارٍ يعني ثلاث نسخٍ من المفتاح نفسه تنتهي صلاحيتها في ثلاثة أوقات. */
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  // منصات الإعلان وقنوات المراسلة وتتبّع المكالمات ورصد الذكر
+  ADS_API_KEY?: string;
+  MESSAGING_API_KEY?: string;
+  CALL_TRACKING_API_KEY?: string;
+  LISTENING_API_KEY?: string;
 };
 
 export type Role = 'writer' | 'marketing_manager' | 'general_manager';
