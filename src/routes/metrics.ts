@@ -68,7 +68,7 @@ metricsRoutes.post('/sync', requirePermission('metrics.manage'), async (c) => {
   const p = resolvePeriod(c);
   const sources = await syncAllSources(c.env, p);
 
-  // مرآة إدارة المكتب مسارٌ مستقلّ — تُنسخ صفوفاً لا نقاطَ مؤشرات
+  // مرآة إدارة الشركة مسارٌ مستقلّ — تُنسخ صفوفاً لا نقاطَ مؤشرات
   let crm: { ok: boolean; error?: string; leads?: number } = { ok: false };
   const crmRow = await c.env.DB.prepare("SELECT is_enabled FROM integrations WHERE key = 'crm'").first<{ is_enabled: number }>();
   if (crmRow?.is_enabled) {

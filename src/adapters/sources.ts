@@ -340,7 +340,7 @@ export type SourceDefinition = {
 };
 
 /**
- * المصادر السبعة التي تُسحب. ومنصة إدارة المكتب ليست منها: تلك تُنسخ مرآةً
+ * المصادر السبعة التي تُسحب. ومنصة إدارة الشركة ليست منها: تلك تُنسخ مرآةً
  * صفوفاً لا نقاطَ مؤشرات، ومسارُها في `services/crmSync.ts`.
  */
 export const SOURCES: Record<string, SourceDefinition> = {

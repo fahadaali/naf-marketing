@@ -1,5 +1,5 @@
 /* ============================================================
-   منصة إدارة المكتب (`naf-manger`) — مصدر الطبقة الرابعة كلها.
+   منصة إدارة الشركة (`naf-manger`) — مصدر الطبقة الرابعة كلها.
 
    العميل المحتمل ومساره إلى التعاقد سجلٌّ هناك لا هنا، وكلُّ ما في الطبقات
    الرابعة والخامسة والسادسة يُحسب منه: نسبة التأهيل، والتحويل على كل مرحلة،
@@ -13,7 +13,7 @@
 
    ═══ المصادقة ═══
 
-   منصة إدارة المكتب محميّة بحارس الدخول الموحّد: كل مسار فيها يمرّ بـ
+   منصة إدارة الشركة محميّة بحارس الدخول الموحّد: كل مسار فيها يمرّ بـ
    `authenticate` من `naf-auth`، وهو يقرأ كوكي جلسةٍ من متصفّح. وهذا الطلب
    يخرج من `Worker` لا من متصفّح، فلا كوكي معه ولا جلسة.
 
@@ -79,7 +79,7 @@ export type CrmCase = {
 export type CrmSnapshot = { leads: CrmLead[]; clients: CrmClient[]; cases: CrmCase[] };
 
 export type CrmConfig = {
-  /** عنوان منصة إدارة المكتب — بلا خطّ مائل في آخره. */
+  /** عنوان منصة إدارة الشركة — بلا خطّ مائل في آخره. */
   baseUrl: string;
   mode: 'bearer' | 'import';
 };
@@ -254,7 +254,7 @@ export function parseCrmExport(payload: unknown): CrmSnapshot {
   const cases = rows(data.cases).map(mapCaseRow);
 
   if (!leads.length && !clients.length && !cases.length) {
-    throw new CrmError('الملف لا يحمل عملاء ولا محتملين ولا قضايا. تأكّد أنه ملف التصدير من منصة إدارة المكتب.');
+    throw new CrmError('الملف لا يحمل عملاء ولا محتملين ولا قضايا. تأكّد أنه ملف التصدير من منصة إدارة الشركة.');
   }
   return { leads, clients, cases };
 }
@@ -266,16 +266,16 @@ async function getJson(cfg: CrmConfig, token: string, path: string): Promise<unk
       headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
     });
   } catch (e) {
-    throw new CrmError(`تعذّر الوصول إلى منصة إدارة المكتب على ${cfg.baseUrl} — ${String((e as Error)?.message || e)}`);
+    throw new CrmError(`تعذّر الوصول إلى منصة إدارة الشركة على ${cfg.baseUrl} — ${String((e as Error)?.message || e)}`);
   }
 
   if (res.status === 401 || res.status === 403) {
     throw new CrmError(
-      'رفضت منصة إدارة المكتب المفتاح. تأكّد من ضبط CRM_API_KEY، وأن تلك المنصة تقبل مفتاح الخدمة على مسارات القراءة.',
+      'رفضت منصة إدارة الشركة المفتاح. تأكّد من ضبط CRM_API_KEY، وأن تلك المنصة تقبل مفتاح الخدمة على مسارات القراءة.',
     );
   }
   if (!res.ok) {
-    throw new CrmError(`ردّت منصة إدارة المكتب بالحالة ${res.status} على ${path}`);
+    throw new CrmError(`ردّت منصة إدارة الشركة بالحالة ${res.status} على ${path}`);
   }
 
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
@@ -287,8 +287,8 @@ async function getJson(cfg: CrmConfig, token: string, path: string): Promise<unk
 
 /** يسحب لقطةً كاملة عبر الشبكة — الوضع `bearer`. */
 export async function fetchCrmSnapshot(cfg: CrmConfig, token: string): Promise<CrmSnapshot> {
-  if (!cfg.baseUrl) throw new CrmError('عنوان منصة إدارة المكتب غير مضبوط. اضبطه من التكاملات.');
-  if (!token) throw new CrmError('مفتاح منصة إدارة المكتب غير مضبوط (CRM_API_KEY).');
+  if (!cfg.baseUrl) throw new CrmError('عنوان منصة إدارة الشركة غير مضبوط. اضبطه من التكاملات.');
+  if (!token) throw new CrmError('مفتاح منصة إدارة الشركة غير مضبوط (CRM_API_KEY).');
 
   const [prospects, clients, cases] = await Promise.all([
     getJson(cfg, token, '/api/prospects'),

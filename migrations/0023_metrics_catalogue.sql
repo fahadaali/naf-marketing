@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS integrations (
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
--- ═══ مرآة منصة إدارة المكتب ═══
+-- ═══ مرآة منصة إدارة الشركة ═══
 --
 -- الطبقة الرابعة كلها تُبنى على سجلّ العميل المحتمل، وسجلُّه في `naf-manger`
 -- لا هنا. فتُنسخ الصفوف مرآةً للقراءة، ولا تُكتب من هذه المنصة أبداً: مصدر
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS integrations (
 -- والمرآة تُعاد بناؤها في كل سحب، فلا تُبنى عليها مفاتيح أجنبية من جداولنا.
 
 CREATE TABLE IF NOT EXISTS crm_leads (
-  id              TEXT PRIMARY KEY,                  -- معرّف المحتمل في منصة إدارة المكتب
+  id              TEXT PRIMARY KEY,                  -- معرّف المحتمل في منصة إدارة الشركة
   full_name       TEXT,
   phone           TEXT,
   email           TEXT,
@@ -213,7 +213,7 @@ INSERT OR IGNORE INTO integrations (key, is_enabled, config_json) VALUES
 -- ═══ دليل المؤشرات ═══
 -- كل مؤشر في الدليل، بترتيب طبقاته. `source` يقول من أين تأتي القيمة:
 --   auto        — تحسبها المنصة من بياناتها (لقطات التحليلات، النشرات، سجلّ
---                 الاعتماد، مرآة إدارة المكتب، الإنفاق المسجَّل)
+--                 الاعتماد، مرآة إدارة الشركة، الإنفاق المسجَّل)
 --   integration — تصل من مصدر خارجي مربوط
 --   manual      — يسجّلها عضو الفريق، وتحمل اسمه وتاريخه
 

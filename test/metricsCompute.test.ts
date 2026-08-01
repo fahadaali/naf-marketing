@@ -121,7 +121,7 @@ describe('الطبقة الأولى والثانية — من لقطات الت�
   });
 });
 
-describe('الطبقة الرابعة — مسار البيع من مرآة إدارة المكتب', () => {
+describe('الطبقة الرابعة — مسار البيع من مرآة إدارة الشركة', () => {
   beforeEach(() => {
     const lead = db.prepare(
       `INSERT INTO crm_leads (id, full_name, phone, email, source, status, expected_value, created_at, synced_at)

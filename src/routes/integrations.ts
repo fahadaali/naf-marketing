@@ -34,7 +34,7 @@ integrationRoutes.get('/', async (c) => {
 
   const integrations = results.map((row) => {
     const source = SOURCES[row.key];
-    // منصة إدارة المكتب ليست في `SOURCES`: مسارُها نسخُ صفوفٍ لا سحبُ نقاط.
+    // منصة إدارة الشركة ليست في `SOURCES`: مسارُها نسخُ صفوفٍ لا سحبُ نقاط.
     const isCrm = row.key === 'crm';
     let config: Record<string, unknown> = {};
     try {
@@ -49,7 +49,7 @@ integrationRoutes.get('/', async (c) => {
       config,
       fields: isCrm
         ? [
-            { key: 'base_url', label: 'عنوان منصة إدارة المكتب', placeholder: 'https://naf-manger.pages.dev' },
+            { key: 'base_url', label: 'عنوان منصة إدارة الشركة', placeholder: 'https://naf-manger.pages.dev' },
             { key: 'mode', label: 'وضع السحب', placeholder: 'bearer' },
           ]
         : (source?.fields ?? []),
@@ -124,7 +124,7 @@ integrationRoutes.post('/:key/sync', requirePermission('metrics.manage'), async 
 });
 
 /**
- * رفع ملفّ تصدير منصة إدارة المكتب — الوضع `import`.
+ * رفع ملفّ تصدير منصة إدارة الشركة — الوضع `import`.
  *
  * وهو المسار الذي يعمل اليوم بلا تغيير في أي مستودع: تلك المنصة تحرس كل
  * مسارٍ بجلسة متصفّح، ولا مدخلَ لمفتاح خدمةٍ فيها بعد. فمن أراد الأرقام
@@ -151,7 +151,7 @@ integrationRoutes.post('/crm/import', requirePermission('metrics.manage'), async
   }
 });
 
-/** فحص جاهزية منصة إدارة المكتب — قبل تشغيل السحب الدوري عليها. */
+/** فحص جاهزية منصة إدارة الشركة — قبل تشغيل السحب الدوري عليها. */
 integrationRoutes.get('/crm/check', requirePermission('integrations.manage'), async (c) => {
   const row = await c.env.DB.prepare("SELECT config_json FROM integrations WHERE key = 'crm'").first<{ config_json: string }>();
   let cfg: Record<string, unknown> = {};

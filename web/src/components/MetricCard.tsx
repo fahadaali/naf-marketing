@@ -141,7 +141,7 @@ export default function MetricCard({ m, onPick }: { m: MetricReading; onPick?: (
       <div className="row metric-foot">
         <TargetChip m={m} />
         {/* المعيار القطاعي — المرجعية الثالثة. غير المستهدف: هذا ما عليه
-            القطاع وذاك ما نلتزم به، ومكتبٌ يبلغ مستهدفه وهو دون القطاع بلغ
+            القطاع وذاك ما نلتزم به، وشركةٌ تبلغ مستهدفه وهو دون القطاع بلغ
             ما وضعه لنفسه لا ما يكفي للمنافسة. */}
         {m.benchmark_value !== null && (
           <span className="muted" title={m.benchmark_note ?? undefined}>

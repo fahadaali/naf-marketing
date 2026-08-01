@@ -95,7 +95,7 @@ export default function MetricSources() {
     } catch (e: any) { setMsg(e.message); load(); } finally { setBusy(''); }
   }
 
-  /** رفع ملفّ تصدير منصة إدارة المكتب — المسار الذي يعمل بلا مفتاح خدمة. */
+  /** رفع ملفّ تصدير منصة إدارة الشركة — المسار الذي يعمل بلا مفتاح خدمة. */
   async function importCrm(file: File) {
     setBusy('crm'); setMsg('جارٍ القراءة…');
     try {
@@ -182,7 +182,7 @@ export default function MetricSources() {
           {i.key === 'crm' && canSync && (
             <div style={{ marginTop: 10 }}>
               <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '0 0 6px' }}>
-                أو ارفع ملف التصدير من منصة إدارة المكتب — يعمل دون مفتاح خدمة.
+                أو ارفع ملف التصدير من منصة إدارة الشركة — يعمل دون مفتاح خدمة.
               </p>
               <label className="btn sm ghost" style={{ cursor: 'pointer' }}>
                 <Upload size={20} /> رفع ملف التصدير

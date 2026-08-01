@@ -98,7 +98,7 @@ export async function syncAllSources(env: Env, p: Period): Promise<SourceSyncRes
 
   const out: SourceSyncResult[] = [];
   for (const row of results) {
-    if (!SOURCES[row.key]) continue; // منصة إدارة المكتب مسارها الخاص
+    if (!SOURCES[row.key]) continue; // منصة إدارة الشركة مسارها الخاص
     try {
       const points = await syncSource(env, row.key, p);
       out.push({ key: row.key, ok: true, points });
