@@ -81,6 +81,16 @@ export const TREND_LABELS: Record<Trend, string> = {
   no_baseline: 'لا مقارنة',
 };
 
+/** المرجعية الثالثة والقرار والمراجعة — `naf-terms.md` §١٣. */
+export const REFERENCE_LABELS = {
+  target: 'المستهدف',
+  benchmark: 'المعيار القطاعي',
+  decision: 'القرار المحتمل',
+  review_due: 'مستحقّ المراجعة',
+  reviewed_at: 'آخر مراجعة',
+  heatmap_open: 'فتح خريطة الحرارة',
+} as const;
+
 export const INTEGRATION_LABELS: Record<string, string> = {
   crm: 'منصة إدارة المكتب',
   web_analytics: 'تحليلات الموقع',

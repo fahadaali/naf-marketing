@@ -281,6 +281,31 @@ export function ReputationCard() {
   );
 }
 
+/* ===== خريطة الحرارة =====
+   ليست رقماً بل مخرَجٌ بصريّ من أداة قياسٍ خارجية، فلا بطاقةَ رقم لها بل
+   زرُّ فتح. والزرّ لا يظهر ما لم يُضبط الرابط: زرٌّ معطَّل يُنقر مرّاتٍ
+   قبل أن يُفهم أنه لا يعمل. */
+export function HeatmapLink() {
+  const [url, setUrl] = useState('');
+  useEffect(() => { api.get('/analytics/heatmap').then((d) => setUrl(d.url || '')).catch(() => {}); }, []);
+  if (!url) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row">
+        <h4 style={{ margin: 0 }}>خريطة الحرارة</h4>
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+          أين ينقر الزائر وأين يتوقف بصره في صفحة الخدمات
+        </span>
+        <div className="spacer" />
+        <a className="btn sm ghost" href={url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink size={20} /> فتح خريطة الحرارة
+        </a>
+      </div>
+    </div>
+  );
+}
+
 /* ===== أفضل أوقات النشر — من الأداء الفعلي بتوقيت الرياض ===== */
 const DAY_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 

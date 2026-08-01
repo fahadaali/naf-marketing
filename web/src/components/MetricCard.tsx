@@ -1,9 +1,9 @@
-import { Compass, Gauge, Megaphone, TrendingUp, TrendingDown, Equal, CircleCheck, CircleAlert, CircleHelp, TriangleAlert } from 'lucide-react';
+import { CalendarSync, Compass, Gauge, Megaphone, TrendingUp, TrendingDown, Equal, CircleCheck, CircleAlert, CircleHelp, TriangleAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { formatNumber } from '../lib/format';
 import { Money } from './Money';
 import {
-  CLASS_LABELS, SOURCE_LABELS, TARGET_STATUS_BADGE, TARGET_STATUS_LABELS,
+  CLASS_LABELS, REFERENCE_LABELS, SOURCE_LABELS, TARGET_STATUS_BADGE, TARGET_STATUS_LABELS,
   TREND_LABELS, UNIT_SUFFIX, dimensionLabel, targetStatus, trendIsGood, trendOf, trendPercent,
   type MetricClass, type MetricUnit, type TargetDirection, type TargetStatus, type Trend, type ValueSource,
 } from '../metrics';
@@ -37,6 +37,11 @@ export type MetricReading = {
   updated_at: string | null;
   note: string | null;
   previous: number | null;
+  benchmark_value: number | null;
+  benchmark_note: string | null;
+  decision: string | null;
+  reviewed_at: string | null;
+  review_due: boolean;
   breakdown: { dim_value: string; value: number; sample: number | null }[];
 };
 
@@ -135,13 +140,32 @@ export default function MetricCard({ m, onPick }: { m: MetricReading; onPick?: (
 
       <div className="row metric-foot">
         <TargetChip m={m} />
+        {/* المعيار القطاعي — المرجعية الثالثة. غير المستهدف: هذا ما عليه
+            القطاع وذاك ما نلتزم به، ومكتبٌ يبلغ مستهدفه وهو دون القطاع بلغ
+            ما وضعه لنفسه لا ما يكفي للمنافسة. */}
+        {m.benchmark_value !== null && (
+          <span className="muted" title={m.benchmark_note ?? undefined}>
+            {REFERENCE_LABELS.benchmark} <bdi>{formatNumber(m.benchmark_value)}{UNIT_SUFFIX[m.unit]}</bdi>
+          </span>
+        )}
         {m.value_source && <span className="muted">{SOURCE_LABELS[m.value_source]}</span>}
         {m.sample !== null && m.sample > 0 && (
           <span className="muted">
             من <bdi>{formatNumber(m.sample)}</bdi>
           </span>
         )}
+        {/* الدورية وحدها لا تُنبّه: مؤشرٌ ربعيٌّ لم يُراجع منذ سنة يبدو
+            كأخيه المراجَع أمس. */}
+        {m.review_due && (
+          <span className="badge gray">
+            <CalendarSync size={13} />
+            {REFERENCE_LABELS.review_due}
+          </span>
+        )}
       </div>
+
+      {/* لا تقس ما لا تنوي التصرف بناءً عليه — أوّل ملاحظات الدليل الختامية. */}
+      {m.decision && <p className="metric-decision">{m.decision}</p>}
 
       {m.breakdown.length > 0 && (
         <ul className="metric-breakdown">

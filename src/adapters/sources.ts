@@ -351,6 +351,10 @@ export const SOURCES: Record<string, SourceDefinition> = {
       { key: 'property_id', label: 'معرّف الخاصية', placeholder: '123456789' },
       { key: 'form_event', label: 'اسم حدث تعبئة النموذج', placeholder: 'generate_lead' },
       { key: 'gated_event', label: 'اسم حدث تحميل المحتوى المسوّر', placeholder: 'file_download' },
+      /* خريطة الحرارة ليست رقماً — لا قيمة عددية لها، وهي مخرَجٌ بصريّ من
+         أداة قياسٍ خارجية. فتُحفظ رابطاً هنا ويُعرض في طبقتها زرَّ فتح، ولا
+         تُسجَّل مؤشراً بوحدةٍ مخترعة. */
+      { key: 'heatmap_url', label: 'رابط خريطة الحرارة', placeholder: 'https://…' },
     ],
     fetch: fetchWebAnalytics,
   },

@@ -15,7 +15,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
   DatabaseSync: new (path: string) => any;
 };
 
-import { computeAuto } from '../src/services/metrics';
+import { computeAuto, isReviewDue } from '../src/services/metrics';
 import { periodOf } from '../src/services/period';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -295,5 +295,92 @@ describe('الطبقة العاشرة — التشغيل', () => {
     // النوعيّان: سؤالٌ صريح وطلبُ خدمة — لا تعليقا المجاملة
     expect(value('qualitative_comments')).toBe(2);
     expect(value('direct_conversations')).toBe(1);
+  });
+});
+
+describe('المراحل الستّ ومعدل الإغلاق بتعريف الدليل', () => {
+  beforeEach(() => {
+    const lead = db.prepare(
+      `INSERT INTO crm_leads (id, source, status, phone, created_at, synced_at)
+       VALUES (?, 'إعلان', ?, ?, ?, '2026-08-01T00:00:00Z')`,
+    );
+    // عشرون محتملاً، عشرةٌ منهم مؤهلون
+    for (let i = 1; i <= 20; i++) {
+      lead.run(`l${i}`, i <= 10 ? 'تم التواصل' : 'مهتم', `05010000${String(i).padStart(2, '0')}`, '2026-07-05T08:00:00Z');
+    }
+    db.prepare(
+      `INSERT INTO crm_clients (id, status, join_date, created_at, synced_at)
+       VALUES ('c1','current','2026-07-10','2026-07-10T00:00:00Z','2026-08-01T00:00:00Z')`,
+    ).run();
+    // عقدان في الفترة
+    const kase = db.prepare(
+      `INSERT INTO crm_cases (id, client_id, case_type, status, outcome, fee_amount, created_at, synced_at)
+       VALUES (?, 'c1', ?, 'completed', ?, 100000, ?, '2026-08-01T00:00:00Z')`,
+    );
+    kase.run('k1', 'قضية تجارية', 'won', '2026-07-15T00:00:00Z');
+    kase.run('k2', 'قضية عمالية', 'lost', '2026-07-18T00:00:00Z');
+  });
+
+  it('يترك المرحلتين غير المقيستين بلا رقم — لا صفراً يُقرأ تسرّباً', async () => {
+    await computeAuto(env, JULY);
+    expect(value('stage_conversion', 'lead_qualified')).toBe(50); // ١٠ من ٢٠
+    expect(value('stage_conversion', 'qualified_contract')).toBe(20); // ٢ من ١٠
+    // لا اجتماعات ولا عروض مسجَّلة بعد
+    expect(value('stage_conversion', 'qualified_meeting')).toBeUndefined();
+    expect(value('stage_conversion', 'meeting_proposal')).toBeUndefined();
+    expect(value('stage_conversion', 'proposal_contract')).toBeUndefined();
+  });
+
+  it('يكمل المسار متى سُجّلت الاجتماعات والعروض', async () => {
+    const put = db.prepare(
+      `INSERT INTO metric_values (id, metric_key, period, period_start, period_end, value, source)
+       VALUES (?, ?, 'monthly', ?, ?, ?, 'manual')`,
+    );
+    put.run('m1', 'meetings', JULY.start, JULY.end, 8);
+    put.run('m2', 'proposals', JULY.start, JULY.end, 4);
+
+    await computeAuto(env, JULY);
+    expect(value('stage_conversion', 'qualified_meeting')).toBe(80); // ٨ من ١٠
+    expect(value('stage_conversion', 'meeting_proposal')).toBe(50);  // ٤ من ٨
+    expect(value('stage_conversion', 'proposal_contract')).toBe(50); // ٢ من ٤
+  });
+
+  it('ينسب معدل الإغلاق إلى العروض متى سُجّلت، وإلى المحسومة متى لم تُسجَّل', async () => {
+    // بلا عروض: القضايا الرابحة ÷ المحسومة = ١ من ٢
+    await computeAuto(env, JULY);
+    expect(value('win_rate')).toBe(50);
+
+    db.prepare(
+      `INSERT INTO metric_values (id, metric_key, period, period_start, period_end, value, source)
+       VALUES ('m3', 'proposals', 'monthly', ?, ?, 8, 'manual')`,
+    ).run(JULY.start, JULY.end);
+
+    // بالعروض: العقود ÷ العروض = ٢ من ٨ — وهو ما ينصّ عليه الدليل
+    await computeAuto(env, JULY);
+    expect(value('win_rate')).toBe(25);
+  });
+
+  it('يفصل زمن دورة البيع لكل نوع خدمة', async () => {
+    // محتملان حُوّلا إلى العميل نفسه، وله عقدان بنوعين مختلفين
+    db.prepare(
+      `UPDATE crm_leads SET converted_client_id = 'c1', is_present = 0 WHERE id IN ('l1','l2')`,
+    ).run();
+    await computeAuto(env, JULY);
+    // العقد التجاري بعد ١٠ أيام من المحتمل، والعمالي بعد ١٣
+    expect(value('sales_cycle_days', 'قضية تجارية')).toBeCloseTo(10, 0);
+    expect(value('sales_cycle_days', 'قضية عمالية')).toBeCloseTo(13, 0);
+    expect(value('sales_cycle_days')).toBeDefined();
+  });
+});
+
+describe('استحقاق المراجعة', () => {
+  it('يستحقّ من لم يُراجع قطُّ، ومن مضت دوريتُه', async () => {
+    const now = new Date('2026-08-01T00:00:00Z');
+    expect(isReviewDue('weekly', null, now)).toBe(true);
+    expect(isReviewDue('weekly', '2026-07-30T00:00:00Z', now)).toBe(false);
+    expect(isReviewDue('weekly', '2026-07-20T00:00:00Z', now)).toBe(true);
+    // الربعيّ لا يستحقّ بعد شهر، ويستحقّ بعد أربعة
+    expect(isReviewDue('quarterly', '2026-07-01T00:00:00Z', now)).toBe(false);
+    expect(isReviewDue('quarterly', '2026-03-01T00:00:00Z', now)).toBe(true);
   });
 });

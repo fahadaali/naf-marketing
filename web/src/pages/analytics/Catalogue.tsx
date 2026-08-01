@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Compass, Gauge, Megaphone, Save } from 'lucide-react';
+import { CalendarCheck, Compass, Gauge, Megaphone, Save } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { api } from '../../api';
+import { api, formatRiyadh } from '../../api';
 import { formatNumber } from '../../lib/format';
 import { Money } from '../../components/Money';
 import {
-  CADENCE_LABELS, CLASS_LABELS, INTEGRATION_LABELS, LAYERS, SOURCE_LABELS, UNIT_SUFFIX,
+  CADENCE_LABELS, CLASS_LABELS, INTEGRATION_LABELS, LAYERS, REFERENCE_LABELS, SOURCE_LABELS, UNIT_SUFFIX,
   type MetricClass, type MetricUnit,
 } from '../../metrics';
 
@@ -26,6 +26,8 @@ type Definition = {
   class: MetricClass; source: string; integration_key: string | null; cadence: string;
   dim_key: string; target_value: number | null; target_direction: string;
   target_min: number | null; target_max: number | null; board_rank: number | null;
+  benchmark_value: number | null; benchmark_note: string | null;
+  decision: string | null; reviewed_at: string | null;
 };
 
 function TargetText({ d }: { d: Definition }) {
@@ -85,7 +87,8 @@ export default function Catalogue({ canManage, period, start, onChanged }: {
             <thead>
               <tr>
                 <th>المؤشر</th><th>الطبقة</th><th>الفئة</th><th>المصدر</th>
-                <th>الدورية</th><th>المستهدف</th>{canManage && <th />}
+                <th>الدورية</th><th>المستهدف</th><th>المعيار القطاعي</th>
+                <th>القرار المحتمل</th>{canManage && <th />}
               </tr>
             </thead>
             <tbody>
@@ -112,6 +115,14 @@ export default function Catalogue({ canManage, period, start, onChanged }: {
                     </td>
                     <td className="muted">{CADENCE_LABELS[d.cadence] ?? d.cadence}</td>
                     <td><TargetText d={d} /></td>
+                    <td title={d.benchmark_note ?? undefined}>
+                      {d.benchmark_value === null
+                        ? <span className="muted">—</span>
+                        : <bdi>{formatNumber(d.benchmark_value)}{UNIT_SUFFIX[d.unit]}</bdi>}
+                    </td>
+                    {/* الدليل: لا تقس ما لا تنوي التصرف بناءً عليه. والخانة
+                        الفارغة هنا سؤالٌ مطروح لا نقصٌ في العرض. */}
+                    <td className="muted">{d.decision ?? '—'}</td>
                     {canManage && (
                       <td>
                         <button type="button" className="btn sm ghost" onClick={() => setPicked(d)}>تسجيل</button>
@@ -121,7 +132,7 @@ export default function Catalogue({ canManage, period, start, onChanged }: {
                 );
               })}
               {shown.length === 0 && (
-                <tr><td colSpan={canManage ? 7 : 6} className="muted">لا مؤشر في هذه الطبقة بعد.</td></tr>
+                <tr><td colSpan={canManage ? 9 : 8} className="muted">لا مؤشر في هذه الطبقة بعد.</td></tr>
               )}
             </tbody>
           </table>
@@ -149,6 +160,8 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
   const [dimValue, setDimValue] = useState('');
   const [note, setNote] = useState('');
   const [target, setTarget] = useState(def.target_value === null ? '' : String(def.target_value));
+  const [benchmark, setBenchmark] = useState(def.benchmark_value === null ? '' : String(def.benchmark_value));
+  const [decision, setDecision] = useState(def.decision ?? '');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -172,8 +185,21 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
       await api.put(`/metrics/definitions/${def.key}/target`, {
         target_value: target === '' ? null : Number(target),
         target_direction: def.target_direction,
+        benchmark_value: benchmark === '' ? null : Number(benchmark),
+        benchmark_note: def.benchmark_note,
+        decision: decision.trim() === '' ? null : decision.trim(),
       });
       setMsg('تم تسجيل المستهدف');
+      onSaved();
+    } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
+  }
+
+  /** يُسقط وسم الاستحقاق حتى تمرّ دورية المؤشر — المراجعة فعلٌ يُسجَّل. */
+  async function markReviewed() {
+    setBusy(true);
+    try {
+      await api.post(`/metrics/definitions/${def.key}/reviewed`);
+      setMsg('تم تسجيل المراجعة');
       onSaved();
     } catch (e: any) { setMsg(e.message); } finally { setBusy(false); }
   }
@@ -208,12 +234,32 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
         <button className="btn" disabled={busy} onClick={saveValue}><Save size={20} /> حفظ</button>
       </div>
 
+      {/* المرجعية ثلاث: مقارنةٌ زمنية تُحسب، ومستهدفٌ نلتزم به، ومعيارٌ
+          عليه القطاع. والقرار رابعٌ يسأل السؤال قبل أن يُجمع الرقم. */}
       <div className="row" style={{ alignItems: 'flex-end', gap: 12, marginTop: 12 }}>
-        <div className="field" style={{ margin: 0 }}>
-          <label htmlFor="mv-target">المستهدف</label>
+        <div className="field" style={{ margin: 0, maxWidth: 140 }}>
+          <label htmlFor="mv-target">{REFERENCE_LABELS.target}</label>
           <input id="mv-target" className="input" inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)} />
         </div>
-        <button className="btn ghost" disabled={busy} onClick={saveTarget}><Save size={20} /> حفظ المستهدف</button>
+        <div className="field" style={{ margin: 0, maxWidth: 160 }}>
+          <label htmlFor="mv-benchmark">{REFERENCE_LABELS.benchmark}</label>
+          <input id="mv-benchmark" className="input" inputMode="decimal" value={benchmark} onChange={(e) => setBenchmark(e.target.value)} />
+        </div>
+        <div className="field" style={{ margin: 0, flex: 1, minWidth: 200 }}>
+          <label htmlFor="mv-decision">{REFERENCE_LABELS.decision}</label>
+          <input id="mv-decision" className="input" value={decision} onChange={(e) => setDecision(e.target.value)} />
+        </div>
+        <button className="btn ghost" disabled={busy} onClick={saveTarget}><Save size={20} /> حفظ المرجعية</button>
+      </div>
+
+      <div className="row" style={{ gap: 12, marginTop: 12 }}>
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+          {REFERENCE_LABELS.reviewed_at}:{' '}
+          {def.reviewed_at ? <bdi>{formatRiyadh(def.reviewed_at)}</bdi> : 'لم يُراجع بعد'}
+        </span>
+        <button className="btn sm ghost" disabled={busy} onClick={markReviewed}>
+          <CalendarCheck size={20} /> تسجيل المراجعة
+        </button>
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
       </div>

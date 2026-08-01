@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { parsePeriod, periodOf, previousPeriod, isPeriodKind, type Period } from '../services/period';
-import { computeAuto, listDefinitions, readBoard, readLayer, readSeries, recordManual } from '../services/metrics';
+import { computeAuto, listDefinitions, markReviewed, readBoard, readLayer, readSeries, recordManual } from '../services/metrics';
 import { syncAllSources } from '../services/metricSync';
 import { syncCrm } from '../services/crmSync';
 import { newId } from '../util';
@@ -114,10 +114,16 @@ metricsRoutes.post('/values', requirePermission('metrics.manage'), async (c) => 
   return c.json({ ok: true });
 });
 
-// المستهدف — الرقم بلا مرجع لا يعني شيئاً، والمرجع يُسجَّل هنا
+/* المرجعية والقرار — الرقم بلا مرجعية لا يعني شيئاً، والمرجعية ثلاث:
+   مقارنةٌ زمنية تُحسب، ومستهدفٌ يُسجَّل هنا، ومعيارٌ قطاعي يُسجَّل معه.
+   والقرار المحتمل حقلٌ رابع: لا تقس ما لا تنوي التصرف بناءً عليه. */
 metricsRoutes.put('/definitions/:key/target', requirePermission('metrics.manage'), async (c) => {
   const key = c.req.param('key');
-  const body = await c.req.json<{ target_value?: number | null; target_direction?: string; target_min?: number | null; target_max?: number | null }>();
+  const body = await c.req.json<{
+    target_value?: number | null; target_direction?: string;
+    target_min?: number | null; target_max?: number | null;
+    benchmark_value?: number | null; benchmark_note?: string | null; decision?: string | null;
+  }>();
 
   const direction = body.target_direction;
   if (direction && !['higher_better', 'lower_better', 'range'].includes(direction)) {
@@ -127,7 +133,8 @@ metricsRoutes.put('/definitions/:key/target', requirePermission('metrics.manage'
   const result = await c.env.DB.prepare(
     `UPDATE metric_definitions SET
        target_value = ?, target_min = ?, target_max = ?,
-       target_direction = COALESCE(?, target_direction)
+       target_direction = COALESCE(?, target_direction),
+       benchmark_value = ?, benchmark_note = ?, decision = ?
      WHERE key = ?`,
   )
     .bind(
@@ -135,12 +142,23 @@ metricsRoutes.put('/definitions/:key/target', requirePermission('metrics.manage'
       body.target_min ?? null,
       body.target_max ?? null,
       direction ?? null,
+      body.benchmark_value ?? null,
+      body.benchmark_note ?? null,
+      body.decision ?? null,
       key,
     )
     .run();
 
   if (!result.meta?.changes) return c.json({ error: 'مؤشر غير مسجَّل.' }, 404);
   await logAudit(c.env, c.get('user'), 'metric_target_set', 'metric', key, String(body.target_value ?? '—'));
+  return c.json({ ok: true });
+});
+
+// تسجيل أن المؤشر رُوجع — فيسقط وسم الاستحقاق حتى تمرّ دوريته
+metricsRoutes.post('/definitions/:key/reviewed', requirePermission('metrics.manage'), async (c) => {
+  const key = c.req.param('key');
+  if (!(await markReviewed(c.env, key))) return c.json({ error: 'مؤشر غير مسجَّل.' }, 404);
+  await logAudit(c.env, c.get('user'), 'metric_reviewed', 'metric', key);
   return c.json({ ok: true });
 });
 

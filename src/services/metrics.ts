@@ -358,7 +358,13 @@ async function computeEmail(env: Env, p: Period): Promise<void> {
     lifts.push(((Math.max(a, b) - loser) / loser) * 100);
   }
   if (lifts.length) {
-    await put('ab_test_lift', round2(lifts.reduce((x, y) => x + y, 0) / lifts.length), { sample: lifts.length });
+    const value = round2(lifts.reduce((x, y) => x + y, 0) / lifts.length);
+    /* الدليل يذكر الاختبار على «العناوين والصور والعروض ونماذج التواصل».
+       والمحتسب آلياً عناوينُ البريد وحدها — وهي وحدها ما تجري داخل المنصة.
+       فتُكتب ببُعدها كي تقع الثلاثةُ الأخرى في الصفّ نفسه حين تُدخَل، لا في
+       مؤشرٍ رابع يفرّق ما يقيس الشيء ذاته. والرقم المجمّع يبقى فوقها. */
+    await put('ab_test_lift', value, { sample: lifts.length });
+    await put('ab_test_lift', value, { dimKey: 'test', dimValue: 'عناوين البريد', sample: lifts.length });
   }
 }
 
@@ -482,11 +488,18 @@ async function computeFunnel(env: Env, p: Period): Promise<void> {
   }
   await put('duplicate_rate', pct(duplicates, leads.length), { sample: leads.length });
 
-  /* التحويل على كل مرحلة. المراحل الستّ في السجلّ، وثلاثةٌ منها لها بيانات
-     اليوم: الزائر من تحليلات الموقع، والمحتمل والمؤهل من هذه المرآة،
-     والتعاقد من القضايا. والاجتماعُ والعرضُ لا يسجّلهما المصدر بعد، فلا
-     يُكتب لهما رقم — وغيابُهما في الشاشة ثغرةٌ معروفة لا صفرٌ يُقرأ فشلاً. */
+  /* ═══ التحويل على كل مرحلة — المراحل الستّ ═══
+
+     زائر ← محتمل ← مؤهل ← اجتماع ← عرض ← تعاقد. أربعٌ من الستّ تصل من
+     مصادرها: الزائر من تحليلات الموقع، والمحتمل والمؤهل من هذه المرآة،
+     والتعاقد من القضايا. والاجتماعُ والعرضُ يُدخَلان — ومتى دخلا اكتمل
+     المسار من غير تعديل هنا.
+
+     وما لا مقام له لا يُكتب: انتقالٌ بلا رقم أصدقُ من صفرٍ يُقرأ تسرّباً
+     كاملاً في مرحلةٍ لم تُقَس أصلاً. */
   const sessions = await readValue(env, p, 'sessions');
+  const meetings = await readValue(env, p, 'meetings');
+  const proposals = await readValue(env, p, 'proposals');
   const contracts = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM crm_cases WHERE created_at >= ? AND created_at < ?`,
   )
@@ -494,10 +507,37 @@ async function computeFunnel(env: Env, p: Period): Promise<void> {
     .first<{ n: number }>();
   const contractCount = contracts?.n ?? 0;
 
-  if (sessions) await put('stage_conversion', pct(leads.length, sessions), { dimKey: 'stage', dimValue: 'visitor_lead' });
-  await put('stage_conversion', pct(mqls.length, leads.length), { dimKey: 'stage', dimValue: 'lead_qualified' });
-  await put('stage_conversion', pct(contractCount, mqls.length), { dimKey: 'stage', dimValue: 'qualified_contract' });
+  const stage = (dimValue: string, part: number | null, whole: number | null) => {
+    if (part === null || whole === null || !whole) return Promise.resolve();
+    return put('stage_conversion', pct(part, whole), { dimKey: 'stage', dimValue, sample: whole });
+  };
+
+  await stage('visitor_lead', leads.length, sessions);
+  await stage('lead_qualified', mqls.length, leads.length);
+  await stage('qualified_meeting', meetings, mqls.length);
+  await stage('meeting_proposal', proposals, meetings);
+  await stage('proposal_contract', contractCount, proposals);
+  // ويبقى «مؤهل ← تعاقد» مكتوباً ولو غابت المرحلتان بينهما: هو رقم اللوحة
+  // الأسبوعية، ولا ينتظر اكتمال المسار.
+  await stage('qualified_contract', contractCount, mqls.length);
   await put('qualified_to_contract', pct(contractCount, mqls.length), { sample: mqls.length });
+
+  /* ═══ معدل الإغلاق ═══
+
+     الدليل يعرّفه «العقود الموقعة ÷ العروض المقدمة». وحسابُه على القضايا
+     المحسومة — رابحة ÷ (رابحة + خاسرة) — يقيس شيئاً آخر: جودةَ تنفيذ ما
+     وُقّع لا جودةَ ما عُرض. ومكتبٌ يربح قضاياه كلَّها يقرأ إغلاقاً ممتازاً
+     وهو لا يفوز إلا بعرضٍ من عشرة.
+
+     فيُحسب بتعريف الدليل متى سُجّلت العروض، ويتراجع إلى المحسومة متى لم
+     تُسجَّل — والملاحظة المرافقة للقيمة تقول أيُّهما استُعمل، فلا يُقارَن
+     رقمٌ بتعريفٍ برقمٍ بتعريفٍ آخر دون أن يُعلم. */
+  if (proposals && proposals > 0) {
+    await put('win_rate', pct(contractCount, proposals), {
+      sample: proposals,
+      note: 'العقود الموقعة ÷ العروض المقدمة — تعريف الدليل',
+    });
+  }
 }
 
 async function computeCrmRevenue(env: Env, p: Period): Promise<void> {
@@ -520,10 +560,17 @@ async function computeCrmRevenue(env: Env, p: Period): Promise<void> {
     await put('acv', round2(valued.reduce((s, c) => s + (c.fee_amount || 0), 0) / valued.length), { sample: valued.length });
   }
 
-  // معدل الإغلاق — على ما حُسم وحده: قضيةٌ جارية ليست خسارة
+  /* معدل الإغلاق — المسار الاحتياطي وحده.
+     التعريف المسجَّل في الدليل «العقود ÷ العروض المقدمة»، ويُكتب في
+     `computeFunnel` متى سُجّلت العروض. وهذا يقع بعده، فلا يُكتب إلا حين
+     لا عروضَ مسجَّلة — وإلا محا التعريفَ الأصحّ بالتعريف الأضيق. */
+  const proposals = await readValue(env, p, 'proposals');
   const decided = cases.results.filter((c) => c.outcome === 'won' || c.outcome === 'lost');
-  if (decided.length) {
-    await put('win_rate', pct(decided.filter((c) => c.outcome === 'won').length, decided.length), { sample: decided.length });
+  if (!proposals && decided.length) {
+    await put('win_rate', pct(decided.filter((c) => c.outcome === 'won').length, decided.length), {
+      sample: decided.length,
+      note: 'القضايا الرابحة ÷ المحسومة — العروض المقدمة غير مسجَّلة',
+    });
   }
 
   // إيراد التوسّع — ما جاء من عميلٍ له أكثر من عقد في الفترة
@@ -553,6 +600,29 @@ async function computeCrmRevenue(env: Env, p: Period): Promise<void> {
     .first<{ days: number | null; n: number }>();
   if (cycle && cycle.n > 0 && cycle.days !== null) {
     await put('sales_cycle_days', round2(cycle.days), { sample: cycle.n });
+  }
+
+  /* والدليل يطلبه «ومتوسطه لكل نوع خدمة». ورقمٌ واحد يخفي أن عقد التأسيس
+     يُغلق في أسبوع والتقاضي في أشهر، فيبدو المتوسط بطيئاً في الأول وسريعاً
+     في الثاني ولا يصف أيّهما — ولا يُبنى عليه وعدُ موعدٍ لعميل. */
+  const cycleByService = await env.DB.prepare(
+    `SELECT k.case_type AS service,
+            ROUND(AVG(julianday(k.first_case) - julianday(l.created_at)), 2) AS days,
+            COUNT(*) AS n
+     FROM crm_leads l
+     JOIN (SELECT client_id, case_type, MIN(created_at) AS first_case FROM crm_cases
+           WHERE client_id IS NOT NULL AND case_type IS NOT NULL GROUP BY client_id, case_type) k
+       ON k.client_id = l.converted_client_id
+     WHERE l.converted_client_id IS NOT NULL AND l.created_at IS NOT NULL
+       AND k.first_case >= ? AND k.first_case < ? AND k.first_case > l.created_at
+     GROUP BY k.case_type`,
+  )
+    .bind(from, to)
+    .all<{ service: string; days: number | null; n: number }>();
+
+  for (const row of cycleByService.results) {
+    if (row.days === null) continue;
+    await put('sales_cycle_days', row.days, { dimKey: 'service', dimValue: row.service, sample: row.n });
   }
 
   /* الاحتفاظ والتسرب — على من كان عميلاً قبل بداية الفترة وحده. وإدخالُ من
@@ -752,7 +822,34 @@ export type MetricDefinition = {
   target_max: number | null;
   board_rank: number | null;
   sort: number;
+  /** المرجعية الثالثة — ما عليه القطاع، لا ما نلتزم به. */
+  benchmark_value: number | null;
+  benchmark_note: string | null;
+  /** القرار الذي يُتخذ عند هذا الرقم — لا تقس ما لا تنوي التصرف بناءً عليه. */
+  decision: string | null;
+  reviewed_at: string | null;
 };
+
+/** كم يوماً تغطّي دوريةُ المؤشر — منها يُشتقّ استحقاق المراجعة. */
+const CADENCE_DAYS: Record<string, number> = {
+  weekly: 7,
+  monthly: 31,
+  quarterly: 92,
+  annual: 366,
+};
+
+/**
+ * أمستحقٌّ للمراجعة؟
+ *
+ * الدورية وحدها لا تُنبّه: مؤشرٌ ربعيٌّ لم يُراجع منذ سنة يبدو في الشاشة
+ * كأخيه المراجَع أمس. ومن لم يُراجع قطُّ مستحقٌّ بالتعريف.
+ */
+export function isReviewDue(cadence: string, reviewedAt: string | null, now = new Date()): boolean {
+  if (!reviewedAt) return true;
+  const days = CADENCE_DAYS[cadence] ?? 31;
+  const elapsed = (now.getTime() - new Date(reviewedAt).getTime()) / 86_400_000;
+  return !Number.isFinite(elapsed) || elapsed >= days;
+}
 
 export type MetricReading = MetricDefinition & {
   value: number | null;
@@ -761,6 +858,8 @@ export type MetricReading = MetricDefinition & {
   updated_at: string | null;
   note: string | null;
   previous: number | null;
+  /** مشتقٌّ من الدورية وتاريخ آخر مراجعة — لا عمود في القاعدة. */
+  review_due: boolean;
   /** التوزيع على البُعد إن كان للمؤشر بُعد. */
   breakdown: { dim_value: string; value: number; sample: number | null }[];
 };
@@ -826,9 +925,20 @@ export async function readLayer(env: Env, p: Period, layer?: string): Promise<Me
       updated_at: total ? total.updated_at : null,
       note: total ? total.note : null,
       previous: prevMap.get(d.key) ?? null,
+      review_due: isReviewDue(d.cadence, d.reviewed_at),
       breakdown,
     };
   });
+}
+
+/** يسجّل أن المؤشر رُوجع الآن — فيسقط وسم الاستحقاق حتى تمرّ دوريته. */
+export async function markReviewed(env: Env, metricKey: string): Promise<boolean> {
+  const result = await env.DB.prepare(
+    "UPDATE metric_definitions SET reviewed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE key = ?",
+  )
+    .bind(metricKey)
+    .run();
+  return Boolean(result.meta?.changes);
 }
 
 /** اللوحة المختصرة — عشرة أرقام بترتيبها المسجَّل. */

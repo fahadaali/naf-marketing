@@ -10,7 +10,7 @@ import { platformLabel } from '../platforms';
 import Catalogue from './analytics/Catalogue';
 import Spend from './analytics/Spend';
 import {
-  BestTimesCard, CampaignPerformance, PipelineStatus, PlatformBreakdown,
+  BestTimesCard, CampaignPerformance, HeatmapLink, PipelineStatus, PlatformBreakdown,
   ReputationCard, StaleAlerts, TeamPerformance, TopPosts, VideoAnalyticsExport,
   type DashboardData,
 } from './analytics/panels';
@@ -231,6 +231,7 @@ export default function Analytics() {
               {tab === 'engagement' && (
                 <>
                   <BestTimesCard platform={platform} />
+                  <HeatmapLink />
                   <TopPosts data={dash} />
                   <div style={{ marginTop: 16 }}>
                     <ReputationCard />

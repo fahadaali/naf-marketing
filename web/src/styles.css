@@ -556,3 +556,12 @@ button.metric-card:focus-visible { outline: 2px solid var(--ring); outline-offse
 @media (max-width: 900px) {
   .metric-value { font-size: var(--text-2xl); }
 }
+
+/* القرار المحتمل — يُقرأ مع الرقم لا في تقريرٍ بعده. */
+.metric-decision {
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
