@@ -351,4 +351,8 @@ INSERT OR IGNORE INTO metric_definitions
 ('approval_cycle_hours','operations','زمن دورة الاعتماد','Approval Workflow Cycle Time','hours','operational','auto',NULL,'monthly','',48,'lower_better',NULL,NULL,NULL,1003),
 ('data_completeness','operations','اكتمال بيانات العميل المحتمل','Data Completeness','percentage','operational','auto',NULL,'monthly','',95,'higher_better',NULL,NULL,NULL,1004),
 ('duplicate_rate','operations','نسبة السجلات المكررة','Duplicate Rate','percentage','operational','auto',NULL,'monthly','',2,'lower_better',NULL,NULL,NULL,1005),
-('privacy_compliance','operations','الالتزام بحماية البيانات','Data Privacy Compliance','percentage','operational','auto',NULL,'quarterly','',100,'higher_better',NULL,NULL,NULL,1006);
+-- مُدخَل لا محتسب: التوافق مع نظام حماية البيانات الشخصية وسياسة الاحتفاظ
+-- وموافقة التواصل التسويقي حكمٌ يصدره من راجعها، لا رقمٌ يُستخرج من جدول.
+-- ووسمُه «محتسب» كان يَعِد بقيمةٍ لا تأتي: البطاقة تقول «سجّلها أو اربط
+-- مصدرها» ولا أحد يسجّلها لأنها تبدو آليّة.
+('privacy_compliance','operations','الالتزام بحماية البيانات','Data Privacy Compliance','percentage','operational','manual',NULL,'quarterly','',100,'higher_better',NULL,NULL,NULL,1006);
