@@ -93,6 +93,7 @@ export const REFERENCE_LABELS = {
 
 export const INTEGRATION_LABELS: Record<string, string> = {
   crm: 'منصة إدارة الشركة',
+  social: 'مزوّد النشر',
   web_analytics: 'تحليلات الموقع',
   search_console: 'أدوات مشرفي المواقع',
   business_profile: 'الملف التجاري',
