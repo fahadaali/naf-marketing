@@ -49,7 +49,7 @@ integrationRoutes.get('/', async (c) => {
       config,
       fields: isCrm
         ? [
-            { key: 'base_url', label: 'عنوان منصة إدارة الشركة', placeholder: 'https://naf-manger.pages.dev' },
+            { key: 'base_url', label: 'عنوان منصة إدارة الشركة', placeholder: 'https://crm.naflaw.sa' },
             { key: 'mode', label: 'وضع السحب', placeholder: 'bearer' },
           ]
         : (source?.fields ?? []),

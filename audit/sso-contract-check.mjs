@@ -20,8 +20,8 @@ import { execFileSync } from 'node:child_process';
    وليس ذلك حال الخمس كلها، فمنصة التقارير معرّفها naf-rebort ونطاقها
    naf-reports، ولا يُشتقّ أحدهما من الآخر. */
 const PLATFORM_ID = 'naf-marketing';
-const CALLBACK_URL = 'https://naf-marketing.naflaw-sa.workers.dev/auth/callback';
-const AUTH_ISSUER = 'https://naf-id.pages.dev';
+const CALLBACK_URL = 'https://marketing.naflaw.sa/auth/callback';
+const AUTH_ISSUER = 'https://app.naflaw.sa';
 /* الوسم يوافق ما في `package.json` — يُرفع معه في الترقية نفسها.
    وكان `v3.0.0` بينما المنصة على `v3.2.0`، فيسقط الفاحص على مستودعٍ صحيح
    ويُقرأ سقوطُه على أنه خلل في الربط.
