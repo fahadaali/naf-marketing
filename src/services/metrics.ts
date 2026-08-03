@@ -886,25 +886,38 @@ export async function readLayer(env: Env, p: Period, layer?: string): Promise<Me
   if (!defs.length) return [];
 
   const prev = previousPeriod(p);
-  const keys = defs.map((d) => d.key);
-  const placeholders = keys.map(() => '?').join(', ');
+
+  /* ═══ الحدّ على القيمة بالانضمام لا بسرد المفاتيح ═══
+
+     `metric_key IN (?, ?, …)` بمفتاحٍ لكل مؤشر يرسل رابطةً لكل واحد، وD1 يقف
+     عند مئة رابطة في الاستعلام الواحد. والدليل اليوم مئةٌ وستّة عشر مؤشراً،
+     فقراءةُ اللوحة المختصرة — وهي `readLayer` بلا طبقة — كانت تُرسل مئةً
+     وثمانيَ عشرة فيردّ D1 بخطأ ويردّ المسار ٥٠٠. وسجلٌّ يكبر بمؤشرٍ واحد كان
+     يكفي لكسر شاشةٍ كانت تعمل.
+
+     والانضمام إلى `metric_definitions` يقول الشيء نفسه: القيمة تشير إلى
+     تعريفها بمفتاحٍ خارجي، فالانضمامُ يحدّها بالطبقة برابطةٍ واحدة مهما بلغ
+     عدد المؤشرات. */
+  const layerClause = layer ? ' AND d.layer = ?' : '';
+  const layerBind = layer ? [layer] : [];
 
   const { results: values } = await env.DB.prepare(
-    `SELECT metric_key, dim_key, dim_value, value, sample, source, updated_at, note
-     FROM metric_values
-     WHERE period = ? AND period_start = ? AND metric_key IN (${placeholders})`,
+    `SELECT v.metric_key, v.dim_key, v.dim_value, v.value, v.sample, v.source, v.updated_at, v.note
+     FROM metric_values v JOIN metric_definitions d ON d.key = v.metric_key
+     WHERE v.period = ? AND v.period_start = ?${layerClause}`,
   )
-    .bind(p.kind, p.start, ...keys)
+    .bind(p.kind, p.start, ...layerBind)
     .all<{
       metric_key: string; dim_key: string; dim_value: string; value: number;
       sample: number | null; source: string; updated_at: string; note: string | null;
     }>();
 
   const { results: prevValues } = await env.DB.prepare(
-    `SELECT metric_key, value FROM metric_values
-     WHERE period = ? AND period_start = ? AND dim_key = '' AND dim_value = '' AND metric_key IN (${placeholders})`,
+    `SELECT v.metric_key, v.value FROM metric_values v
+     JOIN metric_definitions d ON d.key = v.metric_key
+     WHERE v.period = ? AND v.period_start = ? AND v.dim_key = '' AND v.dim_value = ''${layerClause}`,
   )
-    .bind(prev.kind, prev.start, ...keys)
+    .bind(prev.kind, prev.start, ...layerBind)
     .all<{ metric_key: string; value: number }>();
 
   const prevMap = new Map(prevValues.map((r) => [r.metric_key, r.value]));
