@@ -65,7 +65,9 @@ export default function Analytics() {
     const q = new URLSearchParams({ period });
     if (start) q.set('start', start);
     if (!isBoard && !isCatalogue) q.set('layer', tab);
-    const path = isBoard ? '/metrics/board' : '/metrics/layer';
+    // والدليل يقرأ اللوحة لا الطبقات: لا يعرض أرقاماً وإنما يلزمه حدّ الفترة،
+    // واللوحة عشرة أرقام و«الطبقات كلها» مئةٌ وستّة عشر.
+    const path = isBoard || isCatalogue ? '/metrics/board' : '/metrics/layer';
     api.get(`${path}?${q}`)
       .then((d) => {
         setMetrics(d.metrics || []);
@@ -91,7 +93,11 @@ export default function Analytics() {
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns || [])).catch(() => {});
   }, []);
 
-  useEffect(() => { if (!isCatalogue) loadMetrics(); }, [tab, period, start]);
+  /* الدليل لا يعرض أرقاماً، لكنه يسجّلها — و«تسجيل» يرسل بداية الفترة مع
+     القيمة. وتبديل الفترة يُسقط بدايتها لتُعاد من الخادم، فلو أُعفي الدليل
+     من التحميل بقيت البداية فارغة وردّ الخادم «الفترة غير صالحة» على حفظٍ
+     يبدو سليماً. فيُحمَّل مرّةً حين تنقصه البداية وحدها. */
+  useEffect(() => { if (!isCatalogue || !start) loadMetrics(); }, [tab, period, start]);
   useEffect(() => { if (PANEL_LAYERS.has(tab)) loadDashboard(); }, [tab, platform, campaign, from, to]);
 
   /** يبدّل نوع الفترة ويُسقط بدايتها — فيعود الخادم بالفترة الجارية من النوع الجديد. */
