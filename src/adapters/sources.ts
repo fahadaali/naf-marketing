@@ -5,10 +5,11 @@
    يعرف شيئاً عن الفترات ولا عن التخزين: يستقبل مدىً بتاريخين ويعيد أرقاماً.
    والتجميع والحفظ في `services/metrics.ts`.
 
-   ═══ ثلاثة مصادر بواجهاتها الحقيقية، وأربعة بعقدٍ واحد ═══
+   ═══ أربعة مصادر بواجهاتها الحقيقية، وأربعة بعقدٍ واحد ═══
 
    تحليلات الموقع وأدوات مشرفي المواقع والملف التجاري كلها من جوجل، وواجهاتها
-   مستقرّة وموثّقة، فتُنادى مباشرةً.
+   مستقرّة وموثّقة، فتُنادى مباشرةً. ومعها مزوّد النشر بمفتاحه القائم — لا
+   واجهة جديدة له ولا سرّ ثانٍ.
 
    وأمّا منصات الإعلان وقنوات المراسلة وتتبّع المكالمات ورصد الذكر فلا واجهة
    واحدة لها: الإعلان وحده خمس منصات بخمس واجهات وخمس دورات موافقة، وتتبّع
@@ -24,6 +25,9 @@
 
 import type { Env } from '../types';
 import { getAccessToken, googleJson, parseServiceAccount, GoogleAuthError } from './googleAuth';
+import { providerKey } from './index';
+import { socialApiAudience, socialApiReviewSummary } from './socialapi';
+import { riyadhToday } from '../services/period';
 
 export type MetricPoint = {
   metricKey: string;
@@ -153,16 +157,113 @@ async function fetchWebAnalytics(env: Env, cfg: SourceConfig, range: SourceRange
 
   /* الأحداث المسمّاة: تعبئة النموذج وتحميل المحتوى المسوّر. أسماؤها تُضبط
      من شاشة التكاملات لأنها اصطلاحُ من ركّب القياس على الموقع، لا اصطلاحُ
-     GA4 — ومنصةٌ تفترض `generate_lead` تقرأ صفراً على موقعٍ سمّاه `contact`. */
+     GA4 — ومنصةٌ تفترض `generate_lead` تقرأ صفراً على موقعٍ سمّاه `contact`.
+
+     ويقابلها ثلاثةُ أحداثٍ يولّدها GA4 نفسه في «القياس المحسَّن»: `scroll`
+     و`form_start` و`form_submit`. أسماؤها من عنده لا من عند من ركّب القياس،
+     فتُفترض افتراضاً ويبقى تغييرها ممكناً من الشاشة لمن عطّل القياس المحسَّن
+     وسمّاها بنفسه. */
   const formEvent = cfgString(cfg, 'form_event');
   const gatedEvent = cfgString(cfg, 'gated_event');
-  if (formEvent || gatedEvent) {
-    for (const row of await ga4Report(token, propertyId, range, ['eventName'], ['eventCount'], 100)) {
-      if (formEvent && row.dims[0] === formEvent) out.push({ metricKey: 'form_completions', value: row.metrics[0] });
-      if (gatedEvent && row.dims[0] === gatedEvent) out.push({ metricKey: 'gated_downloads', value: row.metrics[0] });
-    }
+  const scrollEvent = cfgString(cfg, 'scroll_event') || 'scroll';
+  const formStartEvent = cfgString(cfg, 'form_start_event') || 'form_start';
+  const formSubmitEvent = formEvent || 'form_submit';
+
+  const events = new Map<string, number>();
+  for (const row of await ga4Report(token, propertyId, range, ['eventName'], ['eventCount'], 200)) {
+    events.set(row.dims[0], row.metrics[0]);
   }
 
+  if (formEvent && events.has(formEvent)) out.push({ metricKey: 'form_completions', value: events.get(formEvent) as number });
+  if (gatedEvent && events.has(gatedEvent)) out.push({ metricKey: 'gated_downloads', value: events.get(gatedEvent) as number });
+
+  /* التمرير حتى النهاية — حدث `scroll` في GA4 يقع مرّةً واحدة عند بلوغ ٩٠٪
+     من الصفحة، فنسبتُه إلى الجلسات هي المؤشر المسجّل. ونسبته إلى الجلسات لا
+     إلى مشاهدات الصفحة: من فتح خمس صفحات وأتمّ واحدةً أتمّ زيارةً لا خُمسها. */
+  const sessionCount = totals[0]?.metrics[0] ?? 0;
+  const scrolls = events.get(scrollEvent);
+  if (scrolls !== undefined && sessionCount > 0) {
+    out.push({ metricKey: 'scroll_depth', value: Math.round((scrolls / sessionCount) * 1000) / 10, sample: sessionCount });
+  }
+
+  /* عدم إكمال النموذج — من بدأه ولم يُرسله. والمقام من بدأ لا من رأى:
+     نسبةٌ إلى الزيارات كلها تقيس شيئاً آخر (اهتماماً بالنموذج أصلاً)، وهو
+     مؤشرٌ مختلف لم يطلبه الدليل. */
+  const starts = events.get(formStartEvent);
+  const submits = events.get(formSubmitEvent);
+  if (starts !== undefined && starts > 0) {
+    const abandoned = Math.max(starts - (submits ?? 0), 0);
+    out.push({ metricKey: 'form_abandonment_rate', value: Math.round((abandoned / starts) * 1000) / 10, sample: starts });
+  }
+
+  out.push(...(await fetchWebVitals(env, cfg, range)));
+
+  return out;
+}
+
+/* ═══ مؤشرات تجربة الصفحة — تقرير تجربة كروم (CrUX) ═══
+
+   الثلاثة مسجّلة مصدرُها «تحليلات الموقع»، وGA4 لا يحملها: تلك أرقامُ
+   مستخدمين حقيقيين يجمعها المتصفّح نفسه، وتُقرأ من تقرير تجربة كروم مجاناً.
+
+   ومداها ثمانيةٌ وعشرون يوماً منتهيةً بالأمس — لا يُضبط بتاريخين. فالرقم
+   المكتوب في فترةٍ شهرية هو حال الموقع عند احتسابها لا متوسّط الشهر، وهو ما
+   يعنيه المؤشر أصلاً: أهو اليوم ضمن الحدّ أم لا. ولذلك لا يُكتب في فترةٍ
+   منقضية — الدورة اليومية تسحبها مع الجارية، فيصير حال اليوم مكتوباً في كل
+   شهرٍ مضى.
+
+   وموقعٌ زوّارُه قليلون لا سجلّ له في التقرير، فيردّ ٤٠٤ ولا يُكتب شيء —
+   غيابٌ معلوم لا صفرٌ يُقرأ إتقاناً. */
+
+const CRUX_ENDPOINT = 'https://chromeuxreport.googleapis.com/v1/records:queryRecord';
+
+/** أجهزة التقرير ومقابلها في بُعد `device` المستعمل في «التوزيع بين الأجهزة». */
+const CRUX_FORM_FACTORS: { factor: string; device: string }[] = [
+  { factor: 'PHONE', device: 'mobile' },
+  { factor: 'DESKTOP', device: 'desktop' },
+];
+
+/** مقاييس التقرير ومفاتيحها عندنا، ومعامل الوحدة: المؤشران الأولان بالثواني والثالث بلا وحدة. */
+const CRUX_METRICS: { crux: string; metricKey: string; divisor: number }[] = [
+  { crux: 'largest_contentful_paint', metricKey: 'cwv_lcp', divisor: 1000 },
+  { crux: 'interaction_to_next_paint', metricKey: 'cwv_inp', divisor: 1000 },
+  { crux: 'cumulative_layout_shift', metricKey: 'cwv_cls', divisor: 1 },
+];
+
+async function fetchWebVitals(env: Env, cfg: SourceConfig, range: SourceRange): Promise<MetricPoint[]> {
+  const origin = cfgString(cfg, 'crux_origin');
+  const key = (env.GOOGLE_API_KEY || '').trim();
+  // بلا عنوانٍ أو بلا مفتاح: لا تُسحب الثلاثة ولا يسقط سحب تحليلات الموقع
+  // معها — مصدرٌ واحد يحمل واجهتين، وغيابُ إحداهما لا يُبطل الأخرى.
+  if (!origin || !key) return [];
+  if (range.end < riyadhToday()) return [];
+
+  const out: MetricPoint[] = [];
+  for (const { factor, device } of CRUX_FORM_FACTORS) {
+    let body: any;
+    try {
+      const res = await fetch(`${CRUX_ENDPOINT}?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ origin, formFactor: factor }),
+      });
+      if (res.status === 404) continue; // لا سجلّ لهذا الجهاز — زيارات لا تكفي
+      if (!res.ok) throw new SourceError(`ردّ تقرير تجربة كروم بالحالة ${res.status}`);
+      body = await res.json();
+    } catch (err) {
+      if (err instanceof SourceError) throw err;
+      throw new SourceError(`تعذّر الوصول إلى تقرير تجربة كروم — ${String((err as Error)?.message || err)}`);
+    }
+
+    const metrics = body?.record?.metrics ?? {};
+    for (const { crux, metricKey, divisor } of CRUX_METRICS) {
+      const p75 = metrics?.[crux]?.percentiles?.p75;
+      if (p75 === undefined || p75 === null) continue;
+      const n = Number(p75);
+      if (!Number.isFinite(n)) continue;
+      out.push({ metricKey, dimKey: 'device', dimValue: device, value: Math.round((n / divisor) * 100) / 100 });
+    }
+  }
   return out;
 }
 
@@ -275,6 +376,66 @@ async function fetchBusinessProfile(env: Env, cfg: SourceConfig, range: SourceRa
   return Array.from(totals.entries()).map(([metricKey, value]) => ({ metricKey, value }));
 }
 
+/* ═══ مزوّد النشر — أرقام الحساب لا أرقام المنشور ═══
+
+   مقاييس المنشورات تصل أصلاً مع كل منشور وتُحتسب منها الطبقتان الأولى
+   والثانية، وليست مصدراً يُسحب. وما يُسحب هنا ثلاثةٌ لا مسار لها من
+   المنشورات: عددُ المتابعين لكل منصّة، وعددُ مراجعات الملف التجاري
+   ومتوسّطها.
+
+   ولا مفتاح جديد له: هو المزوّد المضبوط في «الإعدادات ← المنصات والمزوّد»
+   بمفتاحه نفسه. ومفتاحان لمزوّدٍ واحد ينتهيان في وقتين.
+
+   والمراجعتان تحت هذا المصدر لا تحت «الملف التجاري»: واجهةُ جوجل للمراجعات
+   لا تزال الإصدار الرابع وتحتاج اعتماداً مستقلاً للحساب، ومزوّد النشر يقرأها
+   اليوم بالمفتاح القائم. والرقم واحد في الحالين — مصدرُ جوجل نفسه. */
+
+async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Promise<MetricPoint[]> {
+  const key = providerKey(env, 'socialapi');
+  if (!key) throw new SourceError('مفتاح مزوّد النشر غير مضبوط. اضبط SOCIALAPI_API_KEY.');
+
+  /* ═══ الثلاثة لقطاتٌ لا مجاميع، فلا تُكتب في فترةٍ منقضية ═══
+
+     المزوّد يعلن عدد المتابعين اليوم وعدد المراجعات منذ أول يوم، ولا يقبل
+     مدىً بتاريخين. والدورة اليومية تسحب الفترة السابقة مع الجارية — عمداً،
+     لأن المصادر تراجع أرقام يومها بعد انقضائه. فلو كُتبت اللقطة في الفترة
+     السابقة كتبت عددَ اليوم مكان عدد ذلك الشهر كلَّ يوم، فصار طرفا المقارنة
+     رقماً واحداً و«معدل النمو في المتابعين» صفراً أبداً.
+
+     فتُترك الفترة المنقضية على ما سُجّل فيها حين كانت جارية. ولقطةٌ فاتت لا
+     تُستدرك: من ربط المصدر اليوم يبدأ نموُّه من اليوم. */
+  if (range.end < riyadhToday()) return [];
+
+  const out: MetricPoint[] = [];
+
+  /* المتابعون لقطةٌ لا مجموع فترة: العدد اليوم هو العدد، ولا يُجمع على أيام
+     الشهر. والنموّ يُحتسب بمقارنة الفترتين في `services/metrics.ts` كما كان
+     يُحتسب حين كان يُسجَّل باليد. */
+  for (const acc of await socialApiAudience(key)) {
+    if (acc.followers === null) continue; // منصّة لا تُعلن العدد — يبقى تسجيله باليد
+    out.push({ metricKey: 'followers_total', dimKey: 'platform', dimValue: acc.platform, value: acc.followers });
+  }
+
+  let reviewCount = 0;
+  let weighted = 0;
+  let sawAverage = false;
+  for (const r of await socialApiReviewSummary(key)) {
+    if (r.count !== null) reviewCount += r.count;
+    if (r.average !== null && r.count) {
+      weighted += r.average * r.count;
+      sawAverage = true;
+    }
+  }
+  if (reviewCount > 0) {
+    out.push({ metricKey: 'gbp_reviews', value: reviewCount });
+    // المتوسط مرجَّحٌ بعدد مراجعات كل حساب: حسابٌ بمراجعتين لا يزن حساباً
+    // بمئتين، ومتوسّطُ المتوسّطات يجعلهما سواء.
+    if (sawAverage) out.push({ metricKey: 'gbp_rating', value: Math.round((weighted / reviewCount) * 100) / 100, sample: reviewCount });
+  }
+
+  return out;
+}
+
 /* ═══ المصادر الأربعة بالعقد الواحد ═══ */
 
 function sourceSecret(env: Env, key: string): string {
@@ -340,7 +501,7 @@ export type SourceDefinition = {
 };
 
 /**
- * المصادر السبعة التي تُسحب. ومنصة إدارة الشركة ليست منها: تلك تُنسخ مرآةً
+ * المصادر الثمانية التي تُسحب. ومنصة إدارة الشركة ليست منها: تلك تُنسخ مرآةً
  * صفوفاً لا نقاطَ مؤشرات، ومسارُها في `services/crmSync.ts`.
  */
 export const SOURCES: Record<string, SourceDefinition> = {
@@ -355,8 +516,18 @@ export const SOURCES: Record<string, SourceDefinition> = {
          أداة قياسٍ خارجية. فتُحفظ رابطاً هنا ويُعرض في طبقتها زرَّ فتح، ولا
          تُسجَّل مؤشراً بوحدةٍ مخترعة. */
       { key: 'heatmap_url', label: 'رابط خريطة الحرارة', placeholder: 'https://…' },
+      /* مؤشرات تجربة الصفحة تُقرأ من تقرير تجربة كروم لا من GA4، ومفتاحُها
+         `GOOGLE_API_KEY` لا الحساب الخدمي. وبلا أحدهما تبقى الثلاثة بلا قيمة
+         ويُسحب ما عداها. */
+      { key: 'crux_origin', label: 'عنوان الموقع لمؤشرات تجربة الصفحة', placeholder: 'https://naf.sa' },
     ],
     fetch: fetchWebAnalytics,
+  },
+  social: {
+    key: 'social',
+    secretName: 'SOCIALAPI_API_KEY',
+    fields: [],
+    fetch: fetchSocial,
   },
   search_console: {
     key: 'search_console',

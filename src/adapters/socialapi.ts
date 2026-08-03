@@ -447,6 +447,65 @@ export async function getExportVideos(apiKey: string, id: string): Promise<any[]
   return d?.data || d?.videos || (Array.isArray(d) ? d : []);
 }
 
+/* ═══ أرقام على مستوى الحساب لا المنشور ═══
+
+   مقاييس المنشورات تصل من `/posts` ومنها تُحتسب الطبقتان الأولى والثانية.
+   وما يلي أرقامُ الحساب نفسه — عدد المتابعين وملخّص المراجعات — ولا مسار
+   لها من المنشورات: حسابٌ لم يَنشر شيئاً هذا الشهر له متابعون ومراجعات.
+
+   والحقول تُقرأ بأسماءٍ متعدّدة لأن الردّ يختلف بين منصّة ومنصّة، وما لم
+   يُوجد منها لا يُكتب صفراً — الغياب ليس صفراً، ومصدرٌ لا يعيد المتابعين
+   يترك المؤشر بلا قيمة ويبقى تسجيلُه باليد ممكناً. */
+
+/** يقرأ عدداً من أول اسمٍ موجود في الكائن — وإلا `null`. */
+function pickNumber(obj: any, names: string[]): number | null {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const n of names) {
+    const v = obj[n];
+    const num = Number(v);
+    if (v !== null && v !== undefined && v !== '' && Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+const FOLLOWER_FIELDS = ['followers', 'followers_count', 'follower_count', 'subscribers', 'subscriber_count', 'audience_size'];
+
+export type SocialApiAudience = { platform: string; accountId: string; followers: number | null };
+
+/** المتابعون لكل حساب — من `/accounts`، ومن الحقول المتداخلة `stats`/`metrics`/`insights` إن وُجدت. */
+export async function socialApiAudience(apiKey: string): Promise<SocialApiAudience[]> {
+  const data = await sapi<any>(apiKey, 'GET', EP.accounts);
+  const list: any[] = data?.accounts || data?.data || (Array.isArray(data) ? data : []);
+  return list.map((a) => ({
+    platform: String(a.platform || a.network || a.service || 'unknown'),
+    accountId: String(a.id || a.account_id || a.accountId || ''),
+    followers:
+      pickNumber(a, FOLLOWER_FIELDS) ??
+      pickNumber(a.stats, FOLLOWER_FIELDS) ??
+      pickNumber(a.metrics, FOLLOWER_FIELDS) ??
+      pickNumber(a.insights, FOLLOWER_FIELDS),
+  }));
+}
+
+export type SocialApiReviewSummary = { platform: string; accountId: string; count: number | null; average: number | null };
+
+/**
+ * ملخّص المراجعات لكل حساب — العدد والمتوسط كما يعلنهما المزوّد.
+ *
+ * ولا يُحتسبان من المراجعات المسحوبة إلى الصندوق: تلك تُسقط ما لا نصّ له
+ * (تقييم نجومٍ بلا تعليق)، فمتوسطُها متوسطُ من كتب لا متوسطُ من قيّم.
+ */
+export async function socialApiReviewSummary(apiKey: string): Promise<SocialApiReviewSummary[]> {
+  const data = await sapi<any>(apiKey, 'GET', EP.reviews);
+  const list: any[] = data?.data || data?.reviews || (Array.isArray(data) ? data : []);
+  return list.map((r) => ({
+    platform: String(r.platform || 'google'),
+    accountId: String(r.account_id || r.id || ''),
+    count: pickNumber(r, ['total', 'count', 'total_reviews', 'review_count', 'reviews_count']),
+    average: pickNumber(r, ['average', 'average_rating', 'rating', 'avg_rating', 'star_rating']),
+  }));
+}
+
 // إدارة الويب هوكس — تسجيل/سرد/حذف نقطة استقبال أحداث الصندوق الفورية.
 export async function registerSocialApiWebhook(apiKey: string, url: string, events: string[]): Promise<{ id: string; secret: string }> {
   const data = await sapi<any>(apiKey, 'POST', '/webhooks', { url, events });
