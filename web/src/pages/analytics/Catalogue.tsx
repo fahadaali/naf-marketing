@@ -3,6 +3,7 @@ import { CalendarCheck, Compass, Gauge, Megaphone, Save } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, formatRiyadh } from '../../api';
 import { formatNumber } from '../../lib/format';
+import Modal from '../../components/Modal';
 import { Money } from '../../components/Money';
 import {
   CADENCE_LABELS, CLASS_LABELS, INTEGRATION_LABELS, LAYERS, REFERENCE_LABELS, SOURCE_LABELS, UNIT_SUFFIX,
@@ -139,8 +140,11 @@ export default function Catalogue({ canManage, period, start, onChanged }: {
         </div>
       </div>
 
+      {/* المفتاح على المؤشر: اللوح يبدأ حقوله من `def` مرّةً واحدة عند تركيبه،
+          فبلا مفتاحٍ يبقى مستهدفُ المؤشر السابق مكتوباً في خانة التالي. */}
       {picked && (
         <RecordPanel
+          key={picked.key}
           def={picked}
           period={period}
           start={start}
@@ -152,7 +156,17 @@ export default function Catalogue({ canManage, period, start, onChanged }: {
   );
 }
 
-/** تسجيل قيمةٍ ومستهدفٍ لمؤشر — القيمة تحمل اسم من أدخلها ووقته. */
+/* تسجيل قيمةٍ ومستهدفٍ لمؤشر — القيمة تحمل اسم من أدخلها ووقته.
+
+   ═══ ولماذا في نافذة لا تحت الجدول ═══
+
+   كان اللوح يُلحق بعد بطاقة الجدول، والجدول مئةٌ وستّة عشر صفاً بلا سقف
+   ارتفاع — ستّة آلاف بكسل على الشاشة العريضة وتسعة على الجوال. فمن ضغط
+   «تسجيل» على صفٍّ في الأعلى فتح لوحاً على بُعد ستّة آلاف بكسل تحت أسفل
+   الشاشة: لا شيء يتغيّر أمامه، فيضغط ثانيةً وثالثة ثم يبلّغ أن الزرّ معطّل.
+
+   والنافذة تحلّ هذا بلا حساب: `position: fixed` في وسط الشاشة أيّاً كان
+   موضع الصفّ المضغوط، ولا تحتاج تمريراً ولا تخمين ارتفاع. */
 function RecordPanel({ def, period, start, onClose, onSaved }: {
   def: Definition; period: string; start: string; onClose: () => void; onSaved: () => void;
 }) {
@@ -167,7 +181,9 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
 
   async function saveValue() {
     const n = Number(value);
-    if (!Number.isFinite(n)) { setMsg('القيمة يجب أن تكون رقماً.'); return; }
+    // الخانة الفارغة تُردّ صراحةً: `Number('')` صفرٌ صحيح، فحفظُها يكتب صفراً
+    // مكان الغياب — وهو ما يمنعه احتساب المؤشرات صراحةً، فلا يُدخله التسجيل.
+    if (value.trim() === '' || !Number.isFinite(n)) { setMsg('القيمة يجب أن تكون رقماً.'); return; }
     setBusy(true);
     try {
       await api.post('/metrics/values', {
@@ -205,14 +221,8 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
   }
 
   return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <div className="row">
-        <h4 style={{ margin: 0 }}>{def.name_ar}</h4>
-        <div className="spacer" />
-        <button type="button" className="btn sm ghost" onClick={onClose}>إغلاق</button>
-      </div>
-
-      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+    <Modal title={def.name_ar} onClose={onClose}>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
         الفترة المسجَّل فيها: <bdi>{start}</bdi> · {CADENCE_LABELS[period] ?? period}
       </p>
 
@@ -263,6 +273,6 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
       </div>
-    </div>
+    </Modal>
   );
 }
