@@ -3,7 +3,7 @@ import { EMAIL } from './emailTheme';
 import { escapeHtml, renderInline, stripInline } from './inline';
 import {
   DEFAULT_THEME, baseSize, inkDecls, surfaceDecls, alignDecl, mergeDecls, styleAttr,
-  RADIUS_PX, sizePx,
+  RADIUS_PX, sizePx, parseStyle,
 } from './blockStyle';
 import type { BlockStyle, NewsletterTheme, StyleCtx } from './blockStyle';
 
@@ -145,13 +145,29 @@ function paragraphs(text: string, ctx: StyleCtx, ink = ''): string {
     .join('');
 }
 
+/* الكتل تُقرأ من المخزن هنا وحده — وتخصيصُها يُنظَّف في هذا الموضع.
+
+   القيمة في `blocks_json` نصٌّ كتبته الواجهة، وواجهةٌ معطوبة أو نداءٌ
+   مباشر على `PATCH` يستطيعان كتابة `style.color = "red;position:fixed"`.
+   وبلا هذا السطر تصل تلك القيمة خاصيةَ `style` في رسالةٍ تُفتح في
+   عميلٍ لا نتحكّم به. `parseStyle` يُسقط كل ما ليس لوناً صالحاً أو
+   قيمةً من المجموعات المغلقة. */
 export function parseBlocks(json: string | null): Block[] {
   try {
     const arr = JSON.parse(json || '[]');
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr.map(cleanBlockStyle) : [];
   } catch {
     return [];
   }
+}
+
+/** ينظّف تخصيص كتلةٍ واحدة ويُبقي بقيّة حقولها كما هي. */
+function cleanBlockStyle(b: any): Block {
+  if (!b || typeof b !== 'object' || !b.style) return b as Block;
+  const style = parseStyle(b.style);
+  const out = { ...b };
+  if (style) out.style = style; else delete out.style;
+  return out as Block;
 }
 
 /* بطاقة رابط — البديل الموحّد لكل ما لا يُشغَّل في موضعه.
@@ -193,6 +209,11 @@ export function renderBlocks(
 ): string {
   const out: string[] = [];
   const inline = mode === 'email';
+  /* التنظيف يتكرّر هنا ولو مرّت الكتل على `parseBlocks` أصلاً: هذه
+     الدالّة هي المخرَج الوحيد إلى HTML، وتُنادى أيضاً بكتلٍ لم تأتِ من
+     المخزن — قالبٌ جاهز، أو اختبار. حارسٌ واحد على المخرَج أوثق من
+     ائتمان كل نداء. */
+  blocks = blocks.map(cleanBlockStyle);
   const ctx: StyleCtx = { inline, theme };
   const base = baseSize(theme);
   const mediaUrl = (b: any) => (b.url ? b.url : b.mediaId ? `${mediaBase}/api/media/${b.mediaId}` : '');

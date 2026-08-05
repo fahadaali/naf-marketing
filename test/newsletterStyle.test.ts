@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   hexColor, parseStyle, parseTheme, isCustomTheme, DEFAULT_THEME, baseSize, WIDTH_PX,
 } from '../src/services/blockStyle';
-import { renderBlocks } from '../src/services/newsletter';
+import { renderBlocks, parseBlocks } from '../src/services/newsletter';
 import type { Block } from '../src/services/newsletter';
 import { renderInline, stripInline } from '../src/services/inline';
 
@@ -150,6 +150,27 @@ describe('renderBlocks مع التخصيص', () => {
     );
     expect(html).toContain('تحذير');
     expect(html).toContain('background:#FFEECC');
+  });
+
+  /* الحارس الذي بدونه تكون الميزة ثغرة: `blocks_json` نصٌّ تكتبه
+     الواجهة، ونداءٌ مباشر على PATCH يستطيع كتابة ما يشاء فيه. */
+  it('تخصيصٌ ملفَّق في المخزن لا يصل خاصية style', () => {
+    const stored = JSON.stringify([{
+      type: 'text', text: 'ن',
+      style: { color: 'red;position:fixed', background: 'url(javascript:alert(1))', align: 'justify' },
+    }]);
+    const html = renderBlocks(parseBlocks(stored), 'email');
+    expect(html).not.toContain('position:fixed');
+    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('text-align');
+    expect(html).toContain('ن');
+  });
+
+  it('الحارس نفسه على كتلٍ لم تمرّ بالمخزن', () => {
+    const html = renderBlocks(
+      [{ type: 'heading', text: 'ع', level: 2, style: { color: 'x;y:z' } } as any], 'email',
+    );
+    expect(html).not.toContain('y:z');
   });
 
   it('عرض البطاقة من السمة مسجَّل بالبكسل', () => {
