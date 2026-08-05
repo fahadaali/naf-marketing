@@ -188,6 +188,53 @@ h3, h4 { letter-spacing: -0.01em; }
 .rte h2 { font-size: var(--text-xl); }
 .rte blockquote { border-inline-start: 3px solid var(--primary); margin: var(--space-2) 0; padding-inline-start: var(--space-3); color: var(--muted-foreground); }
 
+/* ===== تخصيص مظهر الكتلة =====
+   المصطلحات في naf-terms.md §١٤، والأيقونات في naf-icons.md.
+   الألوان التي يختارها الكاتب قيمُ محتوى تُخزَّن مع الكتلة؛ وأصناف
+   الأدوات نفسها من الرموز كبقيّة الواجهة. */
+.style-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  padding: var(--space-2); margin-top: var(--space-2);
+  border: 1px dashed var(--border); border-radius: var(--radius);
+  background: color-mix(in oklab, var(--muted) 40%, transparent);
+}
+.style-pick { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted-foreground); }
+.select.sm { width: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+
+/* مربّع اللون. الخلفية قيمةُ محتوى تأتي من `style` سطرياً، والحدّ
+   والاستدارة من الرموز — فالمربّع الأبيض يبقى مرئياً على سطح البطاقة. */
+.swatch {
+  width: 22px; height: 22px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.swatch:hover { border-color: var(--ring); }
+.swatch[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--ring); }
+.color-input {
+  width: 34px; height: 28px; padding: 2px; cursor: pointer;
+  background: var(--background); border: 1px solid var(--input); border-radius: var(--radius);
+}
+.swatch:focus-visible, .color-input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* تسميةٌ لقارئ الشاشة وحده: الزرّ يحمل أيقونةً ظاهرة، والاسم لا يُحذف
+   لأنه غير مرئي — زرٌّ بلا اسم مقروء لا يجده من يتصفّح بالصوت. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* بطاقة القالب في معرض الإنشاء */
+.tpl-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1);
+  width: 100%; text-align: start; cursor: pointer;
+  padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); color: var(--foreground); font-family: inherit;
+}
+.tpl-card:hover { border-color: var(--ring); }
+.tpl-card[aria-pressed='true'] { border-color: var(--primary); background: var(--primary-soft); }
+.tpl-card:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.tpl-card .tpl-name { font-weight: 600; font-size: var(--text-sm); }
+.tpl-card .tpl-desc { color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.7; }
+
 /* ===== تسجيل الدخول ===== */
 .auth-wrap {
   display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: var(--space-5);
