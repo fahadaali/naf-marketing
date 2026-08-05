@@ -59,6 +59,28 @@ export function printDocument(title: string, bodyHtml: string, opts: { autoPrint
         border: 1pt solid #000000; padding: 6pt; white-space: pre-wrap; word-break: break-word; }
   .article-toc, .callout, .link-card { border: 1pt solid #000000; padding: 6pt 8pt; margin: 10pt 0; }
   .link-card { display: block; }
+
+  /* عناوين البطاقة وبطاقة الرابط كتلٌ لا نصٌّ سطريّ.
+
+     وسما strong وspan افتراضهما inline، وورقة الصفحة العامة تجعلهما
+     block — وهذه الورقة لم تكن تفعل. فخرج المستند بـ«تحذيرالمهلة
+     النظامية» و«نموذج العقدتنزيل» ملتصقتين تُقرآن كلمةً واحدة. ظهر في
+     التصيير لا في المراجعة. */
+  .callout-title, .link-card-title, .link-card-note, .toc-title, .fn-title { display: block; }
+  .callout-title, .link-card-title { font-weight: 700; margin-bottom: 3pt; }
+  .link-card-note { font-size: 10pt; }
+  /* بطاقة الرابط في الورق: العنوان يُطبع تحتها بقاعدة a[href] أعلاه،
+     فلا يُكرَّر تسطيره على السطرين. */
+  .link-card { text-decoration: none; }
+
+  /* الإطار المضمَّن لا يُطبع: صندوقٌ فارغٌ بحدود يشغل ربع صفحة ولا يقول
+     شيئاً. يُخفى ويبقى ما حوله — والعنوان يصل القارئ من بطاقة الرابط
+     أو من نصّ المقال. */
+  .embed-frame { display: none; }
+
+  /* رابط «رجوع» من الحاشية إلى موضعها لا معنى له على الورق: لا نقرة
+     في مستندٍ مطبوع، والكلمة تبقى ضجيجاً في آخر كل حاشية. */
+  .fn-back { display: none; }
   .article-footnotes { margin-top: 16pt; padding-top: 8pt; border-top: 1pt solid #000000; font-size: 10pt; }
   .columns { display: block; }
   .checklist { list-style: none; padding: 0; }
