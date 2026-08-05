@@ -188,6 +188,66 @@ h3, h4 { letter-spacing: -0.01em; }
 .rte h2 { font-size: var(--text-xl); }
 .rte blockquote { border-inline-start: 3px solid var(--primary); margin: var(--space-2) 0; padding-inline-start: var(--space-3); color: var(--muted-foreground); }
 
+/* ===== حقل الفقرة بطبقة تلوين =====
+
+   طبقتان بنفس الحروف: `<div>` يصبغ، و`<textarea>` شفّاف النصّ فوقه
+   يحمل المؤشّر والتحديد. الشرح الكامل في `lib/markHighlight.ts`.
+
+   **كل قيمة تمسّ المقاس مكتوبة مرّتين هنا — مرّةً للطبقة ومرّةً
+   للحقل — ويجب أن تبقيا متطابقتين.** الحشو والحدّ والخطّ ومقاسه
+   وارتفاع السطر والالتفاف: اختلافُ واحدةٍ منها يزيح اللون عن كلامه
+   بمقدارٍ يتراكم مع كل سطر. ولهذا `line-height` مكتوب صراحةً في
+   الاثنين: قيمته الافتراضية `normal` تختلف بين الوسمين. */
+.rte-field { position: relative; }
+
+.rte-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  /* مطابقة `.input` حرفياً */
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.9;
+  color: var(--foreground);
+}
+
+.rte-input {
+  position: relative;
+  /* `block` لا `inline-block` الافتراضي: الحقل عنصرٌ سطريّ يترك تحته
+     فجوةَ نزول الحروف (٨ بكسل هنا)، فيطول الحاضن عن الحقل وتطول معه
+     الطبقة المثبّتة بـ`inset: 0` — فتنزل عن الحقل بقدرها عند التمرير.
+     قِيست في المتصفح لا استُنتجت. */
+  display: block;
+  background: transparent;
+  /* النصّ شفّاف والمؤشّر ليس كذلك — الطبقة خلفه هي ما يُقرأ */
+  color: transparent;
+  caret-color: var(--foreground);
+  line-height: 1.9;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+.rte-input::placeholder { color: var(--muted-foreground); }
+/* تحديدٌ نصف شفّاف كي تظهر الحروف الملوّنة من خلاله — تحديدٌ معتم
+   يحجب الطبقة فيصير المحدَّد فراغاً. */
+.rte-input::selection { background: color-mix(in oklab, var(--ring) 28%, transparent); }
+
+/* حرفُ العلامة يخفت ولا يختفي: من يبحث عنه يجده، ومن يقرأ لا يراه.
+   ولا `font-size` ولا `font-weight` هنا — انظر التعليق أعلاه. */
+.mk-syn { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+/* غامقٌ بظلّ نصّ لا بثقل خط: الثقل يوسّع الحرف فيزيح ما بعده. */
+.mk-b { text-shadow: 0 0 0.4px currentColor; }
+.mk-u { text-decoration: underline; text-underline-offset: 2px; }
+.mk-i { color: color-mix(in oklab, var(--foreground) 85%, transparent); }
+.mk-link { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+
 /* ===== تخصيص مظهر الكتلة =====
    المصطلحات في naf-terms.md §١٤، والأيقونات في naf-icons.md.
    الألوان التي يختارها الكاتب قيمُ محتوى تُخزَّن مع الكتلة؛ وأصناف

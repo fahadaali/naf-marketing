@@ -22,6 +22,7 @@ import {
   DEFAULT_THEME, EMAIL, RADIUS_PX, WIDTH_PX, BODY_PX, parseTheme,
 } from '../lib/newsletterTheme';
 import type { BlockStyle, NewsletterTheme } from '../lib/newsletterTheme';
+import { highlightMarks } from '../lib/markHighlight';
 import { PlatformIcon, platformLabel } from '../platforms';
 
 /* قيم قالب البريد الحرفية تعيش في `lib/newsletterTheme.ts` — نسخة طبق
@@ -860,19 +861,43 @@ function InlineField({ value, rows, placeholder, onChange }: {
   value: string; rows: number; placeholder: string; onChange: (v: string) => void;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState('');
+
+  /* الطبقة تتبع تمرير الحقل: نصٌّ أطول من الصندوق يُمرَّر في
+     `<textarea>` وحده، فتبقى الطبقة مكانها ويفترق اللون عن كلامه. */
+  const syncScroll = () => {
+    const a = areaRef.current;
+    const m = mirrorRef.current;
+    if (!a || !m) return;
+    m.scrollTop = a.scrollTop;
+    m.scrollLeft = a.scrollLeft;
+  };
+
   return (
     <div>
       <InlineToolbar areaRef={areaRef} value={value} onChange={onChange} onError={setErr} />
-      <textarea
-        ref={areaRef}
-        className="input"
-        style={{ borderStartStartRadius: 0, borderStartEndRadius: 0 }}
-        rows={rows}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => { onChange(e.target.value); if (err) setErr(''); }}
-      />
+      {/* طبقةُ التلوين خلف الحقل — الشرح في lib/markHighlight.ts.
+          `aria-hidden` لأنها تكرار بصريّ لنصٍّ يقرؤه قارئ الشاشة من
+          الحقل نفسه. */}
+      <div className="rte-field">
+        <div
+          ref={mirrorRef}
+          className="rte-mirror"
+          aria-hidden="true"
+          dangerouslySetInnerHTML={{ __html: highlightMarks(value) }}
+        />
+        <textarea
+          ref={areaRef}
+          className="input rte-input"
+          rows={rows}
+          placeholder={placeholder}
+          value={value}
+          spellCheck={false}
+          onScroll={syncScroll}
+          onChange={(e) => { onChange(e.target.value); if (err) setErr(''); }}
+        />
+      </div>
       {err && <p className="err" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>{err}</p>}
     </div>
   );
