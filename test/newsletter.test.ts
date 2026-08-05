@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks } from '../src/services/newsletter';
 import type { Block } from '../src/services/newsletter';
+import { retryWindowPassed } from '../src/services/newsletterSend';
 
 const blocks: Block[] = [
   { type: 'heading', text: 'صياغة العقود', level: 2 },
@@ -104,4 +105,27 @@ describe('حجم عيّنة اختبار العنوانين', () => {
   it('يحدّ النسبة بـ ٥٠٪', () => expect(abSample(100, 90)).toBe(50));
   it('يرفع النسبة الصغيرة إلى الحد الأدنى', () => expect(abSample(100, 1)).toBe(5));
   it('يستخدم الافتراضي عند الصفر', () => expect(abSample(100, 0)).toBe(20));
+});
+
+// ===== نافذة إعادة محاولة النشرة المجدولة =====
+// الفشل في الكرون لا مستخدمَ أمامه، فالسلوك يُختبر هنا لا يُقرأ في السجلّ.
+describe('retryWindowPassed', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const due = '2026-08-05T10:00:00Z';
+  const at = (ms: number) => Date.parse(due) + ms;
+
+  it('لا تنقضي قبل يوم — تُعاد المحاولة', () => {
+    expect(retryWindowPassed(due, at(60_000))).toBe(false);
+    expect(retryWindowPassed(due, at(DAY - 1000))).toBe(false);
+  });
+  it('تنقضي بعد يوم', () => {
+    expect(retryWindowPassed(due, at(DAY + 1000))).toBe(true);
+  });
+  it('لا تنقضي عند الحدّ تماماً', () => {
+    expect(retryWindowPassed(due, at(DAY))).toBe(false);
+  });
+  it('موعد تالف يُعدّ منقضياً فلا يُعاد إلى الأبد', () => {
+    expect(retryWindowPassed('ليس تاريخاً', Date.now())).toBe(true);
+    expect(retryWindowPassed('', Date.now())).toBe(true);
+  });
 });

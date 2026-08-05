@@ -3,11 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
+  Images, CalendarClock,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
 import InlineToolbar from '../components/InlineToolbar';
+import MediaPicker from '../components/MediaPicker';
+import { DateTimePicker } from '../components/DatePicker';
+import Modal from '../components/Modal';
 
 /* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
    لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
@@ -20,6 +24,11 @@ const EMAIL_PREVIEW = {
   radius: '12px',
   fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
 } as const;
+
+/* مهلة الحفظ التلقائي بعد آخر تغيير. ثانيتان: أقصر منها يحفظ في وسط
+   الكلمة فيغرق D1 بكتابات، وأطول منها يجعل «تم الحفظ تلقائياً» تصل
+   بعد أن ينصرف الكاتب عن الشاشة. */
+const AUTOSAVE_MS = 2000;
 
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
@@ -109,6 +118,11 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [socialPick, setSocialPick] = useState<Record<string, boolean>>({ x: true, linkedin: true });
   const [ab, setAb] = useState<any>(null);
   const [tags, setTags] = useState<string[]>([]);
+  const [auto, setAuto] = useState<'' | 'saving' | 'saved' | 'failed'>('');
+  const [dirty, setDirty] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [recovered, setRecovered] = useState<any>(null);
+  const draftKey = `naf.newsletter.draft.${id}`;
 
   function loadStats() {
     api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
@@ -122,10 +136,23 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
       try { setBlocks(JSON.parse(d.newsletter.blocks_json || '[]')); } catch { setBlocks([]); }
+
+      /* مسودة بقيت في المتصفح من جلسة سابقة تعذّر فيها الحفظ. لا تُطبَّق
+         تلقائياً: الخادم قد يحمل نسخةً أحدث حُرّرت من جهاز آخر، وتطبيقها
+         بلا سؤال يدوس عليها. تُعرض ويُترك الحكم للكاتب. */
+      try {
+        const raw = localStorage.getItem(`naf.newsletter.draft.${id}`);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        const same = JSON.stringify(saved.blocks || []) === (d.newsletter.blocks_json || '[]')
+          && (saved.title || '') === (d.newsletter.title || '');
+        if (!same) setRecovered(saved);
+        else localStorage.removeItem(`naf.newsletter.draft.${id}`);
+      } catch { /* مسودة تالفة تُتجاهل — لا تمنع فتح النشرة */ }
     }).catch((e) => setMsg(e.message));
   }, [id]);
 
-  function field(k: string, v: any) { setNl((n: any) => ({ ...n, [k]: v })); }
+  function field(k: string, v: any) { setDirty(true); setNl((n: any) => ({ ...n, [k]: v })); }
 
   async function save(extra: Record<string, unknown> = {}) {
     setSaving(true);
@@ -135,12 +162,51 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
         blocks_json: JSON.stringify(blocks), ...extra,
       });
-      setMsg('حُفظت');
+      // «تم الحفظ» من naf-terms.md §٤ — كانت «حُفظت»، وهي خارج القاموس.
+      setMsg('تم الحفظ');
+      // بدونها يبقى dirty مرفوعاً بعد الحفظ اليدوي، فيُطلق المؤقّت حفظاً
+      // ثانياً بلا تغيير ويكتب «تم الحفظ تلقائياً» فوق «تم الحفظ».
+      setDirty(false);
+      setAuto('');
+      localStorage.removeItem(draftKey);
       const d = await api.get(`/newsletters/${id}`);
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
     } catch (e: any) { setMsg(e.message); } finally { setSaving(false); }
   }
+
+  /* ===== الحفظ التلقائي =====
+
+     كل تغيير يؤجّل حفظاً بعد AUTOSAVE_MS من آخر ضغطة. والنسخة تُكتب في
+     المتصفح قبل النداء لا بعده: رسالة الفشل تَعِد بأن «النصّ محفوظ في
+     المتصفح»، ووعدٌ في رسالة خطأ يجب أن يكون صادقاً وقت قراءته.
+
+     ولا يُشغَّل قبل أول تحميل: useEffect يعمل عند التركيب، فبلا الحارس
+     تُحفظ النشرة فور فتحها وتُكتب «تم الحفظ تلقائياً» بلا أن يلمسها أحد. */
+  useEffect(() => {
+    if (!nl || !dirty) return;
+    const snapshot = JSON.stringify({
+      title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt, blocks,
+    });
+    try { localStorage.setItem(draftKey, snapshot); } catch { /* مساحة ممتلئة — النداء يبقى */ }
+
+    const t = setTimeout(async () => {
+      setAuto('saving');
+      try {
+        await api.patch(`/newsletters/${id}`, {
+          title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
+          blocks_json: JSON.stringify(blocks),
+        });
+        setAuto('saved');
+        setDirty(false);
+        localStorage.removeItem(draftKey);
+      } catch {
+        setAuto('failed');
+      }
+    }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // nl بأكمله في التبعيات مقصود: أي حقل في الإعدادات يستحق الحفظ
+  }, [nl, blocks, dirty, id, draftKey]);
 
   async function showPreview() {
     try {
@@ -204,16 +270,39 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   // ===== أدوات الكتل =====
-  const add = (b: Block) => setBlocks((x) => [...x, b]);
-  const upd = (i: number, patch: any) => setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b)));
-  const del = (i: number) => setBlocks((x) => x.filter((_, j) => j !== i));
-  const move = (i: number, d: number) => setBlocks((x) => {
+  // كلّها تُعلّم dirty — الحفظ التلقائي يقرؤه، وبدونه تُحفظ الإعدادات
+  // وحدها ويبقى المحتوى معلّقاً.
+  const touch = () => setDirty(true);
+  const add = (b: Block) => { touch(); setBlocks((x) => [...x, b]); };
+  const upd = (i: number, patch: any) => { touch(); setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b))); };
+  const del = (i: number) => { touch(); setBlocks((x) => x.filter((_, j) => j !== i)); };
+  const move = (i: number, d: number) => { touch(); return setBlocks((x) => {
     const j = i + d;
     if (j < 0 || j >= x.length) return x;
     const c = [...x];
     [c[i], c[j]] = [c[j], c[i]];
     return c;
-  });
+  }); };
+
+  async function schedule(iso: string) {
+    try {
+      await save(); // المحتوى أولاً — نشرة تُجدول بمحتوى قديم تُرسله قديماً
+      await api.post(`/newsletters/${id}/schedule`, { scheduled_at: iso });
+      setMsg('تم جدولة الإرسال');
+      setScheduling(false);
+      const d = await api.get(`/newsletters/${id}`);
+      setNl(d.newsletter);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  async function cancelSchedule() {
+    try {
+      await api.post(`/newsletters/${id}/schedule/cancel`);
+      setMsg('تم إلغاء الجدولة');
+      const d = await api.get(`/newsletters/${id}`);
+      setNl(d.newsletter);
+    } catch (e: any) { setMsg(e.message); }
+  }
 
   if (!nl) return <p className="muted">جارٍ التحميل…</p>;
 
@@ -223,14 +312,64 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         <button className="btn ghost sm" onClick={onBack}><ArrowRight size={20} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 'var(--text-xl)' }}>{nl.title}</h1>
         <div className="spacer" />
+        <AutosaveState state={auto} />
         {msg && <span className="ok">{msg}</span>}
         <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
         <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
+        {nl.status === 'scheduled' ? (
+          <button className="btn ghost" onClick={cancelSchedule}><CalendarClock size={20} /> إلغاء الجدولة</button>
+        ) : nl.status === 'draft' ? (
+          <button className="btn ghost" onClick={() => setScheduling(true)}><CalendarClock size={20} /> جدولة الإرسال</button>
+        ) : null}
         {['draft', 'scheduled'].includes(nl.status) && (
           <button className="btn" onClick={sendAll}><Send size={20} /> إرسال للمشتركين</button>
         )}
         <button className="btn" disabled={saving} onClick={() => save()}><Save size={20} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
+
+      {nl.status === 'scheduled' && nl.scheduled_at && (
+        <p className="muted" style={{ fontSize: 'var(--text-sm)', marginTop: 0 }}>
+          <CalendarClock size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
+          مجدول — {formatRiyadh(nl.scheduled_at)}
+        </p>
+      )}
+
+      {scheduling && <ScheduleModal onClose={() => setScheduling(false)} onConfirm={schedule} />}
+
+      {recovered && (
+        <div className="card" style={{ background: 'var(--warning-soft)', marginBottom: 12 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <span style={{ color: 'var(--warning-strong)', fontSize: 'var(--text-sm)' }}>
+              مسودة لم تُحفظ على الخادم. استعدها أو تجاهلها.
+            </span>
+            <div className="spacer" />
+            <button
+              className="btn sm"
+              onClick={() => {
+                setNl((n: any) => ({
+                  ...n,
+                  title: recovered.title ?? n.title,
+                  subject: recovered.subject ?? n.subject,
+                  preheader: recovered.preheader ?? n.preheader,
+                  excerpt: recovered.excerpt ?? n.excerpt,
+                }));
+                setBlocks(recovered.blocks || []);
+                setRecovered(null);
+                setDirty(true); // تُحفظ تلقائياً بعد لحظة، فتصل الخادم هذه المرة
+                setMsg('تمت الاستعادة');
+              }}
+            >
+              استعادة
+            </button>
+            <button
+              className="btn sm ghost"
+              onClick={() => { localStorage.removeItem(draftKey); setRecovered(null); }}
+            >
+              تجاهل
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         {/* الإعدادات */}
@@ -459,6 +598,91 @@ function InlineField({ value, rows, placeholder, onChange }: {
   );
 }
 
+/* حالة الحفظ التلقائي — نصٌّ لا أيقونة.
+
+   naf-icons.md ينصّ على ذلك صراحةً: أيقونة تومض عند كل ضغطة مفتاح
+   ضجيجٌ بصريّ لا معلومة. والألفاظ الثلاثة من naf-terms.md §١٤.
+
+   ورسالة الفشل تَعِد بأن النصّ محفوظ في المتصفح، وهو صادق: النسخة
+   تُكتب في localStorage قبل النداء لا بعد نجاحه. */
+function AutosaveState({ state }: { state: '' | 'saving' | 'saved' | 'failed' }) {
+  if (!state) return null;
+  if (state === 'saving') return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>جارٍ الحفظ…</span>;
+  if (state === 'saved') return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>تم الحفظ تلقائياً</span>;
+  return (
+    <span className="err" style={{ fontSize: 'var(--text-xs)' }}>
+      تعذّر الحفظ التلقائي. تحقّق من الاتصال، والنصّ محفوظ في المتصفح.
+    </span>
+  );
+}
+
+/* نافذة جدولة الإرسال. الموعد يُدخل بتوقيت الرياض بصرف النظر عن توقيت
+   جهاز المحرر، ثم يُثبَّت +03:00 ويُحوَّل إلى UTC — نفس ما تفعله جدولة
+   المنشورات في Editor.tsx حرفياً، فلا توقيتان في منصة واحدة. */
+function ScheduleModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (iso: string) => void }) {
+  const [when, setWhen] = useState('');
+  return (
+    <Modal title="جدولة الإرسال" onClose={onClose}>
+      <div className="field">
+        <label>الموعد (بتوقيت الرياض)</label>
+        <DateTimePicker value={when} onChange={setWhen} inline />
+      </div>
+      <button className="btn" disabled={!when} onClick={() => onConfirm(new Date(`${when}:00+03:00`).toISOString())}>
+        <CalendarClock size={20} /> جدولة الإرسال
+      </button>
+    </Modal>
+  );
+}
+
+/* حقول كتلة الصورة. المصدر أحد اثنين لا كلاهما: وسيطٌ من المكتبة
+   (mediaId) أو رابطٌ خارجي (url) — واختيار أحدهما يمسح الآخر، وإلا
+   بقيت قيمتان والمصيّر يفضّل url صامتاً فيرى الكاتب غير ما اختار. */
+function ImageFields({ block, onChange }: { block: Extract<Block, { type: 'image' }>; onChange: (p: any) => void }) {
+  const [picking, setPicking] = useState(false);
+  const src = block.mediaId ? `/api/media/${block.mediaId}` : block.url || '';
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn sm ghost" type="button" onClick={() => setPicking(true)}>
+          <Images size={20} /> مكتبة الوسائط
+        </button>
+        {src && (
+          <img
+            src={src}
+            alt=""
+            style={{ height: 40, width: 60, objectFit: 'cover', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
+          />
+        )}
+        <div className="spacer" />
+        {block.mediaId && (
+          <button className="btn sm ghost" type="button" onClick={() => onChange({ mediaId: '' })}>مسح</button>
+        )}
+      </div>
+
+      {!block.mediaId && (
+        <input className="input" placeholder="أو رابط صورة خارجي" value={block.url || ''}
+               onChange={(e) => onChange({ url: e.target.value })} />
+      )}
+      <input className="input" placeholder="وصف بديل" value={block.alt || ''}
+             onChange={(e) => onChange({ alt: e.target.value })} />
+      <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
+             onChange={(e) => onChange({ caption: e.target.value })} />
+
+      {picking && (
+        <MediaPicker
+          onClose={() => setPicking(false)}
+          onPick={(m) => {
+            // الرابط يُمسح مع الاختيار — مصدر واحد لا اثنان.
+            onChange({ mediaId: m.id, url: '', alt: block.alt || m.filename || '' });
+            setPicking(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => void }) {
   switch (block.type) {
     case 'heading':
@@ -477,16 +701,7 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
       return <InlineField value={block.text} rows={4} placeholder="نص الفقرة (سطر فارغ يفصل فقرتين)"
                           onChange={(text) => onChange({ text })} />;
     case 'image':
-      return (
-        <div className="grid" style={{ gap: 6 }}>
-          <input className="input" placeholder="رابط الصورة أو /api/media/<id>" value={block.url || ''}
-                 onChange={(e) => onChange({ url: e.target.value })} />
-          <input className="input" placeholder="وصف بديل (\u2068alt\u2069)" value={block.alt || ''}
-                 onChange={(e) => onChange({ alt: e.target.value })} />
-          <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
-                 onChange={(e) => onChange({ caption: e.target.value })} />
-        </div>
-      );
+      return <ImageFields block={block} onChange={onChange} />;
     case 'button':
       return (
         <div className="row" style={{ gap: 8 }}>

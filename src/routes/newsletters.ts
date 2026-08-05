@@ -126,6 +126,41 @@ newsletterRoutes.post('/:id/send', async (c) => {
   }
 });
 
+/* جدولة الإرسال. الموعد يصل بصيغة ISO بتوقيت UTC — الواجهة تُدخله
+   بتوقيت الرياض وتحوّله، كما في جدولة المنشورات. الكرون هو الذي يُدخل
+   النشرة الطابور عند بلوغه (queueDueNewsletters). */
+newsletterRoutes.post('/:id/schedule', async (c) => {
+  const { scheduled_at } = await c.req.json<{ scheduled_at: string }>();
+  const at = Date.parse(scheduled_at || '');
+  if (!Number.isFinite(at)) return c.json({ error: 'الموعد غير صالح' }, 400);
+  if (at <= Date.now()) return c.json({ error: 'الموعد مضى. اختر وقتاً لاحقاً.' }, 400);
+
+  const row = await c.env.DB.prepare('SELECT status FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ status: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  // نفس حكم queueNewsletter، وبنفس ألفاظه — نشرةٌ غادرت المسودة لا تُجدول.
+  if (row.status === 'sending') return c.json({ error: 'النشرة قيد الإرسال بالفعل' }, 400);
+  if (row.status === 'sent') return c.json({ error: 'أُرسلت هذه النشرة مسبقاً' }, 400);
+
+  await c.env.DB.prepare(
+    "UPDATE newsletters SET status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?",
+  ).bind(new Date(at).toISOString(), nowIso(), c.req.param('id')).run();
+  return c.json({ ok: true, scheduled_at: new Date(at).toISOString() });
+});
+
+// إلغاء الجدولة — تعود النشرة مسودةً بلا موعد
+newsletterRoutes.post('/:id/schedule/cancel', async (c) => {
+  const row = await c.env.DB.prepare('SELECT status FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ status: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  if (row.status !== 'scheduled') return c.json({ error: 'النشرة غير مجدولة' }, 400);
+
+  await c.env.DB.prepare(
+    "UPDATE newsletters SET status = 'draft', scheduled_at = NULL, updated_at = ? WHERE id = ?",
+  ).bind(nowIso(), c.req.param('id')).run();
+  return c.json({ ok: true });
+});
+
 // إرسال تجريبي لبريد واحد قبل الإرسال الجماعي
 newsletterRoutes.post('/:id/test', async (c) => {
   const { email } = await c.req.json<{ email: string }>();
