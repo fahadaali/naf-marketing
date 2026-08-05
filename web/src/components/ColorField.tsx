@@ -1,10 +1,22 @@
 import { useId, useState } from 'react';
-import { Eraser } from 'lucide-react';
+import { Eraser, Pipette } from 'lucide-react';
 import { Popover } from './Popover';
 import { EMAIL, SWATCHES, hexColor, paletteGradient } from '../lib/newsletterTheme';
 
 /* منتقي لون: مربّعات اللوحة المسجّلة أولاً، ثم لونٌ حرّ من منتقي
    المتصفح، ثم «الافتراضي» للعودة.
+
+   و«لون آخر» صفٌّ كامل بأيقونةٍ ونصّ، لا مربّعاً في آخر الشبكة.
+
+   السبب أن المتصفح يرسم `<input type="color">` مربّعاً مصمتاً لا
+   يفرّقه شيء عن مربّعات اللوحة فوقه — فقيل لنا إنه يُحسب لوناً
+   مقرَّراً كبقيّتها، ولا يُعرف أن الضغط عليه يفتح الطيف كلَّه. وهو
+   استنتاجٌ سليم ممّا يراه الناظر: أربعةَ عشرَ مربّعاً في شبكة،
+   وخامسَ عشرَ مثلها في الصفّ الأسفل.
+
+   فالعلامة الفارقة ثلاثٌ معاً: `Pipette` القطّارة المسجّلة لهذا
+   المعنى وحده، ونصٌّ ظاهر يقول «لون آخر»، وصفٌّ مستقلٌّ عن الشبكة
+   بعرضها كلِّه. والمربّع يبقى — لكنه صار **أثرَ** الاختيار لا بابَه.
 
    و«الافتراضي» خيارٌ ظاهر لا غيابُ خيار — `naf-terms.md` §١٤: الكاتب
    الذي لوّن كلمةً يحتاج طريقاً معلومةً للعودة، وقائمةٌ بلا هذا الخيار
@@ -72,12 +84,9 @@ export default function ColorField({
               ))}
             </div>
 
-            <label
-              htmlFor={inputId}
-              className="row"
-              style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', cursor: 'pointer' }}
-            >
-              لون آخر
+            <label htmlFor={inputId} className="pick-row">
+              <Pipette size={16} aria-hidden="true" />
+              <span>لون آخر</span>
               <div className="spacer" />
               <input
                 id={inputId}
@@ -115,6 +124,7 @@ export function ColorPickButton({
   label: string;
   onPick: (hex: string) => void;
 }) {
+  const customId = useId();
   const [custom, setCustom] = useState<string>(EMAIL.primary);
   return (
     <Popover
@@ -140,15 +150,23 @@ export function ColorPickButton({
                       onClick={() => { onPick(s.value); close(); }} />
             ))}
           </div>
-          <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-            <input type="color" className="color-input" aria-label="لون آخر"
+          {/* الصفّ نفسه هنا: أيقونةٌ ونصٌّ ظاهر يقولان إن هذا بابٌ
+              يُفتح، لا لونٌ خامس عشر في الشبكة. و«تطبيق» تحته لأن
+              منتقي المتصفح يبثّ التغيير مع كل حركةِ إصبع — فلولا
+              خطوةُ التأكيد لصُبغ النصّ بكل لونٍ يمرّ عليه المؤشّر. */}
+          <label htmlFor={customId} className="pick-row">
+            <Pipette size={16} aria-hidden="true" />
+            <span>لون آخر</span>
+            <div className="spacer" />
+            <input id={customId} type="color" className="color-input"
                    value={custom} onChange={(e) => setCustom(hexColor(e.target.value) || EMAIL.primary)} />
-            <button type="button" className="btn sm ghost" style={{ flex: 1 }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => { onPick(custom); close(); }}>
-              تطبيق
-            </button>
-          </div>
+          </label>
+          <button type="button" className="btn sm ghost"
+                  style={{ marginTop: 'var(--space-2)', width: '100%' }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onPick(custom); close(); }}>
+            تطبيق
+          </button>
 
           {/* الطريق المعلومة للعودة. `naf-terms.md` §١٤: «الافتراضي»
               خيارٌ ظاهر في **كل** قائمة لون لا غيابُ خيار — ومن لوّن

@@ -285,6 +285,23 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .swatch:hover { border-color: var(--ring); }
 .swatch[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--ring); }
+
+/* صفّ «لون آخر»: بابٌ إلى منتقي المتصفح لا مربّعٌ في الشبكة.
+
+   يأخذ العرض كلَّه ليخرج من نسق الشبكة فوقه، ويحمل أيقونةً ونصّاً —
+   ومربّعُ اللون فيه أثرُ الاختيار لا بابُه. والصفّ كلُّه `<label>`
+   للمنتقي، فالضغط على أي جزءٍ منه يفتحه. */
+.pick-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: 100%; margin-top: var(--space-3); cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs); color: var(--muted-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--background);
+}
+.pick-row:hover { border-color: var(--ring); color: var(--foreground); }
+/* الحلقة على الصفّ حين تبلغ البؤرةُ منتقيَه — الحقل نفسه صغير */
+.pick-row:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
 .color-input {
   width: 34px; height: 28px; padding: 2px; cursor: pointer;
   background: var(--background); border: 1px solid var(--input); border-radius: var(--radius);
