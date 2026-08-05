@@ -101,6 +101,9 @@ export const INTEGRATION_LABELS: Record<string, string> = {
   messaging: 'قنوات المراسلة',
   call_tracking: 'تتبّع المكالمات',
   listening: 'رصد الذكر والمشاعر',
+  /* المفتاح `website` والاسم «الموقع الرئيسي»: بطاقةٌ بلا سطرٍ هنا تعرض
+     مفتاحها خاماً، فيقرؤها من يفتح الشاشة مصدراً غريباً لا موقعَ الشركة. */
+  website: 'الموقع الرئيسي',
 };
 
 export const SYNC_STATUS_LABELS: Record<string, string> = {
