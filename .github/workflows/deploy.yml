@@ -33,6 +33,24 @@ jobs:
     name: البناء والهجرات والنشر
     runs-on: ubuntu-latest
     steps:
+      # السرّان يُفحصان أوّلاً لا في الخطوة الثامنة: الفشل عليهما بعد
+      # التركيب والفحص والاختبار والبناء يهدر الدقيقة، ويخرج برسالة
+      # wrangler الإنجليزية التي لا تقول أين يُضبطان. وقع فعلاً في أول
+      # تشغيلٍ بلغ الهجرات، فصار الفحص هنا.
+      - name: التحقّق من سرَّي كلاودفلير
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          if [ -z "$TOKEN" ]; then missing="CLOUDFLARE_API_TOKEN"; fi
+          if [ -z "$ACCOUNT" ]; then missing="$missing CLOUDFLARE_ACCOUNT_ID"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::سرٌّ ناقص:$missing — يُضبط من Settings ← Secrets and variables ← Actions. والتوكن يحتاج صلاحية تحرير العوامل وقواعد D1."
+            exit 1
+          fi
+          echo "السرّان موجودان."
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
