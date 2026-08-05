@@ -39,8 +39,33 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          # ملفّا قفل لا واحد — وإلا بُني مفتاح الكاش من قفل الجذر وحده،
+          # فيبقى كاش الواجهة على حاله بعد تغيّر تبعياتها.
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # npm يسجّل تبعيات github في ملف القفل بصيغة git+ssh مهما كُتبت،
+      # ولا مفتاح SSH في المشغّل — فيفشل `npm ci` عند `naf-auth`. الخطوة
+      # نفسها في `release.yml` حرفياً، وسببها هناك مشروحٌ بالتفصيل.
+      # ومرّ التشغيل الأول بلا هذه الخطوة لأن كاش npm حمل الحزمة، وتغيّر
+      # مفتاح الكاش أعلاه يُسقط ذلك الحظّ.
+      - name: جلب تبعيات ناف الداخلية عبر HTTPS
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
       - run: npm ci
+
+      # الواجهة حزمة منفصلة بملف قفلها، ولا workspaces في الجذر — فـ
+      # `npm ci` أعلاه لا يمسّها. و`npm run typecheck` يشمل
+      # `npm --prefix web run typecheck`، فبلا هذه الخطوة يسقط على
+      # «Cannot find module 'react'» قبل أن يبلغ سطراً من شيفرتنا.
+      #
+      # وكان يسقط فعلاً: هذا السير لم يُشغَّل قطّ منذ كُتب — `release.yml`
+      # لا يفحص أنواعاً ولا يشغّل اختباراً — فبقي العيب كامناً حتى أول
+      # تشغيل. و`npm run build` أدناه يركّبها أيضاً، لكنه بعد الفحص لا
+      # قبله، فلا ينفع.
+      - name: تركيب حزم الواجهة
+        run: npm --prefix web ci
 
       - name: فحص الأنواع
         run: npm run typecheck
