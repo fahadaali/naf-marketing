@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { EMAIL } from './emailTheme';
+import { escapeHtml, renderInline, stripInline } from './inline';
 
 // ===== تصيير كتل النشرة =====
 // مصدر واحد (blocks) يُصيَّر لوجهتين:
@@ -14,19 +15,22 @@ export type Block =
   | { type: 'quote'; text: string; cite?: string }
   | { type: 'divider' };
 
-export function escapeHtml(s: string): string {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// التهريب والتنسيق داخل الفقرة يعيشان في inline.ts. يُعاد تصديرها من
+// هنا لأن escapeHtml كان يُستورد من هذا الملف قبل الفصل.
+export { escapeHtml, renderInline, stripInline };
 
-// يحوّل أسطر النص إلى فقرات مع دعم الروابط النصية
+/* يحوّل أسطر النص إلى فقرات، مع الروابط والتنسيق داخل الفقرة.
+
+   كان مكتوباً فوق هذه الدالة «مع دعم الروابط النصية» وهي تمرّ كل شيء
+   عبر escapeHtml بلا معالجة رابط واحد. التعليق سبق التنفيذ بفارق
+   طويل، فصار يصف نيّةً لا سلوكاً — وقارئٌ يصدّقه يبني عليه خطأً.
+   الآن يصف ما يجري: renderInline يهرّب أولاً ثم يطبّق علاماتٍ مغلقة. */
 function paragraphs(text: string, inline: boolean): string {
   const style = inline ? ` style="margin:0 0 14px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"` : '';
   return String(text || '')
     .split(/\n{2,}/)
     .filter((p) => p.trim())
-    .map((p) => `<p${style}>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => `<p${style}>${renderInline(p, inline).replace(/\n/g, '<br>')}</p>`)
     .join('');
 }
 
@@ -83,7 +87,9 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
           // الخصائص المنطقية. جهة RTL مكتوبة مباشرةً — استثناء CLAUDE.md §1.
           ? ` style="margin:18px 0;padding:12px 16px;border-right:3px solid ${EMAIL.primary};background:${EMAIL.primarySoft};color:${EMAIL.foreground}"`
           : '';
-        out.push(`<blockquote${st}>${escapeHtml(b.text)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);
+        // الاقتباس يقبل التنسيق داخله — شاهدٌ من نظام يحمل رابطاً إلى مصدره.
+        // والمصدر (cite) اسمٌ مجرّد فيبقى مهرّباً بلا علامات.
+        out.push(`<blockquote${st}>${renderInline(b.text, inline)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);
         break;
       }
       case 'divider':
@@ -94,11 +100,15 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
   return out.join('\n');
 }
 
-// نص عادي مختصر من الكتل (للمقتطف ولمنشورات التواصل)
+/* نص عادي مختصر من الكتل (للمقتطف ولمنشورات التواصل).
+
+   العلامات تُجرَّد هنا: منشور إكس لا يعرض `**` غامقاً، يعرضهما نجمتين.
+   والرابط المكتوب يصير نصّه الظاهر — عنوانه يُلحق بالمنشور مرة واحدة
+   في آخره، فتكراره داخل الجملة ضجيج. */
 export function blocksToText(blocks: Block[]): string {
   const parts: string[] = [];
   for (const b of blocks) {
-    if (b.type === 'heading' || b.type === 'text' || b.type === 'quote') parts.push((b as any).text || '');
+    if (b.type === 'heading' || b.type === 'text' || b.type === 'quote') parts.push(stripInline((b as any).text || ''));
   }
   return parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }

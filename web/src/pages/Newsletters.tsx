@@ -1,12 +1,13 @@
 import { isolate } from '../lib/format';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
-  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
+  Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
+import InlineToolbar from '../components/InlineToolbar';
 
 /* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
    لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
@@ -370,7 +371,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={20} /> عنوان</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={20} /> فقرة</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={20} /> صورة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={20} /> زر</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><SquareMousePointer size={20} /> زر</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={20} /> اقتباس</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={20} /> فاصل</button>
           </div>
@@ -433,6 +434,31 @@ function blockLabel(t: string): string {
   return { heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل' }[t] || t;
 }
 
+/* حقل فقرة بشريط تنسيق. مفصول في مكوّن لأن الاقتباس يستعمله أيضاً —
+   وكلاهما يمرّ على renderInline في الخادم، فيجب أن يعرض للكاتب نفس
+   العلامات. */
+function InlineField({ value, rows, placeholder, onChange }: {
+  value: string; rows: number; placeholder: string; onChange: (v: string) => void;
+}) {
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const [err, setErr] = useState('');
+  return (
+    <div>
+      <InlineToolbar areaRef={areaRef} value={value} onChange={onChange} onError={setErr} />
+      <textarea
+        ref={areaRef}
+        className="input"
+        style={{ borderStartStartRadius: 0, borderStartEndRadius: 0 }}
+        rows={rows}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); if (err) setErr(''); }}
+      />
+      {err && <p className="err" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>{err}</p>}
+    </div>
+  );
+}
+
 function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => void }) {
   switch (block.type) {
     case 'heading':
@@ -448,8 +474,8 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         </div>
       );
     case 'text':
-      return <textarea className="input" rows={4} placeholder="نص الفقرة (سطر فارغ يفصل فقرتين)" value={block.text}
-                       onChange={(e) => onChange({ text: e.target.value })} />;
+      return <InlineField value={block.text} rows={4} placeholder="نص الفقرة (سطر فارغ يفصل فقرتين)"
+                          onChange={(text) => onChange({ text })} />;
     case 'image':
       return (
         <div className="grid" style={{ gap: 6 }}>
@@ -473,8 +499,8 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
     case 'quote':
       return (
         <div className="grid" style={{ gap: 6 }}>
-          <textarea className="input" rows={2} placeholder="نص الاقتباس" value={block.text}
-                    onChange={(e) => onChange({ text: e.target.value })} />
+          <InlineField value={block.text} rows={2} placeholder="نص الاقتباس"
+                       onChange={(text) => onChange({ text })} />
           <input className="input" placeholder="المصدر (اختياري)" value={block.cite || ''}
                  onChange={(e) => onChange({ cite: e.target.value })} />
         </div>
