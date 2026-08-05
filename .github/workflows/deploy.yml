@@ -10,13 +10,22 @@ name: نشر يدوي
 # فمعلَّقٌ لا ينتهي يحجز الطابور خلفه، ويبقى المنشور ما قبل الدمج بلا أثرٍ
 # ظاهر في المستودع. فيُشغَّل هذا يدوياً من تبويب Actions ويصل التغيير.
 #
-# ويطبّق الهجرات قبل النشر — وWorkers Builds لا تفعل: أمرُها `npm run
-# deploy` وحده، والهجرات نصٌّ منفصل. فصفٌّ جديد في القاعدة كان يحتاج
-# جهازاً عليه نسخةٌ من المستودع.
+# وكان مكتوباً هنا أن هذا السير وحده يطبّق الهجرات «وWorkers Builds لا
+# تفعل: أمرُها `npm run deploy` وحده، والهجرات نصٌّ منفصل». وكان صحيحاً
+# ووصفَ عيباً في المسار الآليّ لا ميزةً في هذا: كلُّ تغييرٍ في المخطّط
+# كان لغماً ينتظر من ينشر بلا أن يقرأ README.
 #
-# يحتاج سرَّين في إعدادات المستودع (Settings ← Secrets and variables ←
-# Actions): `CLOUDFLARE_API_TOKEN` بصلاحية تحرير العوامل وD1، و
-# `CLOUDFLARE_ACCOUNT_ID`.
+# فصار `npm run deploy` نفسه يطبّق الهجرات قبل `wrangler deploy`، وهو
+# أمرُ Workers Builds — فتمرّ الهجرات في كل نشرة بأوراق اعتماد كلاودفلير
+# نفسها، بلا سرٍّ في GitHub ولا خطوةٍ يتذكّرها إنسان.
+#
+# وتبقى خطوة الهجرات أدناه صريحةً: `d1 migrations apply` لا يطبّق إلا ما
+# لم يُطبَّق، فتكرارها لا يفعل شيئاً — ووجودها يجعل هذا المسار كاملاً
+# بذاته حين يكون هو المستعمَل.
+#
+# ولأنه لا يمرّ عبر كلاودفلير، يحتاج وحده سرَّين في إعدادات المستودع
+# (Settings ← Secrets and variables ← Actions): `CLOUDFLARE_API_TOKEN`
+# بصلاحية تحرير العوامل وD1، و`CLOUDFLARE_ACCOUNT_ID`.
 
 on:
   workflow_dispatch:
@@ -46,7 +55,8 @@ jobs:
           if [ -z "$TOKEN" ]; then missing="CLOUDFLARE_API_TOKEN"; fi
           if [ -z "$ACCOUNT" ]; then missing="$missing CLOUDFLARE_ACCOUNT_ID"; fi
           if [ -n "$missing" ]; then
-            echo "::error::سرٌّ ناقص:$missing — يُضبط من Settings ← Secrets and variables ← Actions. والتوكن يحتاج صلاحية تحرير العوامل وقواعد D1."
+            echo "::error::سرٌّ ناقص:$missing — يُضبط من Settings ← Secrets and variables ← Actions (أسرار المستودع). والتوكن يحتاج صلاحية تحرير العوامل وقواعد D1."
+            echo "::notice::وإن كان مضبوطاً فعلاً فانظر أين: سرُّ بيئة (Environment) لا تراه المهمة إلا بـ`environment:` فيها، وسرُّ Dependabot أو Codespaces مخزنٌ آخر لا تقرؤه Actions. وأسرارُ كلاودفلير في لوحتها ليست أسرار GitHub — والنشر المعتاد يمرّ من هناك لا من هنا، فقد لا يكون هذا السير محتاجاً أصلاً."
             exit 1
           fi
           echo "السرّان موجودان."
