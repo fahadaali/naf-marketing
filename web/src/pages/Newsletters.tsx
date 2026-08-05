@@ -5,6 +5,7 @@ import {
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
   Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
   Video, AudioLines, FileDown, Columns2, ListTodo, Upload, SpellCheck, FileOutput, Printer,
+  Palette, LayoutTemplate,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
@@ -13,19 +14,20 @@ import InlineToolbar from '../components/InlineToolbar';
 import MediaPicker from '../components/MediaPicker';
 import { DateTimePicker } from '../components/DatePicker';
 import Modal from '../components/Modal';
+import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
+import BlockStyleBar, { BLOCK_STYLE_CAPS } from '../components/BlockStyleBar';
+import NewsletterThemePanel from '../components/NewsletterThemePanel';
+import { NewNewsletterModal, TemplatesModal } from '../components/NewsletterTemplates';
+import {
+  DEFAULT_THEME, EMAIL, RADIUS_PX, WIDTH_PX, BODY_PX, parseTheme,
+} from '../lib/newsletterTheme';
+import type { BlockStyle, NewsletterTheme } from '../lib/newsletterTheme';
 import { PlatformIcon, platformLabel } from '../platforms';
 
-/* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
-   لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
-   وموضعه واحد. أي تغيير هناك يُنسخ هنا، وإلا كذبت المعاينة على المحرّر.
+/* قيم قالب البريد الحرفية تعيش في `lib/newsletterTheme.ts` — نسخة طبق
+   الأصل من src/services/emailTheme.ts و blockStyle.ts. لا يمكن استيراد
+   ملفات الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود وموضعه واحد.
    استثناء قوالب البريد — CLAUDE.md §1. */
-const EMAIL_PREVIEW = {
-  background: '#E8EBED',
-  card: '#FFFFFF',
-  foreground: '#333333',
-  radius: '12px',
-  fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
-} as const;
 
 /* مهلة الحفظ التلقائي بعد آخر تغيير. ثانيتان: أقصر منها يحفظ في وسط
    الكلمة فيغرق D1 بكتابات، وأطول منها يجعل «تم الحفظ تلقائياً» تصل
@@ -36,7 +38,7 @@ const AUTOSAVE_MS = 2000;
 
 type CalloutTone = 'info' | 'warning' | 'primary';
 
-type Block =
+type Block = ({ style?: BlockStyle }) & (
   | { type: 'heading'; text: string; level?: 2 | 3 }
   | { type: 'text'; text: string }
   | { type: 'image'; mediaId?: string; url?: string; alt?: string; caption?: string }
@@ -53,7 +55,8 @@ type Block =
   | { type: 'video'; mediaId?: string; url?: string }
   | { type: 'embed'; url: string; title?: string }
   | { type: 'columns'; start: string; end: string }
-  | { type: 'checklist'; items: { text: string; done?: boolean }[] };
+  | { type: 'checklist'; items: { text: string; done?: boolean }[] }
+);
 
 /* عناوين النغمات — من naf-terms.md §١٤.
 
@@ -75,6 +78,7 @@ export default function Newsletters() {
   const [activeSubs, setActiveSubs] = useState(0);
   const [openId, setOpenId] = useState<string>('');
   const [msg, setMsg] = useState('');
+  const [creating, setCreating] = useState(false);
 
   function load() {
     api.get('/newsletters').then((d) => {
@@ -83,16 +87,6 @@ export default function Newsletters() {
     }).catch((e) => setMsg(e.message));
   }
   useEffect(load, []);
-
-  async function create() {
-    const title = prompt('عنوان النشرة:');
-    if (!title?.trim()) return;
-    try {
-      const d = await api.post('/newsletters', { title: title.trim() });
-      load();
-      setOpenId(d.id);
-    } catch (e: any) { setMsg(e.message); }
-  }
 
   if (openId) return <NewsletterEditor id={openId} onBack={() => { setOpenId(''); load(); }} />;
 
@@ -107,10 +101,24 @@ export default function Newsletters() {
         </div>
         <div className="spacer" />
         {msg && <span className="err">{msg}</span>}
-        <button className="btn" onClick={create}><Plus size={20} /> نشرة جديدة</button>
+        <button className="btn" onClick={() => setCreating(true)}><Plus size={20} /> نشرة جديدة</button>
       </div>
 
-      <div className="card">
+      {/* الإنشاء في نافذة المنصة لا في مربّع المتصفح: `prompt` يفتح
+          مربّعاً معلّقاً بأعلى النافذة بخطّ النظام وأزراره بلغة
+          المتصفح، ولا يقبل عنواناً ولا اختيار قالب ولا رسالة خطأ.
+          القاعدة في naf-terms.md §٤. */}
+      {creating && (
+        <NewNewsletterModal
+          onClose={() => setCreating(false)}
+          onCreated={(id, message) => { setCreating(false); setMsg(message); load(); setOpenId(id); }}
+        />
+      )}
+
+      {/* ستة أعمدة لا تتّسع في ٣٧٥ بكسل، فيمرَّر الجدول داخل غلافه لا مع
+          الصفحة — نفس ما تفعله بقيّة الجداول العريضة في المنصة. وكان
+          يمدّ الصفحة أفقياً ٢١١ بكسل على الجوّال. */}
+      <div className="card table-scroll">
         <table className="table">
           <thead>
             <tr><th>العنوان</th><th>الحالة</th><th>الصفحة العامة</th><th>أُرسلت إلى</th><th>آخر تحديث</th><th></th></tr>
@@ -134,6 +142,23 @@ export default function Newsletters() {
   );
 }
 
+/* حقول الإعدادات التي تُحفظ. مصدرٌ واحد يقرؤه الحفظ اليدوي والتلقائي
+   ونسخة المتصفح معاً.
+
+   و«الشريحة المستهدفة» و«العنوان البديل» كانا يُحرَّران ولا يُرسلان:
+   الحمولة كانت أربعة حقول مكتوبة بأيديها في موضعين. فيختار الكاتب
+   شريحةً ويقرأ «تم الحفظ» ثم تُرسل النشرة إلى الجميع. */
+function settingsPayload(nl: any) {
+  return {
+    title: nl.title,
+    subject: nl.subject,
+    subject_b: nl.subject_b ?? null,
+    segment_tag: nl.segment_tag ?? null,
+    preheader: nl.preheader,
+    excerpt: nl.excerpt,
+  };
+}
+
 /* ===== محرّر النشرة بالكتل ===== */
 function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [nl, setNl] = useState<any>(null);
@@ -155,6 +180,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [caps, setCaps] = useState<{ pdf: boolean }>({ pdf: false });
   const [proofing, setProofing] = useState(false);
   const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
+  const [theme, setTheme] = useState<NewsletterTheme>(DEFAULT_THEME);
+  const [previewTheme, setPreviewTheme] = useState<NewsletterTheme>(DEFAULT_THEME);
+  const [showTheme, setShowTheme] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testErr, setTestErr] = useState('');
+  // الكتلة التي فُتح شريط تخصيصها. واحدةٌ في كل مرة: سبعة عشر شريطاً
+  // مفتوحاً يجعلان المحرر جدارَ أزرار.
+  const [styling, setStyling] = useState<number | null>(null);
+  const [confirming, setConfirming] = useState<'send' | 'social' | 'remove' | null>(null);
   const draftKey = `naf.newsletter.draft.${id}`;
 
   function loadStats() {
@@ -169,6 +204,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     api.get(`/newsletters/${id}`).then((d) => {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
+      setTheme(parseTheme(d.newsletter.theme_json));
       try { setBlocks(JSON.parse(d.newsletter.blocks_json || '[]')); } catch { setBlocks([]); }
 
       /* مسودة بقيت في المتصفح من جلسة سابقة تعذّر فيها الحفظ. لا تُطبَّق
@@ -193,8 +229,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     setMsg('');
     try {
       await api.patch(`/newsletters/${id}`, {
-        title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
-        blocks_json: JSON.stringify(blocks), ...extra,
+        ...settingsPayload(nl),
+        blocks_json: JSON.stringify(blocks), theme_json: JSON.stringify(theme), ...extra,
       });
       // «تم الحفظ» من naf-terms.md §٤ — كانت «حُفظت»، وهي خارج القاموس.
       setMsg('تم الحفظ');
@@ -219,17 +255,15 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
      تُحفظ النشرة فور فتحها وتُكتب «تم الحفظ تلقائياً» بلا أن يلمسها أحد. */
   useEffect(() => {
     if (!nl || !dirty) return;
-    const snapshot = JSON.stringify({
-      title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt, blocks,
-    });
+    const snapshot = JSON.stringify({ ...settingsPayload(nl), blocks, theme });
     try { localStorage.setItem(draftKey, snapshot); } catch { /* مساحة ممتلئة — النداء يبقى */ }
 
     const t = setTimeout(async () => {
       setAuto('saving');
       try {
         await api.patch(`/newsletters/${id}`, {
-          title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
-          blocks_json: JSON.stringify(blocks),
+          ...settingsPayload(nl),
+          blocks_json: JSON.stringify(blocks), theme_json: JSON.stringify(theme),
         });
         setAuto('saved');
         setDirty(false);
@@ -240,25 +274,30 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     }, AUTOSAVE_MS);
     return () => clearTimeout(t);
     // nl بأكمله في التبعيات مقصود: أي حقل في الإعدادات يستحق الحفظ
-  }, [nl, blocks, dirty, id, draftKey]);
+  }, [nl, blocks, theme, dirty, id, draftKey]);
 
   async function showPreview() {
     try {
       await save();
       const d = await api.get(`/newsletters/${id}/preview`);
       setPreview(d.html);
+      /* السمة من ردّ الخادم لا من حالة الواجهة: هي التي مرّت على
+         `parseTheme` هناك، فما يُعرض هو ما سيُرسل فعلاً. */
+      if (d.theme) setPreviewTheme(d.theme);
     } catch (e: any) { setMsg(e.message); }
   }
 
-  async function sendTest() {
-    const email = prompt('بريد الاختبار:');
-    if (!email?.trim()) return;
+  async function sendTest(email: string) {
+    // الرسالة من naf-terms.md — حقلٌ فارغ يُقال له لماذا، لا يُتجاهل صامتاً
+    if (!email.trim()) return setTestErr('أدخل بريداً للاختبار');
+    setTestErr('');
+    setTesting(false);
     try { await save(); await api.post(`/newsletters/${id}/test`, { email: email.trim() }); setMsg('أُرسلت رسالة الاختبار'); }
     catch (e: any) { setMsg(e.message); }
   }
 
   async function sendAll() {
-    if (!confirm('إرسال النشرة لكل المشتركين النشطين؟ لا يمكن التراجع.')) return;
+    setConfirming(null);
     try {
       await save();
       const d = await api.post(`/newsletters/${id}/send`);
@@ -275,9 +314,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   async function publishSocial() {
+    setConfirming(null);
     const platforms = Object.keys(socialPick).filter((p) => socialPick[p]);
     if (!platforms.length) return setMsg('اختر منصة واحدة على الأقل');
-    if (!confirm(`نشر المقالة على: ${platforms.join('، ')}؟`)) return;
     try {
       const d = await api.post(`/newsletters/${id}/social`, { platforms });
       const okAll = d.results.filter((r: any) => r.ok).map((r: any) => r.platform);
@@ -298,7 +337,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   async function remove() {
-    if (!confirm('حذف هذه النشرة نهائياً؟')) return;
+    setConfirming(null);
     await api.del(`/newsletters/${id}`);
     onBack();
   }
@@ -309,10 +348,18 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const touch = () => setDirty(true);
   const add = (b: Block) => { touch(); setBlocks((x) => [...x, b]); };
   const upd = (i: number, patch: any) => { touch(); setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b))); };
-  const del = (i: number) => { touch(); setBlocks((x) => x.filter((_, j) => j !== i)); };
+  /* الحذف والنقل يحرّكان الفهارس، وشريط التخصيص مفتوحٌ على فهرس لا على
+     كتلة. فبلا هذين السطرين يبقى الشريط مفتوحاً على موضعٍ صار لكتلةٍ
+     أخرى، فيُخصَّص غيرُ المقصود. */
+  const del = (i: number) => {
+    touch();
+    setStyling((s) => (s === null ? s : s === i ? null : s > i ? s - 1 : s));
+    setBlocks((x) => x.filter((_, j) => j !== i));
+  };
   const move = (i: number, d: number) => { touch(); return setBlocks((x) => {
     const j = i + d;
     if (j < 0 || j >= x.length) return x;
+    setStyling((s) => (s === i ? j : s === j ? i : s));
     const c = [...x];
     [c[i], c[j]] = [c[j], c[i]];
     return c;
@@ -380,16 +427,22 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         <button className="btn ghost" disabled={proofing} onClick={proofread}>
           <SpellCheck size={20} /> {proofing ? 'جارٍ التدقيق…' : 'تدقيق لغوي'}
         </button>
+        <button className="btn ghost" onClick={() => setShowTheme(true)}>
+          <Palette size={20} /> سمة النشرة
+        </button>
+        <button className="btn ghost" onClick={() => setShowTemplates(true)}>
+          <LayoutTemplate size={20} /> القوالب
+        </button>
         <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
         <button className="btn ghost" onClick={() => setExporting(true)}><FileOutput size={20} /> تصدير</button>
-        <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
+        <button className="btn ghost" onClick={() => setTesting(true)}><Mail size={20} /> اختبار</button>
         {nl.status === 'scheduled' ? (
           <button className="btn ghost" onClick={cancelSchedule}><CalendarClock size={20} /> إلغاء الجدولة</button>
         ) : nl.status === 'draft' ? (
           <button className="btn ghost" onClick={() => setScheduling(true)}><CalendarClock size={20} /> جدولة الإرسال</button>
         ) : null}
         {['draft', 'scheduled'].includes(nl.status) && (
-          <button className="btn" onClick={sendAll}><Send size={20} /> إرسال للمشتركين</button>
+          <button className="btn" onClick={() => setConfirming('send')}><Send size={20} /> إرسال للمشتركين</button>
         )}
         <button className="btn" disabled={saving} onClick={() => save()}><Save size={20} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
@@ -402,6 +455,67 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       )}
 
       {scheduling && <ScheduleModal onClose={() => setScheduling(false)} onConfirm={schedule} />}
+
+      {showTheme && (
+        <NewsletterThemePanel
+          theme={theme}
+          onChange={(next) => { setTheme(next); setDirty(true); }}
+          onClose={() => setShowTheme(false)}
+        />
+      )}
+
+      {showTemplates && (
+        <TemplatesModal
+          newsletterId={id}
+          onClose={() => setShowTemplates(false)}
+          onMessage={setMsg}
+        />
+      )}
+
+      {testing && (
+        <FieldModal
+          title="اختبار"
+          label="بريد الاختبار"
+          type="email"
+          placeholder="name@example.com"
+          actionLabel="إرسال"
+          hint="تصل نسخةٌ واحدة بهذا العنوان قبل الإرسال للمشتركين."
+          error={testErr}
+          onSubmit={sendTest}
+          onClose={() => { setTesting(false); setTestErr(''); }}
+        />
+      )}
+
+      {confirming === 'send' && (
+        <ConfirmModal
+          title="إرسال للمشتركين"
+          message="تُرسَل النشرة لكل المشتركين النشطين في الشريحة المستهدفة. لا يمكن التراجع عن هذا."
+          actionLabel="إرسال"
+          onConfirm={sendAll}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming === 'social' && (
+        <ConfirmModal
+          title="النشر على التواصل"
+          message={`تُنشر المقالة على: ${Object.keys(socialPick).filter((p) => socialPick[p]).map((p) => platformLabel(p)).join('، ')}.`}
+          actionLabel="نشر"
+          onConfirm={publishSocial}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming === 'remove' && (
+        <ConfirmModal
+          title="حذف النشرة"
+          message="ستُحذف النشرة وكل ما سُجّل من نتائج إرسالها. لا يمكن التراجع عن هذا."
+          actionLabel="حذف"
+          danger
+          onConfirm={remove}
+          onClose={() => setConfirming(null)}
+        />
+      )}
 
       {exporting && (
         <Modal title="تصدير" onClose={() => setExporting(false)}>
@@ -457,14 +571,11 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button
               className="btn sm"
               onClick={() => {
-                setNl((n: any) => ({
-                  ...n,
-                  title: recovered.title ?? n.title,
-                  subject: recovered.subject ?? n.subject,
-                  preheader: recovered.preheader ?? n.preheader,
-                  excerpt: recovered.excerpt ?? n.excerpt,
-                }));
+                // كل ما تحفظه `settingsPayload` يُستعاد — وإلا استُعيد
+                // بعضُ المسودة وضاع بعضها بلا أن يُقال.
+                setNl((n: any) => ({ ...n, ...settingsPayload(recovered) }));
                 setBlocks(recovered.blocks || []);
+                if (recovered.theme) setTheme(recovered.theme);
                 setRecovered(null);
                 setDirty(true); // تُحفظ تلقائياً بعد لحظة، فتصل الخادم هذه المرة
                 setMsg('تمت الاستعادة');
@@ -559,7 +670,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                     </label>
                   ))}
                   <div className="spacer" />
-                  <button className="btn sm" onClick={publishSocial}><Send size={20} /> نشر</button>
+                  <button className="btn sm" onClick={() => setConfirming('social')}><Send size={20} /> نشر</button>
                 </div>
                 {social && (
                   <div style={{ fontSize: 'var(--text-xs)' }}>
@@ -624,7 +735,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           )}
 
-          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={remove}><Trash2 size={20} /> حذف النشرة</button>
+          <button className="btn danger sm" style={{ marginTop: 12 }} onClick={() => setConfirming('remove')}>
+            <Trash2 size={20} /> حذف النشرة
+          </button>
         </div>
 
         {/* المحتوى */}
@@ -654,12 +767,36 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <div key={i} className="card" style={{ padding: 10, marginBottom: 8 }}>
               <div className="row" style={{ marginBottom: 6 }}>
                 <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{blockLabel(b.type)}</span>
+                {b.style && (
+                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }} title="هذه الكتلة مخصّصة">
+                    <Palette size={16} style={{ verticalAlign: -3 }} />
+                  </span>
+                )}
                 <div className="spacer" />
+                {/* التخصيص بطيّه لا مفتوحاً: الكاتب في أغلب الفقرات
+                    لا يريد إلا أن يكتب. */}
+                {BLOCK_STYLE_CAPS[b.type] && (
+                  <button
+                    className="btn sm ghost"
+                    aria-expanded={styling === i}
+                    title="التخصيص"
+                    onClick={() => setStyling(styling === i ? null : i)}
+                  >
+                    <Palette size={20} />
+                  </button>
+                )}
                 <button className="btn sm ghost" onClick={() => move(i, -1)} title="أعلى"><ArrowUp size={20} /></button>
                 <button className="btn sm ghost" onClick={() => move(i, 1)} title="أسفل"><ArrowDown size={20} /></button>
                 <button className="btn sm ghost" onClick={() => del(i)} title="حذف"><Trash2 size={20} /></button>
               </div>
               <BlockFields block={b} onChange={(patch) => upd(i, patch)} />
+              {styling === i && (
+                <BlockStyleBar
+                  blockType={b.type}
+                  style={b.style}
+                  onChange={(style) => upd(i, { style })}
+                />
+              )}
             </div>
           ))}
           {blocks.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>أضف كتلاً من الأزرار أعلاه لبناء النشرة.</p>}
@@ -676,19 +813,22 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           {/* استثناء مقصود — CLAUDE.md §1: هذه معاينة لرسالة بريد، فتحمل
               قيم القالب الحرفية لا رموز الثيم. معاينة تتبع ثيم المنصة تُري
               المحرّر شيئاً لا يصل المشترك أبداً.
-              القيم من EMAIL_PREVIEW أدناه، وهي نسخة طبق الأصل من
-              src/services/emailTheme.ts — الملف الذي يبني الرسالة فعلاً.
-              كانت هذه الكتلة تخالف ما تدّعيه: زاوية var(--radius) بدل 12px،
-              وبلا خلفية الصفحة، ولون متن مختلف. */}
-          <div style={{ background: EMAIL_PREVIEW.background, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
+              القيم من lib/newsletterTheme.ts، وهي نسخة طبق الأصل من
+              src/services/emailTheme.ts و blockStyle.ts — الملفّان اللذان
+              يبنيان الرسالة فعلاً. وتتبع سمة النشرة: الغلاف يُصبغ في
+              الخادم أيضاً، ومعاينةٌ ببطاقةٍ بيضاء حول متنٍ فاتح تُخفي
+              عن الكاتب أن رسالته لا تُقرأ. */}
+          <div style={{ background: previewTheme.pageBackground, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
             <div
               style={{
-                background: EMAIL_PREVIEW.card,
-                color: EMAIL_PREVIEW.foreground,
-                fontFamily: EMAIL_PREVIEW.fontStack,
+                background: previewTheme.cardBackground,
+                color: previewTheme.text,
+                fontFamily: EMAIL.fontStack,
+                fontSize: BODY_PX[previewTheme.size],
                 padding: 28,
-                borderRadius: EMAIL_PREVIEW.radius,
-                maxWidth: 640,
+                borderRadius: RADIUS_PX[previewTheme.radius],
+                border: `1px solid ${previewTheme.border}`,
+                maxWidth: WIDTH_PX[previewTheme.width],
                 margin: '0 auto',
               }}
               dangerouslySetInnerHTML={{ __html: preview }}

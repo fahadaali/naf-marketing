@@ -1,6 +1,11 @@
 import type { Env } from '../types';
 import { EMAIL } from './emailTheme';
 import { escapeHtml, renderInline, stripInline } from './inline';
+import {
+  DEFAULT_THEME, baseSize, inkDecls, surfaceDecls, alignDecl, mergeDecls, styleAttr,
+  RADIUS_PX, sizePx, parseStyle,
+} from './blockStyle';
+import type { BlockStyle, NewsletterTheme, StyleCtx } from './blockStyle';
 
 // ===== تصيير كتل النشرة =====
 // مصدر واحد (blocks) يُصيَّر لوجهتين:
@@ -9,7 +14,9 @@ import { escapeHtml, renderInline, stripInline } from './inline';
 
 export type CalloutTone = 'info' | 'warning' | 'primary';
 
-export type Block =
+/* كل كتلة تقبل `style` اختيارياً — تخصيص الكاتب. غيابه يعني «اتبع
+   السمة»، وهو حال كل نشرةٍ كُتبت قبل هذه الميزة: تُصيَّر كما كانت. */
+export type Block = ({ style?: BlockStyle }) & (
   | { type: 'heading'; text: string; level?: 2 | 3 }
   | { type: 'text'; text: string }
   | { type: 'image'; mediaId?: string; url?: string; alt?: string; caption?: string }
@@ -26,7 +33,8 @@ export type Block =
   | { type: 'video'; mediaId?: string; url?: string }
   | { type: 'embed'; url: string; title?: string }
   | { type: 'columns'; start: string; end: string }
-  | { type: 'checklist'; items: { text: string; done?: boolean }[] };
+  | { type: 'checklist'; items: { text: string; done?: boolean }[] }
+);
 
 /* ===== التضمين الخارجي =====
 
@@ -123,22 +131,43 @@ export { escapeHtml, renderInline, stripInline };
    عبر escapeHtml بلا معالجة رابط واحد. التعليق سبق التنفيذ بفارق
    طويل، فصار يصف نيّةً لا سلوكاً — وقارئٌ يصدّقه يبني عليه خطأً.
    الآن يصف ما يجري: renderInline يهرّب أولاً ثم يطبّق علاماتٍ مغلقة. */
-function paragraphs(text: string, inline: boolean): string {
-  const style = inline ? ` style="margin:0 0 14px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"` : '';
+function paragraphs(text: string, ctx: StyleCtx, ink = ''): string {
+  const { inline, theme } = ctx;
+  // الحبر يأتي آخراً فيغلب: لونٌ اختاره الكاتب يعلو لون المتن في السمة.
+  const decls = inline
+    ? mergeDecls(`margin:0 0 14px;line-height:1.9;font-size:${baseSize(theme)}px;color:${theme.text}`, ink)
+    : ink;
+  const attr = styleAttr(decls);
   return String(text || '')
     .split(/\n{2,}/)
     .filter((p) => p.trim())
-    .map((p) => `<p${style}>${renderInline(p, inline).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => `<p${attr}>${renderInline(p, inline, theme.link).replace(/\n/g, '<br>')}</p>`)
     .join('');
 }
 
+/* الكتل تُقرأ من المخزن هنا وحده — وتخصيصُها يُنظَّف في هذا الموضع.
+
+   القيمة في `blocks_json` نصٌّ كتبته الواجهة، وواجهةٌ معطوبة أو نداءٌ
+   مباشر على `PATCH` يستطيعان كتابة `style.color = "red;position:fixed"`.
+   وبلا هذا السطر تصل تلك القيمة خاصيةَ `style` في رسالةٍ تُفتح في
+   عميلٍ لا نتحكّم به. `parseStyle` يُسقط كل ما ليس لوناً صالحاً أو
+   قيمةً من المجموعات المغلقة. */
 export function parseBlocks(json: string | null): Block[] {
   try {
     const arr = JSON.parse(json || '[]');
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr.map(cleanBlockStyle) : [];
   } catch {
     return [];
   }
+}
+
+/** ينظّف تخصيص كتلةٍ واحدة ويُبقي بقيّة حقولها كما هي. */
+function cleanBlockStyle(b: any): Block {
+  if (!b || typeof b !== 'object' || !b.style) return b as Block;
+  const style = parseStyle(b.style);
+  const out = { ...b };
+  if (style) out.style = style; else delete out.style;
+  return out as Block;
 }
 
 /* بطاقة رابط — البديل الموحّد لكل ما لا يُشغَّل في موضعه.
@@ -146,13 +175,13 @@ export function parseBlocks(json: string | null): Block[] {
    رسالة البريد لا تشغّل صوتاً ولا فيديو ولا تقبل iframe، والصفحة
    العامة لا تضمّن مزوّداً غير مسجَّل. الحالتان تنتهيان هنا: عنوانٌ
    ووصفٌ ورابطٌ ظاهر. القارئ يرى الوجهة قبل أن يضغط. */
-function linkCard(url: string, title: string, note: string, inline: boolean): string {
+function linkCard(url: string, title: string, note: string, inline: boolean, theme: NewsletterTheme = DEFAULT_THEME): string {
   const safe = /^https?:\/\//i.test(url) ? url : '';
   if (!safe) return '';
   const st = inline
-    ? ` style="display:block;margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border:1px solid ${EMAIL.border};border-radius:${EMAIL.radius};text-decoration:none"`
+    ? ` style="display:block;margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border:1px solid ${theme.border};border-radius:${RADIUS_PX[theme.radius]};text-decoration:none"`
     : ' class="link-card"';
-  const tSt = inline ? ` style="display:block;font-weight:600;color:${EMAIL.primary};margin-bottom:4px"` : '';
+  const tSt = inline ? ` style="display:block;font-weight:600;color:${theme.link};margin-bottom:4px"` : '';
   const nSt = inline ? ` style="display:block;font-size:13px;color:${EMAIL.mutedForeground}"` : ' class="link-card-note"';
   return `<a href="${escapeHtml(safe)}"${st}>` +
     `<span${tSt}>${escapeHtml(title || safe)}</span>` +
@@ -172,11 +201,30 @@ function iframeHtml(info: EmbedInfo, title: string): string {
     `sandbox="allow-scripts allow-same-origin allow-presentation allow-popups-to-escape-sandbox"></iframe></div>`;
 }
 
-// mediaBase: أصل مطلق لروابط الوسائط (البريد لا يعرض الروابط النسبية)
-export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase = ''): string {
+/* mediaBase: أصل مطلق لروابط الوسائط (البريد لا يعرض الروابط النسبية)
+   theme: سمة النشرة. غيابها يعني الافتراضي، وهو مرايا رموز naf-theme
+   نفسها — فنشرةٌ لم تُخصَّص تخرج كما كانت تخرج قبل التخصيص حرفياً. */
+export function renderBlocks(
+  blocks: Block[], mode: 'email' | 'web', mediaBase = '', theme: NewsletterTheme = DEFAULT_THEME,
+): string {
   const out: string[] = [];
   const inline = mode === 'email';
+  /* التنظيف يتكرّر هنا ولو مرّت الكتل على `parseBlocks` أصلاً: هذه
+     الدالّة هي المخرَج الوحيد إلى HTML، وتُنادى أيضاً بكتلٍ لم تأتِ من
+     المخزن — قالبٌ جاهز، أو اختبار. حارسٌ واحد على المخرَج أوثق من
+     ائتمان كل نداء. */
+  blocks = blocks.map(cleanBlockStyle);
+  const ctx: StyleCtx = { inline, theme };
+  const base = baseSize(theme);
   const mediaUrl = (b: any) => (b.url ? b.url : b.mediaId ? `${mediaBase}/api/media/${b.mediaId}` : '');
+
+  /* لونٌ من السمة. البريد يكتبه دائماً — لا ورقة أنماط هناك. والويب لا
+     يكتبه إلا إذا غيّره الكاتب فعلاً: الصفحة العامة تعيش داخل ثيم
+     الموقع وتتبع وضع القارئ، وكتابةُ اللون الافتراضي عليها تجمّدها
+     فاتحةً في الوضع الداكن بلا أن يطلب ذلك أحد. */
+  const themed = (v: string, d: string) => (inline ? v : (v !== d ? v : ''));
+  const ink = (b: Block) => inkDecls(b.style, ctx);
+  const surface = (b: Block) => surfaceDecls(b.style, ctx);
 
   /* مصدرٌ يصلح لوسم <video>/<audio> فعلاً: وسيطٌ مرفوع، أو رابطٌ ينتهي
      بامتداد وسيط. ورابطُ صفحةٍ عادية ليس منهما — ووضعُه في src يُخرج
@@ -203,23 +251,36 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
     switch (b.type) {
       case 'heading': {
         const lvl = b.level === 3 ? 3 : 2;
-        const st = inline
-          ? ` style="margin:26px 0 12px;font-size:${lvl === 2 ? 22 : 18}px;font-weight:700;color:${EMAIL.foreground}"`
-          : '';
+        /* حجم العنوان ينسب إلى مقياس المتن في السمة: نشرةٌ متنُها ١٨
+           وعناوينها ٢٢ تفقد التدرّج الذي يجعل العنوان عنواناً. */
+        const px = Math.round((lvl === 2 ? 22 : 18) * (base / 16));
+        const baseDecls = inline
+          ? `margin:26px 0 12px;font-size:${px}px;font-weight:700;color:${theme.heading}`
+          : (themed(theme.heading, DEFAULT_THEME.heading) ? `color:${theme.heading}` : '');
+        const decls = mergeDecls(baseDecls, ink(b), surface(b));
         // المعرّف للويب وحده: Gmail يحذف id، ففهرسٌ برابط داخلي في
         // البريد يعطي القارئ روابط لا تصل إلى شيء.
         const idAttr = inline ? '' : ` id="${escapeHtml(headingIds.get(bi) || '')}"`;
-        out.push(`<h${lvl}${idAttr}${st}>${escapeHtml(b.text)}</h${lvl}>`);
+        out.push(`<h${lvl}${idAttr}${styleAttr(decls)}>${escapeHtml(b.text)}</h${lvl}>`);
         break;
       }
-      case 'text':
-        out.push(paragraphs(b.text, inline));
+      case 'text': {
+        const box = surface(b);
+        const body = paragraphs(b.text, ctx, ink(b));
+        // الحاوية لا تُكتب إلا حين يصبغ الكاتب سطحاً أو يحاذي — وإلا
+        // بقيت الفقرات كما كانت بلا `<div>` زائد حول كل نصّ في النشرة.
+        out.push(box ? `<div${styleAttr(mergeDecls('margin:18px 0', box))}>${body}</div>` : body);
         break;
+      }
       case 'image': {
         const src = mediaUrl(b);
         if (!src) break;
-        const st = inline ? ` style="max-width:100%;height:auto;border-radius:${EMAIL.radius};display:block;margin:0 auto"` : '';
-        out.push(`<figure${inline ? ' style="margin:18px 0"' : ''}>` +
+        const radius = b.style?.radius ? RADIUS_PX[b.style.radius] : EMAIL.radius;
+        const st = inline
+          ? ` style="max-width:100%;height:auto;border-radius:${radius};display:block;margin:0 auto"`
+          : (b.style?.radius ? ` style="border-radius:${radius}"` : '');
+        const figDecls = mergeDecls(inline ? 'margin:18px 0' : '', alignDecl(b.style, ctx));
+        out.push(`<figure${styleAttr(figDecls)}>` +
           `<img src="${escapeHtml(src)}" alt="${escapeHtml(b.alt || '')}"${st}>` +
           (b.caption ? `<figcaption${inline ? ` style="font-size:13px;color:${EMAIL.mutedForeground};text-align:center;margin-top:6px"` : ''}>${escapeHtml(b.caption)}</figcaption>` : '') +
           `</figure>`);
@@ -227,45 +288,82 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       }
       case 'button': {
         if (!b.url) break;
+        // لون الزر: تخصيص الكتلة أولاً، ثم السمة، ثم الافتراضي.
+        const bg = b.style?.background || theme.buttonBackground;
+        const fg = b.style?.color || theme.buttonText;
+        const radius = RADIUS_PX[b.style?.radius || theme.radius];
+        const width = b.style?.full ? 'display:block;text-align:center' : 'display:inline-block';
+        const sized = b.style?.size ? `;font-size:${inline ? `${sizePx(b.style.size, base)}px` : `var(--text-${b.style.size === 'md' ? 'base' : b.style.size})`}` : '';
         const st = inline
-          ? ` style="display:inline-block;background:${EMAIL.primary};color:${EMAIL.primaryForeground};text-decoration:none;padding:12px 22px;border-radius:${EMAIL.radius};font-weight:600"`
-          : ' class="btn"';
-        out.push(`<p${inline ? ' style="text-align:center;margin:22px 0"' : ' style="text-align:center"'}>` +
+          ? ` style="${width};background:${bg};color:${fg};text-decoration:none;padding:12px 22px;border-radius:${radius};font-weight:600${sized}"`
+          // الويب يبقى على صنف `.btn` ما لم يخصّص الكاتب شيئاً — فيتبع
+          // الثيم ووضع القارئ. وأول لونٍ يختاره ينقل الزرّ إلى قيمه.
+          : (b.style?.background || b.style?.color || b.style?.radius || b.style?.full || b.style?.size
+              ? ` class="btn" style="${width};background:${bg};color:${fg};border-radius:${radius}${sized}"`
+              : ' class="btn"');
+        const align = b.style?.align ? (inline ? (b.style.align === 'center' ? 'center' : b.style.align === 'end' ? 'left' : 'right') : b.style.align) : 'center';
+        out.push(`<p style="text-align:${align}${inline ? ';margin:22px 0' : ''}">` +
           `<a href="${escapeHtml(b.url)}"${st}>${escapeHtml(b.text || 'اقرأ المزيد')}</a></p>`);
         break;
       }
       case 'quote': {
+        const edge = b.style?.border || theme.link;
         const st = inline
           // border-right لا border-inline-start: عملاء البريد المكتبية لا تدعم
           // الخصائص المنطقية. جهة RTL مكتوبة مباشرةً — استثناء CLAUDE.md §1.
-          ? ` style="margin:18px 0;padding:12px 16px;border-right:3px solid ${EMAIL.primary};background:${EMAIL.primarySoft};color:${EMAIL.foreground}"`
-          : '';
+          ? styleAttr(mergeDecls(
+              `margin:18px 0;padding:12px 16px;border-right:3px solid ${edge};background:${b.style?.background || EMAIL.primarySoft};color:${theme.text}`,
+              ink(b), alignDecl(b.style, ctx),
+            ))
+          : styleAttr(mergeDecls(
+              b.style?.border ? `border-inline-start-color:${edge}` : '',
+              b.style?.background ? `background:${b.style.background}` : '',
+              ink(b), alignDecl(b.style, ctx),
+            ));
         // الاقتباس يقبل التنسيق داخله — شاهدٌ من نظام يحمل رابطاً إلى مصدره.
         // والمصدر (cite) اسمٌ مجرّد فيبقى مهرّباً بلا علامات.
-        out.push(`<blockquote${st}>${renderInline(b.text, inline)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);
+        out.push(`<blockquote${st}>${renderInline(b.text, inline, theme.link)}${b.cite ? `<cite> — ${escapeHtml(b.cite)}</cite>` : ''}</blockquote>`);
         break;
       }
-      case 'divider':
-        out.push(inline ? `<hr style="border:none;border-top:1px solid ${EMAIL.border};margin:26px 0">` : '<hr>');
+      case 'divider': {
+        const line = b.style?.border || b.style?.color || theme.border;
+        out.push(inline
+          ? `<hr style="border:none;border-top:1px solid ${line};margin:26px 0">`
+          : (b.style?.border || b.style?.color ? `<hr style="border:none;border-top:1px solid ${line}">` : '<hr>'));
         break;
+      }
 
       case 'callout': {
         const tone = CALLOUT[b.tone as CalloutTone] ? (b.tone as CalloutTone) : 'primary';
         const c = CALLOUT[tone];
         const title = (b.title || '').trim() || c.label;
+        /* التخصيص يعلو النغمة ولا يمحوها: العنوان يبقى ظاهراً كما هو —
+           §6 يمنع نقل المعنى باللون وحده، ولونٌ يختاره الكاتب لبطاقة
+           تحذيرٍ لا يُسقط كلمة «تحذير» عنها. */
+        const bg = b.style?.background || c.bg;
+        const edge = b.style?.border || c.fg;
+        const radius = RADIUS_PX[b.style?.radius || 'md'];
         // border-right لا border-inline-start — عملاء البريد المكتبية لا
         // تدعم الخصائص المنطقية. جهة RTL مكتوبة مباشرةً، استثناء §1.
         const st = inline
-          ? ` style="margin:18px 0;padding:14px 16px;background:${c.bg};border-right:3px solid ${c.fg};border-radius:${EMAIL.radius}"`
-          : ` class="callout callout-${tone}"`;
+          ? styleAttr(mergeDecls(
+              `margin:18px 0;padding:14px 16px;background:${bg};border-right:3px solid ${edge};border-radius:${radius}`,
+              alignDecl(b.style, ctx),
+            ))
+          : ` class="callout callout-${tone}"${styleAttr(mergeDecls(
+              b.style?.background ? `background:${bg}` : '',
+              b.style?.border ? `border-inline-start-color:${edge}` : '',
+              b.style?.radius ? `border-radius:${radius}` : '',
+              alignDecl(b.style, ctx),
+            ))}`;
         const head = title
           ? (inline
-              ? `<strong style="display:block;margin-bottom:6px;color:${c.fg};font-size:15px">${escapeHtml(title)}</strong>`
-              : `<strong class="callout-title">${escapeHtml(title)}</strong>`)
+              ? `<strong style="display:block;margin-bottom:6px;color:${edge};font-size:${Math.round(15 * (base / 16))}px">${escapeHtml(title)}</strong>`
+              : `<strong class="callout-title"${b.style?.border ? ` style="color:${edge}"` : ''}>${escapeHtml(title)}</strong>`)
           : '';
         const body = inline
-          ? `<span style="color:${EMAIL.foreground};line-height:1.9;font-size:16px">${renderInline(b.text, true)}</span>`
-          : renderInline(b.text, false);
+          ? `<span style="${mergeDecls(`color:${theme.text};line-height:1.9;font-size:${base}px`, inkDecls(b.style, ctx))}">${renderInline(b.text, true, theme.link)}</span>`
+          : (ink(b) ? `<span style="${ink(b)}">${renderInline(b.text, false, theme.link)}</span>` : renderInline(b.text, false, theme.link));
         out.push(`<div${st}>${head}${body}</div>`);
         break;
       }
@@ -274,16 +372,26 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         const rows = Array.isArray(b.rows) ? b.rows.filter((r) => Array.isArray(r)) : [];
         if (!rows.length) break;
         const tSt = inline
-          ? ' style="width:100%;border-collapse:collapse;margin:18px 0;font-size:15px"'
+          ? ` style="width:100%;border-collapse:collapse;margin:18px 0;font-size:${Math.round(15 * (base / 16))}px"`
           : ' class="article-table"';
         // الخلايا محاذاة يمين صراحةً في البريد: text-start غير مدعوم،
         // والجدول بلا محاذاة يعود يساراً في عملاء لا تقرأ dir.
+        const edge = b.style?.border || theme.border;
+        const headBg = b.style?.background || EMAIL.muted;
         const cell = (v: string, head: boolean) => {
           const st = inline
-            ? ` style="border:1px solid ${EMAIL.border};padding:8px 10px;text-align:right;${head ? `background:${EMAIL.muted};font-weight:600;` : ''}color:${EMAIL.foreground}"`
-            : '';
+            ? styleAttr(mergeDecls(
+                `border:1px solid ${edge};padding:8px 10px;text-align:${b.style?.align === 'center' ? 'center' : b.style?.align === 'end' ? 'left' : 'right'};${head ? `background:${headBg};font-weight:600;` : ''}color:${theme.text}`,
+                inkDecls(b.style, ctx),
+              ))
+            : styleAttr(mergeDecls(
+                b.style?.border ? `border-color:${edge}` : '',
+                head && b.style?.background ? `background:${headBg}` : '',
+                alignDecl(b.style, ctx),
+                inkDecls(b.style, ctx),
+              ));
           const tag = head ? 'th' : 'td';
-          return `<${tag}${st}>${renderInline(v, inline)}</${tag}>`;
+          return `<${tag}${st}>${renderInline(v, inline, theme.link)}</${tag}>`;
         };
         const body = rows
           .map((r, ri) => `<tr>${r.map((v) => cell(v, !!b.header && ri === 0)).join('')}</tr>`)
@@ -299,8 +407,12 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         // white-space:pre-wrap لا overflow-x:auto — التمرير الأفقي لا
         // يعمل في صندوق الوارد، فالسطر الطويل يُلَفّ ولا يكسر البطاقة.
         const st = inline
-          ? ` style="margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border:1px solid ${EMAIL.border};border-radius:${EMAIL.radius};font-family:${EMAIL.monoStack};font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;color:${EMAIL.foreground}"`
-          : ' class="article-code"';
+          ? ` style="margin:18px 0;padding:14px 16px;background:${b.style?.background || EMAIL.muted};border:1px solid ${b.style?.border || theme.border};border-radius:${RADIUS_PX[b.style?.radius || 'md']};font-family:${EMAIL.monoStack};font-size:${Math.round(14 * (base / 16))}px;line-height:1.7;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;color:${b.style?.color || theme.text}"`
+          : ` class="article-code"${styleAttr(mergeDecls(
+              b.style?.background ? `background:${b.style.background}` : '',
+              b.style?.border ? `border-color:${b.style.border}` : '',
+              b.style?.color ? `color:${b.style.color}` : '',
+            ))}`;
         // الكود لا يمرّ على renderInline: نجمةٌ في الكود نجمة لا مائل.
         out.push(`<pre${st}><code>${escapeHtml(b.text)}</code></pre>`);
         break;
@@ -309,8 +421,8 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       case 'footnote': {
         noteNo += 1;
         const st = inline
-          ? ` style="color:${EMAIL.primary};font-size:12px;vertical-align:super"`
-          : ' class="fn-ref"';
+          ? ` style="color:${b.style?.color || theme.link};font-size:12px;vertical-align:super"`
+          : (b.style?.color ? ` class="fn-ref" style="color:${b.style.color}"` : ' class="fn-ref"');
         const href = inline ? '' : ` href="#fn-${noteNo}" id="fnref-${noteNo}"`;
         out.push(`<sup><a${href}${st}>${noteNo}</a></sup>`);
         break;
@@ -322,14 +434,14 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         // البريد لا يشغّل صوتاً — ولا عميلَ واحداً يُعوَّل عليه — فبطاقة رابط.
         if (inline) {
           const target = b.url || src;
-          if (target) out.push(linkCard(target, title, 'استماع', true));
+          if (target) out.push(linkCard(target, title, 'استماع', true, theme));
           break;
         }
         if (src) {
           out.push(`<figure class="media-block"><figcaption>${escapeHtml(title)}</figcaption>` +
             `<audio controls preload="none" src="${escapeHtml(src)}"></audio></figure>`);
         } else if (b.url) {
-          out.push(linkCard(b.url, title, 'استماع', false));
+          out.push(linkCard(b.url, title, 'استماع', false, theme));
         }
         break;
       }
@@ -339,7 +451,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         if (!src) break;
         // «تنزيل» وصفُ الفعل في البطاقة، من naf-terms.md §١.
         out.push(inline
-          ? linkCard(src, b.title || 'ملف', b.note || 'تنزيل', true)
+          ? linkCard(src, b.title || 'ملف', b.note || 'تنزيل', true, theme)
           : `<a class="link-card" href="${escapeHtml(src)}" download>` +
             `<span class="link-card-title">${escapeHtml(b.title || 'ملف')}</span>` +
             `<span class="link-card-note">${escapeHtml(b.note || 'تنزيل')}</span></a>`);
@@ -352,12 +464,12 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         if (inline) {
           // لا فيديو في صندوق الوارد: بطاقة رابط أياً كان المصدر.
           const target = b.url || src;
-          if (target) out.push(linkCard(target, 'فيديو', 'مشاهدة', true));
+          if (target) out.push(linkCard(target, 'فيديو', 'مشاهدة', true, theme));
           break;
         }
         if (provider) out.push(iframeHtml(provider, 'فيديو'));
         else if (src) out.push(`<figure class="media-block"><video controls preload="none" src="${escapeHtml(src)}"></video></figure>`);
-        else if (b.url) out.push(linkCard(b.url, 'فيديو', 'مشاهدة', false));
+        else if (b.url) out.push(linkCard(b.url, 'فيديو', 'مشاهدة', false, theme));
         break;
       }
 
@@ -365,7 +477,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
         const provider = embedInfo(b.url);
         // البريد يحذف iframe دائماً، والويب لا يضمّن إلا مزوّداً مسجّلاً.
         if (inline || !provider) {
-          out.push(linkCard(b.url, b.title || '', 'فتح الرابط', inline));
+          out.push(linkCard(b.url, b.title || '', 'فتح الرابط', inline, theme));
           break;
         }
         out.push(iframeHtml(provider, b.title || 'تضمين'));
@@ -379,14 +491,19 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
 
            والويب يستعمل grid ينهار عمودياً تحت 480px: عمودان بعرض
            ١٨٧ بكسل على شاشة ٣٧٥ لا يُقرآن. */
-        const a = renderInline(b.start, inline);
-        const z = renderInline(b.end, inline);
+        const a = renderInline(b.start, inline, theme.link);
+        const z = renderInline(b.end, inline, theme.link);
         if (inline) {
-          const cSt = ` style="width:50%;vertical-align:top;padding:0 8px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"`;
-          out.push(`<table style="width:100%;border-collapse:collapse;margin:18px 0"><tr>` +
+          const cSt = styleAttr(mergeDecls(
+            `width:50%;vertical-align:top;padding:0 8px;line-height:1.9;font-size:${base}px;color:${theme.text}`,
+            inkDecls(b.style, ctx), alignDecl(b.style, ctx),
+          ));
+          out.push(`<table${styleAttr(mergeDecls('width:100%;border-collapse:collapse;margin:18px 0', surface(b)))}><tr>` +
             `<td${cSt}>${a}</td><td${cSt}>${z}</td></tr></table>`);
         } else {
-          out.push(`<div class="columns"><div>${a}</div><div>${z}</div></div>`);
+          const cSt = styleAttr(mergeDecls(inkDecls(b.style, ctx), alignDecl(b.style, ctx)));
+          out.push(`<div class="columns"${styleAttr(surfaceDecls({ ...b.style, align: undefined }, ctx))}>` +
+            `<div${cSt}>${a}</div><div${cSt}>${z}</div></div>`);
         }
         break;
       }
@@ -402,9 +519,11 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
            والمؤشّر `[x]` لا U+2611: الثاني رمزٌ تصويري يُعرض إيموجي ملوّناً
            في أنظمة، و§3 يمنعه. ويُعزل اتجاهياً وإلا أعادت العربية
            ترتيب قوسيه. */
-        const liSt = inline ? ` style="margin:6px 0;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"` : '';
+        const liSt = inline
+          ? styleAttr(mergeDecls(`margin:6px 0;line-height:1.9;font-size:${base}px;color:${theme.text}`, inkDecls(b.style, ctx)))
+          : styleAttr(inkDecls(b.style, ctx));
         const body = items.map((it) => {
-          const text = renderInline(it.text || '', inline);
+          const text = renderInline(it.text || '', inline, theme.link);
           if (inline) return `<li${liSt}><bdi>${it.done ? '[x]' : '[&nbsp;]'}</bdi> ${text}</li>`;
           return `<li><label><input type="checkbox" disabled${it.done ? ' checked' : ''}> <span>${text}</span></label></li>`;
         }).join('');
@@ -416,19 +535,19 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       case 'toc': {
         if (!headings.length) break; // فهرسٌ بلا عناوين لا يُعرض فارغاً
         const st = inline
-          ? ` style="margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border-radius:${EMAIL.radius}"`
-          : ' class="article-toc"';
+          ? ` style="margin:18px 0;padding:14px 16px;background:${b.style?.background || EMAIL.muted};border-radius:${RADIUS_PX[b.style?.radius || 'md']}"`
+          : ` class="article-toc"${styleAttr(b.style?.background ? `background:${b.style.background}` : '')}`;
         const items = headings.map((h, n) => {
           const label = escapeHtml(h.b.text);
           // البريد بلا روابط داخلية — Gmail يحذف id، فالبند نصّ لا رابط.
           const inner = inline
-            ? `<span style="color:${EMAIL.foreground}">${label}</span>`
-            : `<a href="#${escapeHtml(headingIds.get(h.i) || '')}">${label}</a>`;
-          const liSt = inline ? ` style="margin:4px 0;line-height:1.9;font-size:15px"` : '';
+            ? `<span style="color:${b.style?.color || theme.text}">${label}</span>`
+            : `<a href="#${escapeHtml(headingIds.get(h.i) || '')}"${styleAttr(b.style?.color ? `color:${b.style.color}` : '')}>${label}</a>`;
+          const liSt = inline ? ` style="margin:4px 0;line-height:1.9;font-size:${Math.round(15 * (base / 16))}px"` : '';
           return `<li${liSt}>${inner}</li>`;
         }).join('');
         const head = inline
-          ? `<strong style="display:block;margin-bottom:8px;color:${EMAIL.foreground};font-size:15px">المحتويات</strong>`
+          ? `<strong style="display:block;margin-bottom:8px;color:${b.style?.color || theme.text};font-size:${Math.round(15 * (base / 16))}px">المحتويات</strong>`
           : '<strong class="toc-title">المحتويات</strong>';
         const listSt = inline ? ' style="margin:0;padding-right:20px"' : '';
         out.push(`<div${st}>${head}<ol${listSt}>${items}</ol></div>`);
@@ -439,9 +558,9 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
 
   // الحواشي في آخر المقال بترتيب ورودها — بعد كل الكتل لا بينها.
   if (notes.length) {
-    const secSt = inline ? ` style="margin:26px 0 0;padding-top:14px;border-top:1px solid ${EMAIL.border}"` : ' class="article-footnotes"';
+    const secSt = inline ? ` style="margin:26px 0 0;padding-top:14px;border-top:1px solid ${theme.border}"` : ' class="article-footnotes"';
     const head = inline
-      ? `<strong style="display:block;margin-bottom:8px;color:${EMAIL.foreground};font-size:15px">الحواشي</strong>`
+      ? `<strong style="display:block;margin-bottom:8px;color:${theme.text};font-size:${Math.round(15 * (base / 16))}px">الحواشي</strong>`
       : '<strong class="fn-title">الحواشي</strong>';
     const listSt = inline ? ' style="margin:0;padding-right:20px"' : '';
     const items = notes.map((n, i) => {
@@ -449,7 +568,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       // «رجوع» كلمةً لا سهماً: السهم المعقوف U+21A9 يُعرض إيموجي ملوّناً
       // في أنظمة، و§3 يمنعه. والكلمة مسجّلة في naf-terms.md §١.
       const back = inline ? '' : ` <a href="#fnref-${i + 1}" class="fn-back">رجوع</a>`;
-      return `<li${liSt}${inline ? '' : ` id="fn-${i + 1}"`}>${renderInline(n.text, inline)}${back}</li>`;
+      return `<li${liSt}${inline ? '' : ` id="fn-${i + 1}"`}>${renderInline(n.text, inline, theme.link)}${back}</li>`;
     }).join('');
     out.push(`<div${secSt}>${head}<ol${listSt}>${items}</ol></div>`);
   }

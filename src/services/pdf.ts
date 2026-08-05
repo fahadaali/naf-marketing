@@ -2,6 +2,8 @@ import puppeteer from '@cloudflare/puppeteer';
 import type { Env } from '../types';
 import { parseBlocks, renderBlocks } from './newsletter';
 import type { Block } from './newsletter';
+import { DEFAULT_THEME, parseTheme } from './blockStyle';
+import type { NewsletterTheme } from './blockStyle';
 import { printDocument } from './printDoc';
 
 /* ===== توليد PDF من المقالة =====
@@ -74,12 +76,16 @@ export async function inlineMedia(env: Env, html: string): Promise<string> {
 }
 
 /** يبني مستند الطباعة مكتفياً بنفسه: صور مضمّنة وخطّ مضمّن. */
-export async function buildPrintHtml(env: Env, title: string, blocks: Block[]): Promise<string> {
+export async function buildPrintHtml(
+  env: Env, title: string, blocks: Block[], theme: NewsletterTheme = DEFAULT_THEME,
+): Promise<string> {
   const [regular, bold] = await Promise.all([
     fontDataUri(env, FONT_PATH),
     fontDataUri(env, FONT_PATH_BOLD),
   ]);
-  const body = await inlineMedia(env, renderBlocks(blocks, 'web'));
+  // ألوان الكاتب محتوى المقالة لا ثيم التطبيق، فتصل المستند كما تصل
+  // الرسالة. وقيم الصفحة نفسها تبقى من printDoc: أسودُ على أبيض.
+  const body = await inlineMedia(env, renderBlocks(blocks, 'web', '', theme));
 
   /* الخطّ يُحقن قبل </head> بأنماطه. وإن تعذّر تحميله يبقى المستند
      على مكدّس printDoc الاحتياطي — أفضل من مستندٍ لا يُبنى. */
@@ -98,11 +104,13 @@ body,.doc{font-family:"NAF","Times New Roman",serif}
  * يولّد PDF للمقالة. يرفع خطأً صريحاً إن لم يكن ربط المتصفح متاحاً —
  * ولا يعيد ملفاً فارغاً.
  */
-export async function buildArticlePdf(env: Env, title: string, blocksJson: string): Promise<Uint8Array> {
+export async function buildArticlePdf(
+  env: Env, title: string, blocksJson: string, themeJson?: string | null,
+): Promise<Uint8Array> {
   if (!env.BROWSER) {
     throw new Error('توليد PDF غير متاح على هذه الخطة. استخدم «نسخة للطباعة» واحفظها PDF من حوار الطباعة.');
   }
-  const html = await buildPrintHtml(env, title, parseBlocks(blocksJson));
+  const html = await buildPrintHtml(env, title, parseBlocks(blocksJson), parseTheme(themeJson));
 
   const browser = await puppeteer.launch(env.BROWSER as any);
   try {

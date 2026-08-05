@@ -554,7 +554,11 @@
 [dir='rtl'] .lucide-log-out,
 [dir='rtl'] .lucide-log-in,
 [dir='rtl'] .lucide-external-link,
-[dir='rtl'] .lucide-reply { transform: scaleX(-1); }
+[dir='rtl'] .lucide-reply,
+/* المحاذاة: الاسم منطقيّ والرسم لاتينيّ — `TextAlignStart` أسطرٌ
+   محاذاةً لليسار. فتُقلب في RTL ليصير مبدأ السطر يمينه. */
+[dir='rtl'] .lucide-text-align-start,
+[dir='rtl'] .lucide-text-align-end { transform: scaleX(-1); }
 
 /* (ب) اتجاه مزدوج — الاسم مختار بمظهره في RTL، فيُقلب في LTR */
 [dir='ltr'] .lucide-arrow-left,

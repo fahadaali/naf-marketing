@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { newId } from '../util';
 import { parseBlocks, renderBlocks, publicSettings, articleUrl, escapeHtml } from '../services/newsletter';
+import { parseTheme, isCustomTheme, WIDTH_PX, RADIUS_PX } from '../services/blockStyle';
 import { sendWelcome } from '../services/newsletterSend';
 
 // الصفحات العامة (بلا مصادقة): المقالات، الاشتراك، إلغاء الاشتراك.
@@ -10,8 +11,36 @@ export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 type Row = {
   id: string; title: string; slug: string; excerpt: string | null; blocks_json: string;
-  cover_media_id: string | null; published_at: string | null;
+  cover_media_id: string | null; published_at: string | null; theme_json?: string | null;
 };
+
+/* ===== لوحة المقالة المخصّصة =====
+
+   الصفحة العامة تعيش داخل ثيم الموقع وتتبع وضع القارئ — وهو الصحيح
+   لمقالةٍ لم يخصّص كاتبها شيئاً، فتُقرأ فاتحةً نهاراً وداكنةً ليلاً.
+
+   لكن كاتباً اختار متناً بلونٍ فاتح على سطحٍ داكن اختار الزوجَ معاً.
+   وتطبيقُ نصف اختياره — لونُه على خلفية الموقع — يُخرج نصّاً لا يُقرأ
+   في أحد الوضعين حتماً. فحين تُخصَّص السمة تُفرض لوحتها على المقالة
+   وحدها: سطحُها وعرضها واستدارتها ولون متنها، و`color-scheme:light`
+   كي لا يقلب المتصفّح ألوان النموذج داخلها.
+
+   والحدّ ضيّق عمداً: المقالة وحدها. الترويسة والتذييل ونموذج الاشتراك
+   تبقى على ثيم الموقع، فلا تصير صفحةً بهويتين. */
+function articleCanvas(themeJson: string | null | undefined): { open: string; close: string } {
+  const t = parseTheme(themeJson);
+  if (!isCustomTheme(t)) return { open: '', close: '' };
+  const decls = [
+    `background:${t.cardBackground}`,
+    `color:${t.text}`,
+    `max-width:${WIDTH_PX[t.width]}px`,
+    `border-radius:${RADIUS_PX[t.radius]}`,
+    'color-scheme:light',
+    'margin-inline:auto',
+    'padding:var(--space-6)',
+  ].join(';');
+  return { open: `<div class="article-canvas" style="${decls}">`, close: '</div>' };
+}
 
 /* بيانات منظّمة للمقالة — شقّ AEO.
 
@@ -306,7 +335,7 @@ publicRoutes.get('/:slug', async (c) => {
   // نفسها، ويقرأهما من يفهرس المقالة.
   const row = await c.env.DB.prepare(
     `SELECT n.id, n.title, n.slug, n.excerpt, n.blocks_json, n.cover_media_id,
-            n.published_at, n.updated_at, u.name AS author_name
+            n.published_at, n.updated_at, n.theme_json, u.name AS author_name
      FROM newsletters n LEFT JOIN users u ON u.id = n.author_id
      WHERE n.slug = ? AND n.web_published = 1`,
   )
@@ -327,7 +356,9 @@ publicRoutes.get('/:slug', async (c) => {
 
   const blocks = parseBlocks(row.blocks_json);
   const cover = row.cover_media_id ? `${base}/api/media/${row.cover_media_id}` : undefined;
-  const html = renderBlocks(blocks, 'web', base);
+  const theme = parseTheme(row.theme_json);
+  const html = renderBlocks(blocks, 'web', base, theme);
+  const canvas = articleCanvas(row.theme_json);
 
   return c.html(layout({
     title: row.title,
@@ -339,12 +370,12 @@ publicRoutes.get('/:slug', async (c) => {
     published: row.published_at,
     modified: row.updated_at || row.published_at,
     author: row.author_name || null,
-    body: `<article>
-      <h1>${escapeHtml(row.title)}</h1>
+    body: `${canvas.open}<article>
+      <h1${canvas.open ? ` style="color:${theme.heading}"` : ''}>${escapeHtml(row.title)}</h1>
       ${row.published_at ? `<div class="meta">${publicDate(row.published_at)}</div>` : ''}
       ${cover ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(row.title)}">` : ''}
       ${html}
-    </article>${subscribeForm(`${base}${path}`)}`,
+    </article>${canvas.close}${subscribeForm(`${base}${path}`)}`,
   }));
 });
 

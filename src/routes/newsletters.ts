@@ -7,12 +7,19 @@ import {
   parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl,
   toXThread, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST,
 } from '../services/newsletter';
+import type { Block } from '../services/newsletter';
 import { getProvider } from '../adapters';
 import { proofreadArabic } from '../services/claude';
 import { buildDocx } from '../services/docx';
 import { printDocument } from '../services/printDoc';
 import { buildArticlePdf } from '../services/pdf';
 import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
+import { parseTheme } from '../services/blockStyle';
+import {
+  builtinSummaries, builtinById, isBuiltinId, sanitizeBlocks, readTemplateFile, buildTemplateFile,
+} from '../services/newsletterTemplates';
+import { htmlToBlocks, htmlTitle } from '../services/newsletterImport';
+import { hasPermission } from '../permissions';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -67,7 +74,8 @@ newsletterRoutes.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json<Record<string, unknown>>();
   const allowed = ['title', 'subject', 'subject_b', 'ab_percent', 'segment_tag',
-    'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at'];
+    'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at',
+    'theme_json'];
   const sets: string[] = [];
   const binds: unknown[] = [];
 
@@ -106,9 +114,13 @@ newsletterRoutes.get('/:id/preview', async (c) => {
     .first<any>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   const { base } = await publicSettings(c.env, c.req.url);
+  const theme = parseTheme(row.theme_json);
   return c.json({
-    html: renderBlocks(parseBlocks(row.blocks_json), 'email', base),
+    html: renderBlocks(parseBlocks(row.blocks_json), 'email', base, theme),
     text: blocksToText(parseBlocks(row.blocks_json)),
+    // المعاينة تُحاكي غلاف الرسالة أيضاً: بطاقةٌ بيضاء حول متنٍ داكن
+    // تُري الكاتب رسالةً غير التي تصل المشترك.
+    theme,
   });
 });
 
@@ -138,11 +150,11 @@ newsletterRoutes.post('/:id/send', async (c) => {
 newsletterRoutes.get('/meta/export-capabilities', (c) => c.json({ pdf: !!c.env.BROWSER }));
 
 newsletterRoutes.get('/:id/export.pdf', async (c) => {
-  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
-    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
+  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json, theme_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string; theme_json: string | null }>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   try {
-    const bytes = await buildArticlePdf(c.env, row.title, row.blocks_json);
+    const bytes = await buildArticlePdf(c.env, row.title, row.blocks_json, row.theme_json);
     return new Response(bytes, {
       headers: {
         'content-type': 'application/pdf',
@@ -182,11 +194,14 @@ newsletterRoutes.get('/:id/export.docx', async (c) => {
    لا يرث ورقة أنماط التطبيق ولا يقرأ var(--…)، ويبقى فاتحاً مهما كان
    وضع القارئ — مذكّرةٌ داكنة لا تُقدَّم وفاتورةٌ داكنة تُهدر الحبر. */
 newsletterRoutes.get('/:id/print', async (c) => {
-  const row = await c.env.DB.prepare('SELECT title, blocks_json FROM newsletters WHERE id = ?')
-    .bind(c.req.param('id')).first<{ title: string; blocks_json: string }>();
+  const row = await c.env.DB.prepare('SELECT title, blocks_json, theme_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; blocks_json: string; theme_json: string | null }>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   const { base } = await publicSettings(c.env, c.req.url);
-  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base);
+  /* ألوان الكاتب تصل المستند المطبوع كما تصل الرسالة — هي محتواه لا
+     ثيم التطبيق. والمستند يبقى فاتحاً بذاته: السمة الافتراضية فاتحة،
+     ومن اختار سطحاً داكناً اختاره لنشرته لا لوضع قارئه. */
+  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base, parseTheme(row.theme_json));
   return c.html(printDocument(row.title, body));
 });
 
@@ -251,7 +266,7 @@ newsletterRoutes.post('/:id/test', async (c) => {
   try {
     const { base } = await publicSettings(c.env, c.req.url);
     const provider = await getEmailProvider(c.env);
-    const html = renderBlocks(parseBlocks(row.blocks_json), 'email', base);
+    const html = renderBlocks(parseBlocks(row.blocks_json), 'email', base, parseTheme(row.theme_json));
     await provider.send(email.trim(), `[اختبار] ${row.subject || row.title}`, html);
     return c.json({ ok: true });
   } catch (e: any) {
@@ -335,6 +350,200 @@ newsletterRoutes.post('/:id/ab/decide', async (c) => {
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 400);
   }
+});
+
+/* ===== قوالب النشرة =====
+
+   تحت `/meta/` كالوسوم وقدرات التصدير: المسار الثابت لا يزاحم `/:id`،
+   وقارئُ الملف يرى القوالب مجموعةً واحدة لا مبعثرةً بين المسارات.
+
+   والمعرض يجمع صنفين: قوالبُ جاهزة من الشيفرة وقوالبُ محفوظة من
+   القاعدة. تُعادان في حقلين منفصلين لا في قائمةٍ واحدة — الواجهة تعرض
+   لكلٍّ ما يخصّه، والحذف لا يُعرض على ما لا يُحذف. */
+newsletterRoutes.get('/meta/templates', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.name, t.description, t.origin, t.created_at, t.blocks_json, u.name AS creator_name
+     FROM newsletter_templates t LEFT JOIN users u ON u.id = t.created_by
+     ORDER BY t.created_at DESC LIMIT 100`,
+  ).all<any>();
+  const saved = results.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description || '',
+    origin: r.origin,
+    blocks: parseBlocks(r.blocks_json).length,
+    creator_name: r.creator_name,
+    created_at: r.created_at,
+  }));
+  return c.json({ builtin: builtinSummaries(), saved });
+});
+
+// حفظ نشرةٍ قائمة قالباً — الكتل والسمة معاً، فالقالب يحمل مظهره
+newsletterRoutes.post('/meta/templates', async (c) => {
+  const b = await c.req.json<{ newsletter_id?: string; name?: string; description?: string }>();
+  const name = (b.name || '').trim();
+  if (!name) return c.json({ error: 'أدخل اسماً للقالب' }, 400);
+
+  const row = await c.env.DB.prepare(
+    'SELECT title, subject, preheader, blocks_json, theme_json FROM newsletters WHERE id = ?',
+  ).bind(b.newsletter_id || '').first<any>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+
+  const blocks = sanitizeBlocks(parseBlocks(row.blocks_json));
+  if (!blocks.length) return c.json({ error: 'القالب فارغ. أضف كتلاً ثم احفظه.' }, 400);
+
+  const id = newId('nlt');
+  await c.env.DB.prepare(
+    `INSERT INTO newsletter_templates (id, name, description, subject, preheader, blocks_json, theme_json, origin, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'saved', ?)`,
+  ).bind(
+    id, name, (b.description || '').trim() || null, row.subject || null, row.preheader || null,
+    JSON.stringify(blocks), row.theme_json || null, c.get('user').id,
+  ).run();
+  return c.json({ ok: true, id });
+});
+
+/* حذف قالب. صاحبه أو من يملك الاعتماد النهائي — نفس حكم قوالب
+   المحتوى في routes/templates.ts، فلا حكمان لفعلٍ واحد في منصة. */
+newsletterRoutes.delete('/meta/templates/:tid', async (c) => {
+  const tid = c.req.param('tid');
+  if (isBuiltinId(tid)) return c.json({ error: 'القالب الجاهز لا يُحذف' }, 400);
+  const row = await c.env.DB.prepare('SELECT created_by FROM newsletter_templates WHERE id = ?')
+    .bind(tid).first<{ created_by: string | null }>();
+  if (!row) return c.json({ error: 'القالب غير موجود' }, 404);
+  const user = c.get('user');
+  const isGM = await hasPermission(c.env, user.role_name, 'content.approve_final');
+  if (row.created_by !== user.id && !isGM) return c.json({ error: 'لا يمكنك حذف قالب غيرك' }, 403);
+  await c.env.DB.prepare('DELETE FROM newsletter_templates WHERE id = ?').bind(tid).run();
+  return c.json({ ok: true });
+});
+
+/* استيراد قالب — صيغتان لا واحدة، وكلتاهما تنتهيان قالباً محفوظاً:
+
+   `naf` ملفٌّ خرج من هنا فيدخل بلا فقد.
+   `html` قالبُ بريدٍ من أداةٍ أخرى: يُقرأ محتواه ويُحوَّل كتلاً، ولا
+   يُخزَّن منه وسمٌ واحد — السبب في `newsletterImport.ts`.
+
+   والردّ يحمل عدد الكتل ليقوله للكاتب: استيرادٌ صامتٌ يُقرأ فشلاً
+   حين ينقص القالب عمّا كان، وهو ناجحٌ في حدوده المكتوبة. */
+newsletterRoutes.post('/meta/templates/import', async (c) => {
+  const b = await c.req.json<{ format?: string; payload?: string; name?: string }>();
+  const payload = String(b.payload || '');
+  if (!payload.trim()) return c.json({ error: 'الملف فارغ' }, 400);
+
+  let name = (b.name || '').trim();
+  let description = '';
+  let subject = '';
+  let preheader = '';
+  let blocks: Block[] = [];
+  let themeJson: string | null = null;
+  let origin: 'imported' | 'imported_html' = 'imported';
+
+  if (b.format === 'html') {
+    origin = 'imported_html';
+    blocks = sanitizeBlocks(htmlToBlocks(payload));
+    if (!blocks.length) {
+      return c.json({ error: 'لم يُعثر على محتوى في الملف. تأكّد أنه قالب بريد كامل.' }, 400);
+    }
+    name = name || htmlTitle(payload) || 'قالب مستورد';
+  } else {
+    const read = readTemplateFile(payload);
+    if (!read.ok) return c.json({ error: read.error }, 400);
+    blocks = read.file.blocks;
+    name = name || read.file.name || 'قالب مستورد';
+    description = read.file.description || '';
+    subject = read.file.subject || '';
+    preheader = read.file.preheader || '';
+    themeJson = JSON.stringify(read.file.theme);
+  }
+
+  const id = newId('nlt');
+  await c.env.DB.prepare(
+    `INSERT INTO newsletter_templates (id, name, description, subject, preheader, blocks_json, theme_json, origin, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    id, name.slice(0, 120), description || null, subject || null, preheader || null,
+    JSON.stringify(blocks), themeJson, origin, c.get('user').id,
+  ).run();
+  return c.json({ ok: true, id, blocks: blocks.length, origin });
+});
+
+/* إنشاء نشرة من قالب — أو من الصفر حين لا يُمرَّر قالب.
+
+   وهو المسار الوحيد للإنشاء منذ اليوم: `POST /` القديم يبقى لمن
+   يناديه برمجياً، وهذا يقبل العنوان والقالب معاً في نداءٍ واحد فلا
+   تُنشأ نشرةٌ فارغة ثم تُحشى. */
+newsletterRoutes.post('/from-template', async (c) => {
+  const b = await c.req.json<{ template_id?: string; title?: string }>();
+  const tid = (b.template_id || '').trim();
+
+  let name = '';
+  let subject = '';
+  let preheader = '';
+  let blocks: Block[] = [];
+  let themeJson: string | null = null;
+
+  if (tid) {
+    if (isBuiltinId(tid)) {
+      const t = builtinById(tid);
+      if (!t) return c.json({ error: 'القالب غير موجود' }, 404);
+      name = t.name;
+      subject = t.subject;
+      preheader = t.preheader;
+      blocks = sanitizeBlocks(t.blocks);
+      themeJson = JSON.stringify(t.theme);
+    } else {
+      const row = await c.env.DB.prepare(
+        'SELECT name, subject, preheader, blocks_json, theme_json FROM newsletter_templates WHERE id = ?',
+      ).bind(tid).first<any>();
+      if (!row) return c.json({ error: 'القالب غير موجود' }, 404);
+      name = row.name;
+      subject = row.subject || '';
+      preheader = row.preheader || '';
+      blocks = sanitizeBlocks(parseBlocks(row.blocks_json));
+      themeJson = row.theme_json || null;
+    }
+  }
+
+  const title = (b.title || '').trim() || name || 'نشرة بلا عنوان';
+  const id = newId('nl');
+  let slug = slugify(title);
+  const exists = await c.env.DB.prepare('SELECT 1 FROM newsletters WHERE slug = ?').bind(slug).first();
+  if (exists) slug = `${slug}-${id.slice(-5)}`;
+
+  await c.env.DB.prepare(
+    `INSERT INTO newsletters (id, title, slug, subject, preheader, blocks_json, theme_json, author_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    id, title, slug, subject || title, preheader || null,
+    JSON.stringify(blocks), themeJson, c.get('user').id,
+  ).run();
+  return c.json({ ok: true, id, blocks: blocks.length });
+});
+
+/* تصدير النشرة ملفَّ قالب — تُنقل إلى مستودعٍ آخر أو تُحفظ خارج
+   المنصة. الوسائط المرفوعة تسقط في `sanitizeBlocks`: معرّفها يشير إلى
+   صفٍّ لا يوجد هناك. */
+newsletterRoutes.get('/:id/export.json', async (c) => {
+  const row = await c.env.DB.prepare(
+    'SELECT title, slug, subject, preheader, excerpt, blocks_json, theme_json FROM newsletters WHERE id = ?',
+  ).bind(c.req.param('id')).first<any>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const file = buildTemplateFile({
+    name: row.title,
+    description: row.excerpt || '',
+    subject: row.subject || '',
+    preheader: row.preheader || '',
+    blocksJson: row.blocks_json,
+    themeJson: row.theme_json,
+  });
+  return new Response(JSON.stringify(file, null, 2), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      // اسم الملف بترميز RFC 5987 — العنوان عربي ولا يمرّ في ASCII
+      'content-disposition': `attachment; filename="template.json"; filename*=UTF-8''${encodeURIComponent(row.slug || 'template')}.json`,
+    },
+  });
 });
 
 // الوسوم المتاحة للشرائح (من بيانات المشتركين الفعلية)
