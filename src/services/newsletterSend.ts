@@ -6,6 +6,8 @@ import { logAudit } from './audit';
 import {
   parseBlocks, renderBlocks, escapeHtml, publicSettings, articleUrl,
 } from './newsletter';
+import { DEFAULT_THEME, parseTheme, RADIUS_PX, WIDTH_PX } from './blockStyle';
+import type { NewsletterTheme } from './blockStyle';
 import { pushIssueToSite } from './siteSync';
 
 // ===== إرسال النشرة على دفعات =====
@@ -17,27 +19,34 @@ type NL = {
   id: string; title: string; slug: string; subject: string | null; subject_b: string | null;
   ab_percent: number; ab_winner: string | null; segment_tag: string | null;
   preheader: string | null; blocks_json: string; cover_media_id: string | null;
+  theme_json: string | null;
 };
 
-// قالب الرسالة: رأس بسيط + المحتوى + تذييل فيه إلغاء الاشتراك (إلزامي نظاماً)
+/* قالب الرسالة: رأس بسيط + المحتوى + تذييل فيه إلغاء الاشتراك (إلزامي نظاماً)
+
+   والسمة تصل إلى هنا لا إلى الكتل وحدها: نشرةٌ صبغ كاتبها متنَها على
+   سطحٍ داكن ثم بقيت البطاقة بيضاء تُخرج رسالةً لا تُقرأ. الخلفية
+   والسطح والعرض والاستدارة كلّها من السمة، وافتراضها قيم EMAIL
+   نفسها — فرسالةٌ بلا سمة تخرج بايتاً ببايت كما كانت تخرج. */
 function emailShell(opts: {
   siteName: string; preheader: string; body: string; unsubUrl: string;
-  articleUrl: string; trackOpenUrl: string;
+  articleUrl: string; trackOpenUrl: string; theme?: NewsletterTheme;
 }): string {
   const { siteName, preheader, body, unsubUrl, articleUrl: aUrl, trackOpenUrl } = opts;
+  const t = opts.theme || DEFAULT_THEME;
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:${EMAIL.background};font-family:${EMAIL.fontStack}">
+<body style="margin:0;padding:0;background:${t.pageBackground};font-family:${EMAIL.fontStack}">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${EMAIL.background};padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${t.pageBackground};padding:24px 12px">
 <tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:${EMAIL.card};border-radius:${EMAIL.radius};overflow:hidden">
-<tr><td style="padding:20px 28px;border-bottom:1px solid ${EMAIL.border}">
-  <span style="font-weight:700;color:${EMAIL.primary};font-size:17px">${escapeHtml(siteName)}</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:${WIDTH_PX[t.width]}px;background:${t.cardBackground};border-radius:${RADIUS_PX[t.radius]};overflow:hidden">
+<tr><td style="padding:20px 28px;border-bottom:1px solid ${t.border}">
+  <span style="font-weight:700;color:${t.link};font-size:17px">${escapeHtml(siteName)}</span>
 </td></tr>
 <tr><td style="padding:28px" dir="rtl">${body}</td></tr>
-<tr><td style="padding:18px 28px;border-top:1px solid ${EMAIL.border};background:${EMAIL.background};font-size:12px;color:${EMAIL.mutedForeground};text-align:center">
-  <p style="margin:0 0 8px"><a href="${escapeHtml(aUrl)}" style="color:${EMAIL.primary}">اقرأ هذه المقالة على الموقع</a></p>
+<tr><td style="padding:18px 28px;border-top:1px solid ${t.border};background:${t.pageBackground};font-size:12px;color:${EMAIL.mutedForeground};text-align:center">
+  <p style="margin:0 0 8px"><a href="${escapeHtml(aUrl)}" style="color:${t.link}">اقرأ هذه المقالة على الموقع</a></p>
   <p style="margin:0">وصلتك هذه الرسالة لاشتراكك في نشرة ${escapeHtml(siteName)}.
     <a href="${escapeHtml(unsubUrl)}" style="color:${EMAIL.mutedForeground};text-decoration:underline">إلغاء الاشتراك</a></p>
 </td></tr>
@@ -164,7 +173,7 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
 
   const nl = await env.DB.prepare(
     `SELECT id, title, slug, subject, subject_b, ab_percent, ab_winner, segment_tag,
-            preheader, blocks_json, cover_media_id FROM newsletters WHERE id = ?`,
+            preheader, blocks_json, cover_media_id, theme_json FROM newsletters WHERE id = ?`,
   ).bind(sending.id).first<NL>();
   if (!nl) return { sent: 0, failed: 0 };
 
@@ -189,7 +198,8 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
   const { base, path } = await publicSettings(env, requestOrigin || 'https://localhost');
   const name = await siteName(env);
   const provider = await getEmailProvider(env);
-  const contentHtml = renderBlocks(parseBlocks(nl.blocks_json), 'email', base);
+  const theme = parseTheme(nl.theme_json);
+  const contentHtml = renderBlocks(parseBlocks(nl.blocks_json), 'email', base, theme);
   const aUrl = articleUrl(base, path, nl.slug);
   const subjectA = nl.subject || nl.title;
   const subjectB = nl.subject_b || subjectA;
@@ -212,6 +222,7 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
         unsubUrl: `${base}${path}/unsubscribe/${row.token}`,
         articleUrl: aUrl,
         trackOpenUrl: `${base}/e/o/${row.send_id}.gif`,
+        theme,
       });
       await provider.send(row.email, pickSubject(row.variant), html);
       await env.DB.prepare("UPDATE newsletter_sends SET status = 'sent', sent_at = ? WHERE id = ?")

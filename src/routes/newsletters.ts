@@ -13,6 +13,7 @@ import { buildDocx } from '../services/docx';
 import { printDocument } from '../services/printDoc';
 import { buildArticlePdf } from '../services/pdf';
 import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
+import { parseTheme } from '../services/blockStyle';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -67,7 +68,8 @@ newsletterRoutes.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json<Record<string, unknown>>();
   const allowed = ['title', 'subject', 'subject_b', 'ab_percent', 'segment_tag',
-    'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at'];
+    'preheader', 'excerpt', 'blocks_json', 'cover_media_id', 'slug', 'scheduled_at',
+    'theme_json'];
   const sets: string[] = [];
   const binds: unknown[] = [];
 
@@ -106,9 +108,13 @@ newsletterRoutes.get('/:id/preview', async (c) => {
     .first<any>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   const { base } = await publicSettings(c.env, c.req.url);
+  const theme = parseTheme(row.theme_json);
   return c.json({
-    html: renderBlocks(parseBlocks(row.blocks_json), 'email', base),
+    html: renderBlocks(parseBlocks(row.blocks_json), 'email', base, theme),
     text: blocksToText(parseBlocks(row.blocks_json)),
+    // المعاينة تُحاكي غلاف الرسالة أيضاً: بطاقةٌ بيضاء حول متنٍ داكن
+    // تُري الكاتب رسالةً غير التي تصل المشترك.
+    theme,
   });
 });
 
@@ -138,11 +144,11 @@ newsletterRoutes.post('/:id/send', async (c) => {
 newsletterRoutes.get('/meta/export-capabilities', (c) => c.json({ pdf: !!c.env.BROWSER }));
 
 newsletterRoutes.get('/:id/export.pdf', async (c) => {
-  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
-    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
+  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json, theme_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string; theme_json: string | null }>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   try {
-    const bytes = await buildArticlePdf(c.env, row.title, row.blocks_json);
+    const bytes = await buildArticlePdf(c.env, row.title, row.blocks_json, row.theme_json);
     return new Response(bytes, {
       headers: {
         'content-type': 'application/pdf',
@@ -182,11 +188,14 @@ newsletterRoutes.get('/:id/export.docx', async (c) => {
    لا يرث ورقة أنماط التطبيق ولا يقرأ var(--…)، ويبقى فاتحاً مهما كان
    وضع القارئ — مذكّرةٌ داكنة لا تُقدَّم وفاتورةٌ داكنة تُهدر الحبر. */
 newsletterRoutes.get('/:id/print', async (c) => {
-  const row = await c.env.DB.prepare('SELECT title, blocks_json FROM newsletters WHERE id = ?')
-    .bind(c.req.param('id')).first<{ title: string; blocks_json: string }>();
+  const row = await c.env.DB.prepare('SELECT title, blocks_json, theme_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; blocks_json: string; theme_json: string | null }>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
   const { base } = await publicSettings(c.env, c.req.url);
-  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base);
+  /* ألوان الكاتب تصل المستند المطبوع كما تصل الرسالة — هي محتواه لا
+     ثيم التطبيق. والمستند يبقى فاتحاً بذاته: السمة الافتراضية فاتحة،
+     ومن اختار سطحاً داكناً اختاره لنشرته لا لوضع قارئه. */
+  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base, parseTheme(row.theme_json));
   return c.html(printDocument(row.title, body));
 });
 
@@ -251,7 +260,7 @@ newsletterRoutes.post('/:id/test', async (c) => {
   try {
     const { base } = await publicSettings(c.env, c.req.url);
     const provider = await getEmailProvider(c.env);
-    const html = renderBlocks(parseBlocks(row.blocks_json), 'email', base);
+    const html = renderBlocks(parseBlocks(row.blocks_json), 'email', base, parseTheme(row.theme_json));
     await provider.send(email.trim(), `[اختبار] ${row.subject || row.title}`, html);
     return c.json({ ok: true });
   } catch (e: any) {
