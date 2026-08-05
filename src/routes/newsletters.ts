@@ -9,6 +9,8 @@ import {
 } from '../services/newsletter';
 import { getProvider } from '../adapters';
 import { proofreadArabic } from '../services/claude';
+import { buildDocx } from '../services/docx';
+import { printDocument } from '../services/printDoc';
 import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -125,6 +127,39 @@ newsletterRoutes.post('/:id/send', async (c) => {
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 400);
   }
+});
+
+/* تصدير Word — مستند OOXML حقيقي لا HTML بامتداد doc. */
+newsletterRoutes.get('/:id/export.docx', async (c) => {
+  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const bytes = buildDocx(row.title, parseBlocks(row.blocks_json));
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // اسم الملف بترميز RFC 5987 — العنوان عربي ولا يمرّ في ASCII
+      'content-disposition': `attachment; filename="article.docx"; filename*=UTF-8''${encodeURIComponent(row.slug || 'article')}.docx`,
+    },
+  });
+});
+
+/* نسخة الطباعة — يفتحها المتصفح ويطبعها القارئ إلى PDF.
+
+   ولا تُولَّد PDF في الخادم: ذلك يحتاج محرّك تصيير كاملاً لا يعمل في
+   Workers، وأي بديل خفيف يسقط تشكيل العربية وتكسير أسطرها. متصفّح
+   القارئ يملك المحرّك أصلاً ويصفّ العربية صحيحةً.
+
+   وهذه هي حالة «مستند يُولَّد في نافذته» في CLAUDE.md §1 حرفياً:
+   لا يرث ورقة أنماط التطبيق ولا يقرأ var(--…)، ويبقى فاتحاً مهما كان
+   وضع القارئ — مذكّرةٌ داكنة لا تُقدَّم وفاتورةٌ داكنة تُهدر الحبر. */
+newsletterRoutes.get('/:id/print', async (c) => {
+  const row = await c.env.DB.prepare('SELECT title, blocks_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; blocks_json: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const { base } = await publicSettings(c.env, c.req.url);
+  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base);
+  return c.html(printDocument(row.title, body));
 });
 
 /* التدقيق اللغوي — يقرأ نصّ الكتل ويعيد ملاحظات لا نصّاً مستبدَلاً.

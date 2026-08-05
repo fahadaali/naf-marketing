@@ -4,7 +4,7 @@ import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
   Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
-  Video, AudioLines, FileDown, Columns2, ListTodo, Upload, SpellCheck,
+  Video, AudioLines, FileDown, Columns2, ListTodo, Upload, SpellCheck, FileOutput, Printer,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
@@ -144,6 +144,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [dirty, setDirty] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [recovered, setRecovered] = useState<any>(null);
+  const [exporting, setExporting] = useState(false);
   const [proofing, setProofing] = useState(false);
   const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
   const draftKey = `naf.newsletter.draft.${id}`;
@@ -308,6 +309,22 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     return c;
   }); };
 
+  /* التصدير يحفظ أولاً للسبب نفسه: كلا المسارين يقرأ الكتل من الخادم.
+
+     وWord ينزل ملفاً، وPDF يفتح نسخة الطباعة في نافذة تستدعي print()
+     — فيحفظها القارئ PDF من حوار الطباعة. ولا تُولَّد PDF في الخادم:
+     Workers بلا محرّك تصيير، والبديل الخفيف يسقط تشكيل العربية. */
+  async function exportDoc(fmt: 'docx' | 'print') {
+    setMsg('');
+    try {
+      await save();
+      setExporting(false);
+      if (fmt === 'docx') window.location.href = `/api/newsletters/${id}/export.docx`;
+      else window.open(`/api/newsletters/${id}/print`, '_blank', 'noopener');
+      setMsg('تم التصدير');
+    } catch (e: any) { setMsg(e.message); }
+  }
+
   /* التدقيق يحفظ أولاً: المدقّق يقرأ الكتل من الخادم، ونصٌّ لم يُحفظ
      بعد يُدقَّق في نسخته القديمة فتصل الملاحظات عن كلامٍ غُيّر. */
   async function proofread() {
@@ -355,6 +372,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           <SpellCheck size={20} /> {proofing ? 'جارٍ التدقيق…' : 'تدقيق لغوي'}
         </button>
         <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
+        <button className="btn ghost" onClick={() => setExporting(true)}><FileOutput size={20} /> تصدير</button>
         <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
         {nl.status === 'scheduled' ? (
           <button className="btn ghost" onClick={cancelSchedule}><CalendarClock size={20} /> إلغاء الجدولة</button>
@@ -375,6 +393,23 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       )}
 
       {scheduling && <ScheduleModal onClose={() => setScheduling(false)} onConfirm={schedule} />}
+
+      {exporting && (
+        <Modal title="تصدير" onClose={() => setExporting(false)}>
+          <div className="grid" style={{ gap: 'var(--space-2)' }}>
+            <button className="btn" onClick={() => exportDoc('docx')}>
+              <FileOutput size={20} /> مستند Word
+            </button>
+            <button className="btn ghost" onClick={() => exportDoc('print')}>
+              <Printer size={20} /> نسخة للطباعة
+            </button>
+            {/* الوعد يوصف كما هو: المتصفح يحفظ PDF، لا الخادم يولّده */}
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+              نسخة الطباعة تُفتح في نافذة جديدة، واحفظها PDF من حوار الطباعة.
+            </p>
+          </div>
+        </Modal>
+      )}
 
       {proof && proof.length > 0 && (
         <Modal title="تدقيق لغوي" onClose={() => setProof(null)}>

@@ -51,8 +51,10 @@ function sheetXml(rows: (string | number)[][]): string {
 }
 
 // ===== ZIP (store, no compression) =====
-type Entry = { name: string; data: Uint8Array };
-function zipStore(entries: Entry[]): Uint8Array {
+// يُصدَّر لأن docx.ts يبني حاويته بنفس الآلية — كلا الصيغتين حزمة
+// OOXML، وبناء ثانٍ لنفس الشيء هو ما يُنتج نسختين تتباعدان.
+export type Entry = { name: string; data: Uint8Array };
+export function zipStore(entries: Entry[]): Uint8Array {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
