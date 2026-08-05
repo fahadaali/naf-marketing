@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { Eraser } from 'lucide-react';
 import { Popover } from './Popover';
-import { EMAIL, SWATCHES, hexColor } from '../lib/newsletterTheme';
+import { EMAIL, SWATCHES, hexColor, paletteGradient } from '../lib/newsletterTheme';
 
 /* منتقي لون: مربّعات اللوحة المسجّلة أولاً، ثم لونٌ حرّ من منتقي
    المتصفح، ثم «الافتراضي» للعودة.
@@ -38,14 +38,14 @@ export default function ColorField({
             onClick={toggle}
             title={label}
           >
+            {/* شريطٌ متعدّد الألوان حين لا لون مختار: مربّعٌ بلون
+                واحد لا يقول إنه منتقي ألوان — وقد قيل لنا ذلك. وحين
+                يُختار لونٌ يصير الشريط لونَه، فيقول أيضاً «هذا هو
+                المختار». */}
             <span
               aria-hidden="true"
-              style={{
-                width: 14, height: 14, borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border)',
-                background: current || 'transparent',
-                display: 'inline-block',
-              }}
+              className="swatch-dot"
+              style={{ background: current || paletteGradient(135) }}
             />
             {label}
           </button>
@@ -118,10 +118,14 @@ export function ColorPickButton({
   const [custom, setCustom] = useState<string>(EMAIL.primary);
   return (
     <Popover
+      /* الأيقونة فوق شريط الألوان — الشكل المألوف في محرّرات النصوص:
+         الرمز يقول أيَّ شيءٍ يُلوَّن، والشريط يقول إن هنا ألواناً تُختار. */
       render={({ toggle, open }) => (
         <button type="button" title={label} aria-label={label} aria-haspopup="dialog" aria-expanded={open}
+                className="color-btn"
                 onMouseDown={(e) => e.preventDefault()} onClick={toggle}>
           {icon}
+          <span aria-hidden="true" className="swatch-bar" style={{ background: paletteGradient(90) }} />
         </button>
       )}
     >
@@ -145,6 +149,17 @@ export function ColorPickButton({
               تطبيق
             </button>
           </div>
+
+          {/* الطريق المعلومة للعودة. `naf-terms.md` §١٤: «الافتراضي»
+              خيارٌ ظاهر في **كل** قائمة لون لا غيابُ خيار — ومن لوّن
+              كلمةً بلا هذا الخيار يصير تراجعُه تخميناً. ولا يُكتب «بلا
+              لون»: اللون قائم دائماً، والافتراضي لونُ السمة لا العدم. */}
+          <button type="button" className="btn sm ghost"
+                  style={{ marginTop: 'var(--space-2)', width: '100%' }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onPick(''); close(); }}>
+            <Eraser size={16} /> الافتراضي
+          </button>
         </div>
       )}
     </Popover>

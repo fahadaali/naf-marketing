@@ -99,6 +99,18 @@ export const SWATCHES: { value: string; label: string }[] = [
   { value: EMAIL.background, label: 'رمادي فاتح' },
 ];
 
+/* شريط اللوحة الذي يعلن «هنا ألوان»: مربّعٌ بلون واحد لا يقول ذلك.
+   ويُبنى من `SWATCHES` نفسها لا يُكتب بيده — فالشريط الذي يعلن اللوحة
+   لا يجوز أن يخالفها بعد تغييرٍ فيها. والقيم محتوىً كقيم المربّعات،
+   فتصل عبر `style` سطرياً كما تصل هناك. */
+export function paletteGradient(deg: number): string {
+  const stops = SWATCHES.map((s, i) => {
+    const at = Math.round((i / (SWATCHES.length - 1)) * 100);
+    return `${s.value} ${at}%`;
+  });
+  return `linear-gradient(${deg}deg, ${stops.join(', ')})`;
+}
+
 /* الألفاظ من naf-terms.md §١٤ — «تخصيص مظهر الكتلة» و«سمة النشرة». */
 export const ALIGN_LABEL: Record<Align, string> = {
   start: 'بداية السطر', center: 'الوسط', end: 'نهاية السطر',

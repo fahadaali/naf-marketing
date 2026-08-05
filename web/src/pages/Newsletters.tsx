@@ -1,5 +1,5 @@
 import { isolate } from '../lib/format';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
@@ -22,7 +22,8 @@ import {
   DEFAULT_THEME, EMAIL, RADIUS_PX, WIDTH_PX, BODY_PX, parseTheme,
 } from '../lib/newsletterTheme';
 import type { BlockStyle, NewsletterTheme } from '../lib/newsletterTheme';
-import { highlightMarks } from '../lib/markHighlight';
+import { highlightMarks, highlightClean } from '../lib/markHighlight';
+import { parseMarks, applyCleanEdit } from '../lib/markSource';
 import { PlatformIcon, platformLabel } from '../platforms';
 
 /* قيم قالب البريد الحرفية تعيش في `lib/newsletterTheme.ts` — نسخة طبق
@@ -863,6 +864,16 @@ function InlineField({ value, rows, placeholder, onChange }: {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState('');
+  /* العلامات مخفية افتراضاً: الكاتب يكتب نصّاً، لا صيغةً.
+
+     وفي وضع الإخفاء يحمل الحقل **النصّ النظيف**، ويترجم
+     `applyCleanEdit` كل تحرير إلى المصدر المعلَّم. وفي وضع الإظهار
+     يحمل المصدر كما هو — لمن أراد أن يصحّح علامةً بيده أو يفهم ما
+     تحته. والتخزين واحدٌ في الحالتين. */
+  const [showMarks, setShowMarks] = useState(false);
+
+  const parsed = useMemo(() => parseMarks(value), [value]);
+  const shown = showMarks ? value : parsed.clean;
 
   /* الطبقة تتبع تمرير الحقل: نصٌّ أطول من الصندوق يُمرَّر في
      `<textarea>` وحده، فتبقى الطبقة مكانها ويفترق اللون عن كلامه. */
@@ -876,7 +887,15 @@ function InlineField({ value, rows, placeholder, onChange }: {
 
   return (
     <div>
-      <InlineToolbar areaRef={areaRef} value={value} onChange={onChange} onError={setErr} />
+      <InlineToolbar
+        areaRef={areaRef}
+        value={value}
+        parsed={parsed}
+        showMarks={showMarks}
+        onToggleMarks={() => setShowMarks((v) => !v)}
+        onChange={onChange}
+        onError={setErr}
+      />
       {/* طبقةُ التلوين خلف الحقل — الشرح في lib/markHighlight.ts.
           `aria-hidden` لأنها تكرار بصريّ لنصٍّ يقرؤه قارئ الشاشة من
           الحقل نفسه. */}
@@ -885,17 +904,22 @@ function InlineField({ value, rows, placeholder, onChange }: {
           ref={mirrorRef}
           className="rte-mirror"
           aria-hidden="true"
-          dangerouslySetInnerHTML={{ __html: highlightMarks(value) }}
+          dangerouslySetInnerHTML={{
+            __html: showMarks ? highlightMarks(value) : highlightClean(parsed),
+          }}
         />
         <textarea
           ref={areaRef}
           className="input rte-input"
           rows={rows}
           placeholder={placeholder}
-          value={value}
+          value={shown}
           spellCheck={false}
           onScroll={syncScroll}
-          onChange={(e) => { onChange(e.target.value); if (err) setErr(''); }}
+          onChange={(e) => {
+            onChange(showMarks ? e.target.value : applyCleanEdit(value, parsed, e.target.value));
+            if (err) setErr('');
+          }}
         />
       </div>
       {err && <p className="err" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>{err}</p>}
