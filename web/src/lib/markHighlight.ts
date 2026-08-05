@@ -1,4 +1,5 @@
 import { EMAIL, hexColor } from './newsletterTheme';
+import type { Parsed } from './markSource';
 
 /* ============================================================
    تلوين علامات المحرر خلف الحقل النصّي.
@@ -79,5 +80,39 @@ export function highlightMarks(value: string): string {
   /* سطرٌ أخير فارغ لا يرسمه المتصفح في `<div>` ويحجز مكانه في
      `<textarea>`. فبلا هذا الحرف تنقص الطبقةُ سطراً عند نهاية النصّ
      بسطر جديد، ويعلو المؤشّر عن كلامه. */
+  return `${out}\n`;
+}
+
+/* ===== الطبقة في وضع «العلامات مخفية» =====
+
+   هناك يحمل الحقل النصّ النظيف، فتُبنى الطبقة من الحروف نفسها ومن
+   أنماطها المحفوظة في `parseMarks`. لا علامة تُعرض، والمحاذاة مضمونة
+   لأن الحروف واحدة في الطبقتين.
+
+   والألوان تُعرض على سطح الرسالة لا سطح المنصة — للسبب المشروح أعلاه. */
+export function highlightClean(p: Parsed): string {
+  let out = '';
+  let i = 0;
+  const key = (n: number) => {
+    const st = p.styles[n] || {};
+    return [st.color || '', st.bg || '', st.bold ? 'b' : '', st.italic ? 'i' : '',
+      st.under ? 'u' : '', st.link ? 'l' : ''].join('|');
+  };
+  while (i < p.clean.length) {
+    const k = key(i);
+    let j = i + 1;
+    while (j < p.clean.length && key(j) === k) j++;
+    const st = p.styles[i] || {};
+    const text = escapeHtml(p.clean.slice(i, j));
+    const cls = [st.bold && 'mk-b', st.italic && 'mk-i', st.under && 'mk-u', st.link && 'mk-link']
+      .filter(Boolean).join(' ');
+    const style = st.bg
+      ? `background-color:${st.bg};color:${EMAIL.foreground}`
+      : st.color ? `color:${st.color};background-color:${EMAIL.card}` : '';
+    out += (cls || style)
+      ? `<span${cls ? ` class="${cls}"` : ''}${style ? ` style="${style}"` : ''}>${text}</span>`
+      : text;
+    i = j;
+  }
   return `${out}\n`;
 }

@@ -177,6 +177,8 @@ h3, h4 { letter-spacing: -0.01em; }
   min-width: 32px; height: 30px; padding: 0 var(--space-2); cursor: pointer;
   color: var(--muted-foreground); display: grid; place-items: center;
 }
+.rte-toolbar button[aria-pressed='true'] { background: var(--card); color: var(--foreground); border-color: var(--border); }
+.rte-toolbar .spacer { flex: 1; }
 .rte-toolbar button:hover { background: var(--card); color: var(--foreground); border-color: var(--border); }
 .rte {
   min-height: 280px; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius);
@@ -260,6 +262,20 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .style-pick { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted-foreground); }
 .select.sm { width: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+
+/* مؤشّر المنتقي: شريطٌ متعدّد الألوان يقول «هنا ألوان تُختار».
+   ومربّعٌ بلون واحد لا يقوله — وقع فعلاً فلم يُعرف أنه منتقي ألوان.
+
+   والتدرّج نفسه لا يُكتب هنا: يبنيه `paletteGradient` من `SWATCHES`
+   ويصل عبر `style` سطرياً، كما تصل خلفيةُ `.swatch` تماماً. فالشريط
+   يُعلن اللوحة، وشريطٌ مكتوبٌ بيده يخالفها بعد أوّل تغييرٍ فيها. */
+.swatch-dot {
+  width: 14px; height: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); display: inline-block; flex: none;
+}
+/* شريط الأداة في شريط التنسيق: الأيقونة فوقه لا بجانبه */
+.color-btn { flex-direction: column; gap: 1px; height: 34px; }
+.swatch-bar { display: block; width: 18px; height: 4px; border-radius: 2px; }
 
 /* مربّع اللون. الخلفية قيمةُ محتوى تأتي من `style` سطرياً، والحدّ
    والاستدارة من الرموز — فالمربّع الأبيض يبقى مرئياً على سطح البطاقة. */
