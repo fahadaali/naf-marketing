@@ -153,10 +153,17 @@ ${opts.jsonLd ? `<script type="application/ld+json">${articleJsonLd({
 
   .media-block { margin:20px 0; }
   .media-block audio, .media-block video { width:100%; border-radius: var(--radius); }
-  /* الإطار بنسبة 16:9 يحفظ ارتفاعه قبل التحميل فلا تقفز الصفحة */
+  /* الإطار يحفظ ارتفاعه قبل التحميل فلا تقفز الصفحة عند وصوله.
+     والشكل من المزوّد لا من ذوقنا: مقطع تيك توك طوليّ، ومشغّل
+     سبوتيفاي شريط، ومنشور إنستغرام بطاقة. */
   .embed-frame { position:relative; margin:20px 0; aspect-ratio:16/9;
                  border-radius: var(--radius); overflow:hidden; border:1px solid var(--border); }
   .embed-frame iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  .embed-wide { aspect-ratio:16/9; }
+  .embed-tall { aspect-ratio:9/16; max-width:340px; margin-inline:auto; }
+  .embed-card { aspect-ratio:4/5; max-width:540px; margin-inline:auto; }
+  /* الشريط ارتفاعه ثابت لا نسبة — مشغّل الصوت لا يتمدّد بعرض الصفحة */
+  .embed-strip { aspect-ratio:auto; height:180px; }
 
   /* عمودان ينهاران عمودياً على الجوّال — ١٨٧ بكسل للعمود لا يُقرأ */
   .columns { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0; }

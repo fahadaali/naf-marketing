@@ -17,7 +17,11 @@ import { escapeHtml } from './inline';
    القيم أسودُ على أبيض عمداً: المستند القانوني يُصوَّر ويُرسَل بالفاكس
    ويُضمّ إلى ملفّ، والرماديّ الفاتح يختفي في كلّ واحدة من هذه. */
 
-export function printDocument(title: string, bodyHtml: string): string {
+/* autoPrint: تفتحه نافذةُ المتصفح فتطبع نفسها. ويُطفأ حين يُصيَّر
+   المستند إلى PDF في الخادم — لا نافذة هناك تطبع، واستدعاء print()
+   في كروم بلا واجهة يعلّق التصيير بلا فائدة. */
+export function printDocument(title: string, bodyHtml: string, opts: { autoPrint?: boolean } = {}): string {
+  const autoPrint = opts.autoPrint !== false;
   return `<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -67,17 +71,15 @@ export function printDocument(title: string, bodyHtml: string): string {
 </head>
 <body>
 <div class="doc">
-  <div class="no-print">
-    <button onclick="window.print()">طباعة</button>
-  </div>
+  ${autoPrint ? '<div class="no-print"><button onclick="window.print()">طباعة</button></div>' : ''}
   <h1>${escapeHtml(title)}</h1>
   ${bodyHtml}
 </div>
-<script>
+${autoPrint ? `<script>
   /* الطباعة تُطلب بعد اكتمال تحميل الصور: حوار الطباعة يلتقط الصفحة
      كما هي لحظتَه، وصورةٌ لم تصل بعد تُطبع فراغاً. */
   window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 300); });
-</script>
+</script>` : ''}
 </body>
 </html>`;
 }

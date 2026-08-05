@@ -37,23 +37,70 @@ export type Block =
    سياق صفحتنا، ويكسر سياسة المحتوى، وقد يُستعمل في التصيّد. وبطاقة
    الرابط ليست تنازلاً: القارئ يرى الوجهة ويقرّر.
 
-   ومنصات التواصل ليست في القائمة عمداً: تضمين منشور إكس أو لينكدإن
-   يحتاج تحميل شيفرة المنصة نفسها في صفحتنا — تتبّعٌ للقارئ لم يطلبه —
-   فتُعرض بطاقة رابط. */
-const EMBED_PROVIDERS: { test: RegExp; src: (m: RegExpMatchArray) => string }[] = [
-  { test: /^https:\/\/(?:www\.)?youtube\.com\/watch\?v=([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
-  { test: /^https:\/\/youtu\.be\/([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
-  { test: /^https:\/\/(?:www\.)?vimeo\.com\/(\d{6,})/i, src: (m) => `https://player.vimeo.com/video/${m[1]}` },
+   والحدّ الفاصل ليس «منصة تواصل أو لا»، بل: **هل يعطي المزوّد نقطةَ
+   تضمينٍ بإطارٍ من عنده؟** من يعطيها يدخل القائمة، ومن يشترط تحميل
+   شيفرته في صفحتنا لا يدخل — تلك تقرأ القارئ وتتبعه ونحن لم نَعِده
+   بذلك، وتكسر سياسة المحتوى معها.
+
+   ولهذا تدخل تيك توك وإنستغرام وفيسبوك وسبوتيفاي وساوندكلاود وخرائط
+   جوجل ومستندات جوجل، **وتبقى إكس خارجها**: منصة إكس لا تنشر نقطة
+   إطارٍ عامة، وتضمين منشورها يمرّ حصراً عبر widgets.js. فتُعرض بطاقة
+   رابط، وهو حدٌّ قائم لا نقصٌ مؤقت.
+
+   ولينكدإن تدخل بنقطتها المعلنة `/embed/feed/update/…` وحدها — وهي
+   عنوانٌ يعطيه لينكدإن نفسه من زرّ «تضمين هذا المنشور»، لا رابط
+   المنشور العادي. */
+const EMBED_PROVIDERS: { name: string; test: RegExp; src: (m: RegExpMatchArray) => string }[] = [
+  // فيديو
+  { name: 'youtube', test: /^https:\/\/(?:www\.)?youtube\.com\/watch\?v=([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
+  { name: 'youtube', test: /^https:\/\/youtu\.be\/([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
+  { name: 'youtube', test: /^https:\/\/(?:www\.)?youtube\.com\/shorts\/([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
+  { name: 'vimeo', test: /^https:\/\/(?:www\.)?vimeo\.com\/(\d{6,})/i, src: (m) => `https://player.vimeo.com/video/${m[1]}` },
+  { name: 'dailymotion', test: /^https:\/\/(?:www\.)?dailymotion\.com\/video\/([a-z0-9]{5,})/i, src: (m) => `https://www.dailymotion.com/embed/video/${m[1]}` },
+  { name: 'loom', test: /^https:\/\/(?:www\.)?loom\.com\/share\/([a-f0-9]{16,})/i, src: (m) => `https://www.loom.com/embed/${m[1]}` },
+
+  // صوت
+  { name: 'spotify', test: /^https:\/\/open\.spotify\.com\/(track|episode|show|album|playlist)\/([A-Za-z0-9]{10,})/i, src: (m) => `https://open.spotify.com/embed/${m[1].toLowerCase()}/${m[2]}` },
+  { name: 'soundcloud', test: /^https:\/\/soundcloud\.com\/[\w-]+\/[\w-]+/i, src: (m) => `https://w.soundcloud.com/player/?url=${encodeURIComponent(m[0])}` },
+
+  // تواصل — من ينشر نقطة إطار
+  { name: 'tiktok', test: /^https:\/\/(?:www\.)?tiktok\.com\/@[\w.-]+\/video\/(\d{6,})/i, src: (m) => `https://www.tiktok.com/embed/v2/${m[1]}` },
+  { name: 'instagram', test: /^https:\/\/(?:www\.)?instagram\.com\/(p|reel)\/([\w-]{5,})/i, src: (m) => `https://www.instagram.com/${m[1]}/${m[2]}/embed` },
+  { name: 'facebook', test: /^https:\/\/(?:www\.)?facebook\.com\/[\w.-]+\/(?:posts|videos)\/[\w.-]+/i, src: (m) => `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(m[0])}` },
+  { name: 'linkedin', test: /^https:\/\/(?:www\.)?linkedin\.com\/embed\/feed\/update\/([\w:-]+)/i, src: (m) => `https://www.linkedin.com/embed/feed/update/${m[1]}` },
+
+  // مستندات وخرائط
+  { name: 'google-maps', test: /^https:\/\/(?:www\.)?google\.com\/maps\/embed\?pb=([^"'\s]+)/i, src: (m) => `https://www.google.com/maps/embed?pb=${m[1]}` },
+  { name: 'google-docs', test: /^https:\/\/docs\.google\.com\/(document|spreadsheets|presentation|forms)\/d\/(?:e\/)?([\w-]{10,})/i, src: (m) => `https://docs.google.com/${m[1]}/d/${m[2]}/preview` },
 ];
 
-/** عنوان الإطار لمزوّد مسجَّل، أو null فتُعرض بطاقة رابط. */
-export function embedSrc(url: string): string | null {
+/* شكل الإطار. مقطع تيك توك في صندوق 16:9 يظهر شريطين أسودين وصورةً
+   صغيرة في وسطهما، ومشغّل ساوندكلاود في الصندوق نفسه يترك ثلاثة أرباعه
+   فارغة. الشكل من المزوّد لا من ذوقنا. */
+export type EmbedShape = 'wide' | 'tall' | 'card' | 'strip';
+
+const SHAPE: Record<string, EmbedShape> = {
+  youtube: 'wide', vimeo: 'wide', dailymotion: 'wide', loom: 'wide', 'google-maps': 'wide',
+  tiktok: 'tall',
+  instagram: 'card', facebook: 'card', linkedin: 'card', 'google-docs': 'card',
+  spotify: 'strip', soundcloud: 'strip',
+};
+
+export type EmbedInfo = { src: string; name: string; shape: EmbedShape };
+
+/** بيانات الإطار لمزوّد مسجَّل، أو null فتُعرض بطاقة رابط. */
+export function embedInfo(url: string): EmbedInfo | null {
   const u = String(url || '').trim();
   for (const p of EMBED_PROVIDERS) {
     const m = u.match(p.test);
-    if (m) return p.src(m);
+    if (m) return { src: p.src(m), name: p.name, shape: SHAPE[p.name] || 'wide' };
   }
   return null;
+}
+
+/** عنوان الإطار وحده — يبقى لأن الاختبارات والنداءات القائمة تستعمله. */
+export function embedSrc(url: string): string | null {
+  return embedInfo(url)?.src ?? null;
 }
 
 /* نغمات البطاقة. «معلومة» و«تحذير» حالتان مسجّلتان في naf-terms.md
@@ -116,6 +163,18 @@ function linkCard(url: string, title: string, note: string, inline: boolean): st
     `<span${tSt}>${escapeHtml(title || safe)}</span>` +
     (note ? `<span${nSt}>${escapeHtml(note)}</span>` : '') +
     `</a>`;
+}
+
+/* إطار التضمين. الضوابط الثلاثة ليست زينة:
+   referrerpolicy يمنع تسريب مسار المقالة إلى المزوّد، وloading=lazy
+   يمنع تحميله قبل أن يبلغه القارئ، وsandbox يحرم الإطار من التنقّل
+   بالصفحة الأمّ ومن فتح النوافذ — وهو ما يجعل تضميناً خبيثاً عاجزاً
+   عن نقل القارئ إلى حيث لم يقصد. */
+function iframeHtml(info: EmbedInfo, title: string): string {
+  return `<div class="embed-frame embed-${info.shape}">` +
+    `<iframe src="${escapeHtml(info.src)}" title="${escapeHtml(title)}" loading="lazy" allowfullscreen ` +
+    `referrerpolicy="strict-origin-when-cross-origin" ` +
+    `sandbox="allow-scripts allow-same-origin allow-presentation allow-popups-to-escape-sandbox"></iframe></div>`;
 }
 
 // mediaBase: أصل مطلق لروابط الوسائط (البريد لا يعرض الروابط النسبية)
@@ -278,7 +337,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
 
       case 'video': {
         const src = mediaUrl(b);
-        const provider = b.url ? embedSrc(b.url) : null;
+        const provider = b.url ? embedInfo(b.url) : null;
         if (inline) {
           // لا فيديو في صندوق الوارد: بطاقة رابط في الحالتين.
           const target = provider ? (b.url as string) : src;
@@ -286,8 +345,7 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
           break;
         }
         if (provider) {
-          out.push(`<div class="embed-frame"><iframe src="${escapeHtml(provider)}" title="فيديو" ` +
-            `loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`);
+          out.push(iframeHtml(provider, 'فيديو'));
         } else if (src) {
           out.push(`<figure class="media-block"><video controls preload="none" src="${escapeHtml(src)}"></video></figure>`);
         } else if (b.url) {
@@ -297,15 +355,13 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       }
 
       case 'embed': {
-        const provider = embedSrc(b.url);
+        const provider = embedInfo(b.url);
         // البريد يحذف iframe دائماً، والويب لا يضمّن إلا مزوّداً مسجّلاً.
         if (inline || !provider) {
           out.push(linkCard(b.url, b.title || '', 'فتح الرابط', inline));
           break;
         }
-        out.push(`<div class="embed-frame"><iframe src="${escapeHtml(provider)}" ` +
-          `title="${escapeHtml(b.title || 'تضمين')}" loading="lazy" allowfullscreen ` +
-          `referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`);
+        out.push(iframeHtml(provider, b.title || 'تضمين'));
         break;
       }
 
@@ -479,6 +535,58 @@ export function toXThread(title: string, blocks: Block[], url: string, maxParts 
   if ((last + '\n\n' + url).length <= X_LIMIT + 5) thread[thread.length - 1] = `${last}\n\n${url}`;
   else thread.push(url);
   return thread.map((t, i) => (thread.length > 1 ? `${i + 1}/${thread.length} ${t}` : t));
+}
+
+/* ===== صياغة المقالة لكل منصة =====
+
+   كان النشر يعرف صيغتين: سلسلةَ إكس، ونصَّ لينكدإن لكل ما عداها. فمن
+   نشر على ثريدز أرسل نصّاً بطول تسعمئة حرف إلى منصةٍ حدّها خمسمئة،
+   فقُطع في منتصف جملة — أو رُفض كاملاً.
+
+   الحدود أدناه من المنصات نفسها. وهي حدُّ قَبولٍ لا حدُّ ذوق: تجاوزها
+   يعني رفض المنشور أو بتره، لا مجرّد طول. */
+export const SOCIAL_LIMIT: Record<string, number> = {
+  x: 280,
+  threads: 500,
+  google: 1500,
+  instagram: 2200,
+  tiktok: 2200,
+  linkedin: 3000,
+  linkedin_page: 3000,
+  youtube: 5000,
+  facebook: 5000,
+  snapchat: 250,
+};
+
+/* منصاتٌ لا يُنشر عليها منشورٌ نصّيّ للمقالة.
+
+   إنستغرام وتيك توك وسناب شات وسائطُ أولاً: منشورٌ بلا صورة ولا مقطع
+   يُرفض من واجهاتها أصلاً. وإدراجها في قائمة النشر يَعِد الكاتب بما
+   يفشل عند الضغط، فتُستثنى ويُقال له لماذا. */
+export const SOCIAL_MEDIA_FIRST = new Set(['instagram', 'tiktok', 'snapchat']);
+
+/** المنصات التي تقبل نشر مقالةٍ نصّاً. */
+export function socialTargets(): string[] {
+  return Object.keys(SOCIAL_LIMIT).filter((p) => !SOCIAL_MEDIA_FIRST.has(p));
+}
+
+/**
+ * يصوغ المقالة لمنصة بعينها. إكس سلسلة، وما عداها منشورٌ واحد يُقصّ
+ * على حدّ المنصة مع إبقاء الرابط كاملاً — رابطٌ مبتور لا يفتح شيئاً.
+ */
+export function socialText(
+  platform: string, title: string, blocks: Block[], url: string, excerpt?: string | null,
+): string {
+  if (platform === 'x') return toXThread(title, blocks, url).join('\n\n');
+
+  const limit = SOCIAL_LIMIT[platform] || 1000;
+  const body = (excerpt || blocksToText(blocks)).trim();
+  const tail = `\n\nاقرأ المقالة كاملة:\n${url}`;
+  // الرابط والعنوان يُحجزان أولاً، وما بقي هو مساحة المتن.
+  const room = limit - title.length - tail.length - 2;
+  if (room <= 0) return `${title}\n${url}`.slice(0, limit);
+  const trimmed = body.length > room ? `${body.slice(0, room).replace(/\s+\S*$/, '')}…` : body;
+  return `${title}\n\n${trimmed}${tail}`;
 }
 
 // لينكدإن: مقتطف مهني متوسط الطول مع دعوة لقراءة المقالة

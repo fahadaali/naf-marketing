@@ -13,6 +13,7 @@ import InlineToolbar from '../components/InlineToolbar';
 import MediaPicker from '../components/MediaPicker';
 import { DateTimePicker } from '../components/DatePicker';
 import Modal from '../components/Modal';
+import { PlatformIcon, platformLabel } from '../platforms';
 
 /* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
    لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
@@ -145,6 +146,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [scheduling, setScheduling] = useState(false);
   const [recovered, setRecovered] = useState<any>(null);
   const [exporting, setExporting] = useState(false);
+  const [caps, setCaps] = useState<{ pdf: boolean }>({ pdf: false });
   const [proofing, setProofing] = useState(false);
   const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
   const draftKey = `naf.newsletter.draft.${id}`;
@@ -157,6 +159,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   useEffect(() => {
     loadStats();
     api.get('/newsletters/meta/tags').then((d) => setTags(d.tags || [])).catch(() => {});
+    api.get('/newsletters/meta/export-capabilities').then(setCaps).catch(() => {});
     api.get(`/newsletters/${id}`).then((d) => {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
@@ -314,13 +317,13 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
      وWord ينزل ملفاً، وPDF يفتح نسخة الطباعة في نافذة تستدعي print()
      — فيحفظها القارئ PDF من حوار الطباعة. ولا تُولَّد PDF في الخادم:
      Workers بلا محرّك تصيير، والبديل الخفيف يسقط تشكيل العربية. */
-  async function exportDoc(fmt: 'docx' | 'print') {
+  async function exportDoc(fmt: 'pdf' | 'docx' | 'print') {
     setMsg('');
     try {
       await save();
       setExporting(false);
-      if (fmt === 'docx') window.location.href = `/api/newsletters/${id}/export.docx`;
-      else window.open(`/api/newsletters/${id}/print`, '_blank', 'noopener');
+      if (fmt === 'print') window.open(`/api/newsletters/${id}/print`, '_blank', 'noopener');
+      else window.location.href = `/api/newsletters/${id}/export.${fmt}`;
       setMsg('تم التصدير');
     } catch (e: any) { setMsg(e.message); }
   }
@@ -397,13 +400,19 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {exporting && (
         <Modal title="تصدير" onClose={() => setExporting(false)}>
           <div className="grid" style={{ gap: 'var(--space-2)' }}>
-            <button className="btn" onClick={() => exportDoc('docx')}>
+            {/* زرّ PDF لا يُعرض إلا إذا كان ربط المتصفح متاحاً فعلاً —
+                زرٌّ يفشل عند الضغط أسوأ من زرٍّ غائب. */}
+            {caps.pdf && (
+              <button className="btn" onClick={() => exportDoc('pdf')}>
+                <FileOutput size={20} /> ملف PDF
+              </button>
+            )}
+            <button className={caps.pdf ? 'btn ghost' : 'btn'} onClick={() => exportDoc('docx')}>
               <FileOutput size={20} /> مستند Word
             </button>
             <button className="btn ghost" onClick={() => exportDoc('print')}>
               <Printer size={20} /> نسخة للطباعة
             </button>
-            {/* الوعد يوصف كما هو: المتصفح يحفظ PDF، لا الخادم يولّده */}
             <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
               نسخة الطباعة تُفتح في نافذة جديدة، واحفظها PDF من حوار الطباعة.
             </p>
@@ -532,12 +541,15 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             )}
             {nl.web_published && (
               <>
-                <div className="row" style={{ gap: 12, marginBottom: 8 }}>
-                  {['x', 'linkedin'].map((p) => (
-                    <label key={p} className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, cursor: 'pointer' }}>
+                {/* المنصات من الخادم لا مكتوبةً هنا: هو من يعرف أيّها
+                    تقبل منشوراً نصّياً وأيّها يحتاج وسيطاً. */}
+                <div className="row" style={{ gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {(social?.targets || ['x', 'linkedin']).map((p: string) => (
+                    <label key={p} className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, cursor: 'pointer', alignItems: 'center' }}>
                       <input type="checkbox" checked={!!socialPick[p]}
                              onChange={(e) => setSocialPick((v) => ({ ...v, [p]: e.target.checked }))} />
-                      {p === 'x' ? 'إكس (سلسلة)' : 'لينكدإن'}
+                      <PlatformIcon platform={p} size={16} />
+                      {platformLabel(p)}{p === 'x' ? ' (سلسلة)' : ''}
                     </label>
                   ))}
                   <div className="spacer" />
@@ -545,12 +557,22 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                 </div>
                 {social && (
                   <div style={{ fontSize: 'var(--text-xs)' }}>
-                    <div className="muted" style={{ marginBottom: 4 }}>سلسلة إكس ({social.x?.length} تغريدة):</div>
+                    <div className="muted" style={{ marginBottom: 4 }}>
+                      سلسلة إكس (<bdi>{social.x?.length}</bdi> تغريدة):
+                    </div>
                     {(social.x || []).map((t: string, i: number) => (
                       <div key={i} className="card" style={{ padding: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}>{t}</div>
                     ))}
-                    <div className="muted" style={{ margin: '8px 0 4px' }}>لينكدإن:</div>
-                    <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.linkedin}</div>
+                    {/* صياغة كل منصة مختارة، مع عدّاد حدّها — الحدّ حدُّ
+                        قَبولٍ لا ذوق: تجاوزه يعني بتر المنشور أو رفضه. */}
+                    {(social.targets || []).filter((p: string) => p !== 'x' && socialPick[p]).map((p: string) => (
+                      <div key={p}>
+                        <div className="muted" style={{ margin: '8px 0 4px' }}>
+                          {platformLabel(p)} — <bdi>{(social.drafts?.[p] || '').length}</bdi>/<bdi>{social.limits?.[p]}</bdi>
+                        </div>
+                        <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.drafts?.[p]}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </>
@@ -952,12 +974,21 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
    الوجهتين، ومنصات التواصل ليست مسجَّلة عمداً. */
 function EmbedNote({ url }: { url: string }) {
   if (!url.trim()) return null;
-  const framed = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|vimeo\.com\/\d)/i.test(url.trim());
+  /* نسخة مبسّطة من القائمة البيضاء في newsletter.ts — تكفي لتمييز
+     «سيُضمَّن» من «سيصير بطاقة»، والحكم النهائي للخادم. */
+  const framed = new RegExp(
+    '^https://(?:www\\.)?(?:' +
+    'youtube\\.com/(?:watch\\?v=|shorts/)|youtu\\.be/|vimeo\\.com/\\d|dailymotion\\.com/video/|loom\\.com/share/|' +
+    'open\\.spotify\\.com/|soundcloud\\.com/|tiktok\\.com/@|instagram\\.com/(?:p|reel)/|' +
+    'facebook\\.com/[\\w.-]+/(?:posts|videos)/|linkedin\\.com/embed/feed/update/|' +
+    'google\\.com/maps/embed|docs\\.google\\.com/)',
+    'i',
+  ).test(url.trim());
   return (
     <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
       {framed
         ? 'هذا التضمين يظهر في الصفحة العامة فقط. رسالة البريد تعرض بطاقة رابط بدلاً منه.'
-        : 'هذا الرابط يظهر بطاقة رابط في الصفحة العامة وفي البريد — التضمين المباشر ليوتيوب وڤيميو وحدهما.'}
+        : 'هذا الرابط يظهر بطاقة رابط في الصفحة العامة وفي البريد. التضمين المباشر ليوتيوب وڤيميو وديلي موشن ولووم وسبوتيفاي وساوندكلاود وتيك توك وإنستغرام وفيسبوك وخرائط جوجل ومستنداتها، ولينكدإن برابط التضمين وحده.'}
     </p>
   );
 }

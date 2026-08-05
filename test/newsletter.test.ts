@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks, embedSrc } from '../src/services/newsletter';
+import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks, embedSrc, embedInfo, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST } from '../src/services/newsletter';
 import type { Block } from '../src/services/newsletter';
 import { retryWindowPassed } from '../src/services/newsletterSend';
 
@@ -347,5 +347,120 @@ describe('الأعمدة في المقتطف', () => {
   it('ويُجرَّد تنسيقهما', () => {
     const t = blocksToText([{ type: 'columns', start: '**غامق**', end: '[نصّ](https://naf.sa)' }]);
     expect(t).toBe('غامق\n\nنصّ');
+  });
+});
+
+// ===== توسيع قائمة التضمين =====
+describe('embedInfo — المزوّدون المسجّلون', () => {
+  const cases: [string, string, string][] = [
+    ['https://www.youtube.com/shorts/abc123XY', 'youtube', 'wide'],
+    ['https://www.dailymotion.com/video/x8abcd', 'dailymotion', 'wide'],
+    ['https://www.loom.com/share/0123456789abcdef', 'loom', 'wide'],
+    ['https://open.spotify.com/episode/4XYZabc1234567', 'spotify', 'strip'],
+    ['https://soundcloud.com/naf/khutba', 'soundcloud', 'strip'],
+    ['https://www.tiktok.com/@naf/video/7123456789', 'tiktok', 'tall'],
+    ['https://www.instagram.com/reel/Cabc-123/', 'instagram', 'card'],
+    ['https://www.google.com/maps/embed?pb=!1m18!1m12', 'google-maps', 'wide'],
+    ['https://docs.google.com/document/d/1AbCdEfGhIjK/edit', 'google-docs', 'card'],
+  ];
+  for (const [url, name, shape] of cases) {
+    it(`${name} يُضمَّن بشكل ${shape}`, () => {
+      const info = embedInfo(url);
+      expect(info?.name).toBe(name);
+      expect(info?.shape).toBe(shape);
+    });
+  }
+
+  it('يوتيوب shorts إلى nocookie', () => {
+    expect(embedInfo('https://www.youtube.com/shorts/abc123XY')?.src)
+      .toBe('https://www.youtube-nocookie.com/embed/abc123XY');
+  });
+
+  /* إكس خارج القائمة بقرار: لا تنشر نقطة إطار عامة، وتضمين منشورها
+     يمرّ حصراً عبر widgets.js — شيفرةُ طرفٍ ثالث تقرأ القارئ. */
+  it('إكس تبقى بطاقة رابط', () => {
+    expect(embedInfo('https://x.com/naf/status/123')).toBeNull();
+    expect(embedInfo('https://twitter.com/naf/status/123')).toBeNull();
+  });
+
+  it('رابط لينكدإن العادي ليس رابط تضمين', () => {
+    expect(embedInfo('https://www.linkedin.com/posts/naf_abc-123')).toBeNull();
+    expect(embedInfo('https://www.linkedin.com/embed/feed/update/urn:li:share:7123')?.name).toBe('linkedin');
+  });
+
+  it('يرفض نطاقاً يتشبّه بمزوّد مسجّل', () => {
+    expect(embedInfo('https://tiktok.com.evil.test/@a/video/7123456789')).toBeNull();
+    expect(embedInfo('https://open.spotify.com.evil.test/track/4XYZabc1234567')).toBeNull();
+    expect(embedInfo('https://notloom.com/share/0123456789abcdef')).toBeNull();
+  });
+
+  it('يرفض http — https وحدها', () => {
+    expect(embedInfo('http://www.tiktok.com/@naf/video/7123456789')).toBeNull();
+  });
+});
+
+describe('إطار التضمين يحمل ضوابطه', () => {
+  it('sandbox وreferrerpolicy وlazy', () => {
+    const h = renderBlocks([{ type: 'embed', url: 'https://www.tiktok.com/@naf/video/7123456789' }], 'web');
+    expect(h).toContain('sandbox="allow-scripts allow-same-origin');
+    expect(h).toContain('referrerpolicy="strict-origin-when-cross-origin"');
+    expect(h).toContain('loading="lazy"');
+    expect(h).toContain('embed-tall');
+  });
+});
+
+// ===== صياغة المقالة لكل منصة =====
+describe('socialText', () => {
+  const long: Block[] = [{ type: 'text', text: 'جملة قانونية طويلة نسبياً. '.repeat(200) }];
+  const url = 'https://naf.sa/articles/x';
+
+  it('كل منصة تحترم حدّها', () => {
+    for (const p of socialTargets()) {
+      if (p === 'x') continue; // سلسلة لا منشور — تُفحص أجزاؤها أدناه
+      const out = socialText(p, 'عنوان المقالة', long, url);
+      expect(out.length, p).toBeLessThanOrEqual(SOCIAL_LIMIT[p]);
+    }
+  });
+
+  it('وكل جزء من سلسلة إكس ضمن حدّه بعد الترقيم', () => {
+    // البادئة «N/M » تُضاف بعد التقسيم، وX_LIMIT=275 هامشُها من ٢٨٠
+    const parts = toXThread('عنوان المقالة القانونية', long, url);
+    expect(parts.filter((t) => t.length > SOCIAL_LIMIT.x)).toEqual([]);
+  });
+
+  /* ثريدز حدّها ٥٠٠ وكانت تأخذ صيغة لينكدإن بتسعمئة حرف، فيُقطع
+     المنشور في منتصف جملة أو يُرفض. */
+  it('ثريدز لا تأخذ صيغة لينكدإن', () => {
+    const t = socialText('threads', 'عنوان', long, url);
+    const l = socialText('linkedin', 'عنوان', long, url);
+    expect(t.length).toBeLessThanOrEqual(500);
+    expect(l.length).toBeGreaterThan(500);
+  });
+
+  it('الرابط يبقى كاملاً مهما قُصّ المتن', () => {
+    for (const p of socialTargets()) {
+      expect(socialText(p, 'عنوان', long, url), p).toContain(url);
+    }
+  });
+
+  it('إكس سلسلة لا منشوراً واحداً', () => {
+    expect(socialText('x', 'عنوان', long, url)).toContain('1/');
+  });
+
+  it('يفضّل المقتطف على المتن', () => {
+    expect(socialText('linkedin', 'ع', long, url, 'مقتطف مخصّص')).toContain('مقتطف مخصّص');
+  });
+
+  it('المنصات الوسائطية خارج قائمة النشر النصّي', () => {
+    for (const p of ['instagram', 'tiktok', 'snapchat']) {
+      expect(socialTargets()).not.toContain(p);
+      expect(SOCIAL_MEDIA_FIRST.has(p)).toBe(true);
+    }
+  });
+
+  it('وتشمل القائمة ما وراء إكس ولينكدإن', () => {
+    for (const p of ['facebook', 'threads', 'youtube', 'google']) {
+      expect(socialTargets()).toContain(p);
+    }
   });
 });
