@@ -7,13 +7,35 @@ import { escapeHtml, renderInline, stripInline } from './inline';
 //   • بريد: أنماط مضمّنة سطرياً لأن عملاء البريد يتجاهلون <style> الخارجي.
 //   • ويب: HTML نظيف يعتمد ورقة أنماط الصفحة.
 
+export type CalloutTone = 'info' | 'warning' | 'primary';
+
 export type Block =
   | { type: 'heading'; text: string; level?: 2 | 3 }
   | { type: 'text'; text: string }
   | { type: 'image'; mediaId?: string; url?: string; alt?: string; caption?: string }
   | { type: 'button'; text: string; url: string }
   | { type: 'quote'; text: string; cite?: string }
-  | { type: 'divider' };
+  | { type: 'divider' }
+  | { type: 'callout'; text: string; tone?: CalloutTone; title?: string }
+  | { type: 'table'; rows: string[][]; header?: boolean }
+  | { type: 'code'; text: string }
+  | { type: 'footnote'; text: string }
+  | { type: 'toc' };
+
+/* نغمات البطاقة. «معلومة» و«تحذير» حالتان مسجّلتان في naf-terms.md
+   بلونيهما، فعنوانهما ظاهر دائماً — §6 يمنع نقل المعنى باللون وحده،
+   والبريد يشدّده: أيقونة SVG لا تصل عملاء سطح المكتب أصلاً.
+   و«تمييز» إبرازٌ بلا حكم، فلا عنوان افتراضي له. */
+const CALLOUT: Record<CalloutTone, { label: string; bg: string; fg: string }> = {
+  info: { label: 'معلومة', bg: EMAIL.infoSoft, fg: EMAIL.infoStrong },
+  warning: { label: 'تحذير', bg: EMAIL.warningSoft, fg: EMAIL.warningStrong },
+  primary: { label: '', bg: EMAIL.primarySoft, fg: EMAIL.primaryStrong },
+};
+
+/** معرّف عنوانٍ للربط من الفهرس. الترتيب يمنع تكرار المعرّف عند تشابه العناوين. */
+export function headingId(text: string, index: number): string {
+  return `h-${index + 1}-${slugify(text).slice(0, 40)}`;
+}
 
 // التهريب والتنسيق داخل الفقرة يعيشان في inline.ts. يُعاد تصديرها من
 // هنا لأن escapeHtml كان يُستورد من هذا الملف قبل الفصل.
@@ -49,14 +71,28 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
   const inline = mode === 'email';
   const mediaUrl = (b: any) => (b.url ? b.url : b.mediaId ? `${mediaBase}/api/media/${b.mediaId}` : '');
 
-  for (const b of blocks) {
+  /* مرورٌ أوّل قبل التصيير: الحواشي تُرقَّم بترتيب ورودها، والعناوين
+     تأخذ معرّفاتها. كلاهما يُقرأ من كتلٍ لاحقة أو سابقة — الفهرس قد
+     يسبق العناوين، والحاشية تُعرض في آخر المقال — فلا يكفي مرور واحد. */
+  const headings = blocks
+    .map((b, i) => ({ b, i }))
+    .filter((x) => x.b.type === 'heading') as { b: Extract<Block, { type: 'heading' }>; i: number }[];
+  const headingIds = new Map<number, string>();
+  headings.forEach((h, n) => headingIds.set(h.i, headingId(h.b.text, n)));
+  const notes = blocks.filter((b) => b.type === 'footnote') as Extract<Block, { type: 'footnote' }>[];
+  let noteNo = 0;
+
+  for (const [bi, b] of blocks.entries()) {
     switch (b.type) {
       case 'heading': {
         const lvl = b.level === 3 ? 3 : 2;
         const st = inline
           ? ` style="margin:26px 0 12px;font-size:${lvl === 2 ? 22 : 18}px;font-weight:700;color:${EMAIL.foreground}"`
           : '';
-        out.push(`<h${lvl}${st}>${escapeHtml(b.text)}</h${lvl}>`);
+        // المعرّف للويب وحده: Gmail يحذف id، ففهرسٌ برابط داخلي في
+        // البريد يعطي القارئ روابط لا تصل إلى شيء.
+        const idAttr = inline ? '' : ` id="${escapeHtml(headingIds.get(bi) || '')}"`;
+        out.push(`<h${lvl}${idAttr}${st}>${escapeHtml(b.text)}</h${lvl}>`);
         break;
       }
       case 'text':
@@ -95,8 +131,115 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       case 'divider':
         out.push(inline ? `<hr style="border:none;border-top:1px solid ${EMAIL.border};margin:26px 0">` : '<hr>');
         break;
+
+      case 'callout': {
+        const tone = CALLOUT[b.tone as CalloutTone] ? (b.tone as CalloutTone) : 'primary';
+        const c = CALLOUT[tone];
+        const title = (b.title || '').trim() || c.label;
+        // border-right لا border-inline-start — عملاء البريد المكتبية لا
+        // تدعم الخصائص المنطقية. جهة RTL مكتوبة مباشرةً، استثناء §1.
+        const st = inline
+          ? ` style="margin:18px 0;padding:14px 16px;background:${c.bg};border-right:3px solid ${c.fg};border-radius:${EMAIL.radius}"`
+          : ` class="callout callout-${tone}"`;
+        const head = title
+          ? (inline
+              ? `<strong style="display:block;margin-bottom:6px;color:${c.fg};font-size:15px">${escapeHtml(title)}</strong>`
+              : `<strong class="callout-title">${escapeHtml(title)}</strong>`)
+          : '';
+        const body = inline
+          ? `<span style="color:${EMAIL.foreground};line-height:1.9;font-size:16px">${renderInline(b.text, true)}</span>`
+          : renderInline(b.text, false);
+        out.push(`<div${st}>${head}${body}</div>`);
+        break;
+      }
+
+      case 'table': {
+        const rows = Array.isArray(b.rows) ? b.rows.filter((r) => Array.isArray(r)) : [];
+        if (!rows.length) break;
+        const tSt = inline
+          ? ' style="width:100%;border-collapse:collapse;margin:18px 0;font-size:15px"'
+          : ' class="article-table"';
+        // الخلايا محاذاة يمين صراحةً في البريد: text-start غير مدعوم،
+        // والجدول بلا محاذاة يعود يساراً في عملاء لا تقرأ dir.
+        const cell = (v: string, head: boolean) => {
+          const st = inline
+            ? ` style="border:1px solid ${EMAIL.border};padding:8px 10px;text-align:right;${head ? `background:${EMAIL.muted};font-weight:600;` : ''}color:${EMAIL.foreground}"`
+            : '';
+          const tag = head ? 'th' : 'td';
+          return `<${tag}${st}>${renderInline(v, inline)}</${tag}>`;
+        };
+        const body = rows
+          .map((r, ri) => `<tr>${r.map((v) => cell(v, !!b.header && ri === 0)).join('')}</tr>`)
+          .join('');
+        // الويب يلفّ الجدول بحاوية تمرّر أفقياً — جدولٌ عريض يجب أن
+        // يمرّر داخل نفسه لا أن يمدّ الصفحة. والبريد بلا حاوية: عملاء
+        // البريد لا يمرّرون، ولذلك عرض الجدول 100% ابتداءً.
+        out.push(inline ? `<table${tSt}>${body}</table>` : `<div class="table-scroll"><table${tSt}>${body}</table></div>`);
+        break;
+      }
+
+      case 'code': {
+        // white-space:pre-wrap لا overflow-x:auto — التمرير الأفقي لا
+        // يعمل في صندوق الوارد، فالسطر الطويل يُلَفّ ولا يكسر البطاقة.
+        const st = inline
+          ? ` style="margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border:1px solid ${EMAIL.border};border-radius:${EMAIL.radius};font-family:${EMAIL.monoStack};font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;color:${EMAIL.foreground}"`
+          : ' class="article-code"';
+        // الكود لا يمرّ على renderInline: نجمةٌ في الكود نجمة لا مائل.
+        out.push(`<pre${st}><code>${escapeHtml(b.text)}</code></pre>`);
+        break;
+      }
+
+      case 'footnote': {
+        noteNo += 1;
+        const st = inline
+          ? ` style="color:${EMAIL.primary};font-size:12px;vertical-align:super"`
+          : ' class="fn-ref"';
+        const href = inline ? '' : ` href="#fn-${noteNo}" id="fnref-${noteNo}"`;
+        out.push(`<sup><a${href}${st}>${noteNo}</a></sup>`);
+        break;
+      }
+
+      case 'toc': {
+        if (!headings.length) break; // فهرسٌ بلا عناوين لا يُعرض فارغاً
+        const st = inline
+          ? ` style="margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border-radius:${EMAIL.radius}"`
+          : ' class="article-toc"';
+        const items = headings.map((h, n) => {
+          const label = escapeHtml(h.b.text);
+          // البريد بلا روابط داخلية — Gmail يحذف id، فالبند نصّ لا رابط.
+          const inner = inline
+            ? `<span style="color:${EMAIL.foreground}">${label}</span>`
+            : `<a href="#${escapeHtml(headingIds.get(h.i) || '')}">${label}</a>`;
+          const liSt = inline ? ` style="margin:4px 0;line-height:1.9;font-size:15px"` : '';
+          return `<li${liSt}>${inner}</li>`;
+        }).join('');
+        const head = inline
+          ? `<strong style="display:block;margin-bottom:8px;color:${EMAIL.foreground};font-size:15px">المحتويات</strong>`
+          : '<strong class="toc-title">المحتويات</strong>';
+        const listSt = inline ? ' style="margin:0;padding-right:20px"' : '';
+        out.push(`<div${st}>${head}<ol${listSt}>${items}</ol></div>`);
+        break;
+      }
     }
   }
+
+  // الحواشي في آخر المقال بترتيب ورودها — بعد كل الكتل لا بينها.
+  if (notes.length) {
+    const secSt = inline ? ` style="margin:26px 0 0;padding-top:14px;border-top:1px solid ${EMAIL.border}"` : ' class="article-footnotes"';
+    const head = inline
+      ? `<strong style="display:block;margin-bottom:8px;color:${EMAIL.foreground};font-size:15px">الحواشي</strong>`
+      : '<strong class="fn-title">الحواشي</strong>';
+    const listSt = inline ? ' style="margin:0;padding-right:20px"' : '';
+    const items = notes.map((n, i) => {
+      const liSt = inline ? ` style="margin:6px 0;line-height:1.8;font-size:13px;color:${EMAIL.mutedForeground}"` : '';
+      // «رجوع» كلمةً لا سهماً: السهم المعقوف U+21A9 يُعرض إيموجي ملوّناً
+      // في أنظمة، و§3 يمنعه. والكلمة مسجّلة في naf-terms.md §١.
+      const back = inline ? '' : ` <a href="#fnref-${i + 1}" class="fn-back">رجوع</a>`;
+      return `<li${liSt}${inline ? '' : ` id="fn-${i + 1}"`}>${renderInline(n.text, inline)}${back}</li>`;
+    }).join('');
+    out.push(`<div${secSt}>${head}<ol${listSt}>${items}</ol></div>`);
+  }
+
   return out.join('\n');
 }
 
@@ -108,7 +251,12 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
 export function blocksToText(blocks: Block[]): string {
   const parts: string[] = [];
   for (const b of blocks) {
-    if (b.type === 'heading' || b.type === 'text' || b.type === 'quote') parts.push(stripInline((b as any).text || ''));
+    // البطاقة نصٌّ يقرؤه القارئ فتدخل، والحاشية تعليقٌ على النصّ فتخرج —
+    // مقتطفٌ يبدأ بحاشيةٍ يصف المرجع لا المقال. والكود والجدول والفهرس
+    // بنيةٌ لا تُقرأ منشوراً على إكس.
+    if (b.type === 'heading' || b.type === 'text' || b.type === 'quote' || b.type === 'callout') {
+      parts.push(stripInline((b as any).text || ''));
+    }
   }
   return parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }

@@ -56,6 +56,45 @@ ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
   blockquote { margin:20px 0; padding:12px 16px;
                border-inline-start:3px solid var(--primary); background: var(--primary-soft); }
   hr { border:none; border-top:1px solid var(--border); margin:28px 0; }
+
+  /* كتل المقال الجديدة. الصفحة العامة تقرأ الرموز — لا استثناء البريد
+     هنا — فكلّها من naf-theme.css وتتبع الوضعين. */
+  .callout { margin:20px 0; padding:14px 16px; border-radius: var(--radius);
+             border-inline-start:3px solid; }
+  .callout-title { display:block; margin-bottom:6px; font-size:var(--text-sm); }
+  .callout-info { background: var(--info-soft); border-color: var(--info-strong); }
+  .callout-info .callout-title { color: var(--info-strong); }
+  .callout-warning { background: var(--warning-soft); border-color: var(--warning-strong); }
+  .callout-warning .callout-title { color: var(--warning-strong); }
+  .callout-primary { background: var(--primary-soft); border-color: var(--primary); }
+  .callout-primary .callout-title { color: var(--primary-strong); }
+
+  .article-table { width:100%; border-collapse:collapse; margin:20px 0;
+                   font-size:var(--text-sm); font-variant-numeric: tabular-nums; }
+  .article-table th, .article-table td { border:1px solid var(--border);
+                                         padding:8px 10px; text-align:start; }
+  .article-table th { background: var(--muted); font-weight:600; }
+  /* الجدول العريض يمرّر داخل حاويته ولا يمدّ الصفحة أفقياً */
+  .table-scroll { overflow-x:auto; }
+
+  /* الكود اتجاهه LTR بطبيعته — لغةُ برمجةٍ لا نصٌّ عربي. */
+  .article-code { margin:20px 0; padding:14px 16px; background: var(--muted);
+                  border:1px solid var(--border); border-radius: var(--radius);
+                  font-family: var(--font-mono); font-size:var(--text-sm); line-height:1.7;
+                  direction:ltr; text-align:start; overflow-x:auto; }
+  .article-code code { font-family:inherit; }
+
+  .article-toc { margin:20px 0; padding:14px 16px; background: var(--muted);
+                 border-radius: var(--radius); }
+  .toc-title, .fn-title { display:block; margin-bottom:8px; font-size:var(--text-sm); }
+  .article-toc a { color: var(--foreground); }
+
+  .article-footnotes { margin-top:32px; padding-top:16px; border-top:1px solid var(--border);
+                       font-size:var(--text-sm); color: var(--muted-foreground); }
+  .fn-ref { color: var(--primary); text-decoration:none; }
+  .fn-back { font-size:var(--text-xs); margin-inline-start:6px; }
+  .fn-ref:focus-visible, .fn-back:focus-visible, .article-toc a:focus-visible {
+    outline:2px solid var(--ring); outline-offset:2px; }
   .btn { display:inline-block; background: var(--primary); color: var(--primary-foreground);
          text-decoration:none; padding:12px 24px; border-radius: var(--radius); font-weight:600; }
   .btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }

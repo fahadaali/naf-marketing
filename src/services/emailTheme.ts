@@ -35,6 +35,32 @@ export const EMAIL = {
   border: '#D9D9D9',
   /** --primary-soft — color-mix(primary 14%, card) */
   primarySoft: '#EFEAE2',
+
+  /* ألوان بطاقات المقال. الأزواج مأخوذة من naf-theme.css كما هي:
+     الخلفية من `--*-soft` والنصّ من `--*-strong`. والقاعدة في
+     CLAUDE.md §6 أن نصّ الحالة على خلفيتها الهادئة يأخذ `-strong`
+     لا اللون الأساسي — الأساسي يبلغ 3.7:1 فقط، دون AA. */
+  /** --info — oklch(0.5640 0.1200 240) */
+  info: '#1B7DB4',
+  /** --info-strong — oklch(0.5140 0.1200 240) */
+  infoStrong: '#006EA4',
+  /** --info-soft */
+  infoSoft: '#E1EDF5',
+  /** --warning — oklch(0.5720 0.1400 75) */
+  warning: '#A76900',
+  /** --warning-strong — oklch(0.5220 0.1400 75) */
+  warningStrong: '#975A00',
+  /** --warning-soft */
+  warningSoft: '#F3EADD',
+  /** --primary-strong يقابل primary هنا: النصّ على primarySoft */
+  primaryStrong: '#937133',
+
+  /** --muted — خلفية كتلة الكود وصفّ عناوين الجدول */
+  muted: '#F9FAFB',
+  /* مكدّس أحاديّ العرض. --font-mono في السجلّ يبدأ بـIBM Plex Mono،
+     وهو غير محمَّل في صندوق الوارد كما أن font-sans غير محمَّل — فيبقى
+     ذيل المكدّس وحده. والكود بلا عرض ثابت يفقد المحاذاة، وهي غرضه. */
+  monoStack: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
   /** --radius + 4px، بالبكسل لأن calc() غير مضمون في عملاء البريد */
   radius: '12px',
   /** مكدّس خطوط آمن: خط ناف غير محمَّل في صندوق الوارد */

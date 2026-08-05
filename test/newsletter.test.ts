@@ -31,7 +31,12 @@ describe('renderBlocks', () => {
   });
   it('الويب بلا أنماط مضمّنة على العناوين', () => {
     const html = renderBlocks(blocks, 'web');
-    expect(html).toContain('<h2>');
+    // كان الفحص `toContain('<h2>')`. صار العنوان في الويب يحمل معرّفاً
+    // يربط إليه فهرس المحتويات، فالوسم لم يعد مجرّداً. والمقصود من
+    // الاختبار أن الويب بلا style — وهو ما يفحصه الآن صراحةً.
+    const h2 = html.match(/<h2[^>]*>/)?.[0] || '';
+    expect(h2).toBeTruthy();
+    expect(h2).not.toContain('style=');
   });
   it('يبني رابط الوسيط من الأصل المطلق (البريد لا يقرأ النسبي)', () => {
     const html = renderBlocks([{ type: 'image', mediaId: 'med_1' }], 'email', 'https://naf.sa');
@@ -127,5 +132,131 @@ describe('retryWindowPassed', () => {
   it('موعد تالف يُعدّ منقضياً فلا يُعاد إلى الأبد', () => {
     expect(retryWindowPassed('ليس تاريخاً', Date.now())).toBe(true);
     expect(retryWindowPassed('', Date.now())).toBe(true);
+  });
+});
+
+// ===== الكتل الجديدة =====
+describe('كتلة البطاقة', () => {
+  it('نغمة الحالة تحمل عنوانها ظاهراً — §6 يمنع اللون وحده', () => {
+    const h = renderBlocks([{ type: 'callout', text: 'نصّ', tone: 'warning' }], 'email');
+    expect(h).toContain('تحذير');
+  });
+  it('عنوان الكاتب يسبق العنوان الافتراضي', () => {
+    const h = renderBlocks([{ type: 'callout', text: 'ن', tone: 'info', title: 'مهلة نظامية' }], 'email');
+    expect(h).toContain('مهلة نظامية');
+    expect(h).not.toContain('>معلومة<');
+  });
+  it('«تمييز» بلا عنوان افتراضي — إبرازٌ بلا حكم', () => {
+    const h = renderBlocks([{ type: 'callout', text: 'ن', tone: 'primary' }], 'web');
+    expect(h).not.toContain('callout-title');
+  });
+  it('نغمة مجهولة تسقط إلى «تمييز» ولا تنكسر', () => {
+    const h = renderBlocks([{ type: 'callout', text: 'ن', tone: 'خطأ' as any }], 'web');
+    expect(h).toContain('callout-primary');
+  });
+  it('تقبل التنسيق داخلها', () => {
+    expect(renderBlocks([{ type: 'callout', text: '**غامق**' }], 'web')).toContain('<strong>غامق</strong>');
+  });
+});
+
+describe('كتلة الجدول', () => {
+  const rows = [['المادة', 'المدة'], ['الأولى', '30 يوماً']];
+  it('صفّ العناوين th والباقي td', () => {
+    const h = renderBlocks([{ type: 'table', rows, header: true }], 'web');
+    expect(h).toContain('<th');
+    expect(h).toContain('<td');
+  });
+  it('بلا صفّ عناوين لا th', () => {
+    expect(renderBlocks([{ type: 'table', rows, header: false }], 'web')).not.toContain('<th');
+  });
+  it('الويب يلفّها بحاوية تمرير والبريد لا', () => {
+    expect(renderBlocks([{ type: 'table', rows }], 'web')).toContain('table-scroll');
+    expect(renderBlocks([{ type: 'table', rows }], 'email')).not.toContain('table-scroll');
+  });
+  it('تتخطّى الجدول الفارغ', () => {
+    expect(renderBlocks([{ type: 'table', rows: [] }], 'web')).toBe('');
+  });
+  it('تهرّب محتوى الخلايا', () => {
+    const h = renderBlocks([{ type: 'table', rows: [['<img onerror=x>']] }], 'web');
+    expect(h).not.toContain('<img onerror');
+  });
+});
+
+describe('كتلة الكود', () => {
+  it('لا تفسّر علامات التنسيق — نجمةٌ في الكود نجمة', () => {
+    const h = renderBlocks([{ type: 'code', text: 'a = **b**' }], 'web');
+    expect(h).toContain('a = **b**');
+    expect(h).not.toContain('<strong>');
+  });
+  it('تهرّب الكود', () => {
+    expect(renderBlocks([{ type: 'code', text: '<script>' }], 'web')).toContain('&lt;script&gt;');
+  });
+});
+
+describe('الحواشي', () => {
+  const withNotes: Block[] = [
+    { type: 'text', text: 'الأولى' },
+    { type: 'footnote', text: 'المادة الخامسة' },
+    { type: 'text', text: 'الثانية' },
+    { type: 'footnote', text: 'المادة السابعة' },
+  ];
+  it('تُرقَّم بترتيب ورودها', () => {
+    const h = renderBlocks(withNotes, 'web');
+    expect(h).toContain('>1</a>');
+    expect(h).toContain('>2</a>');
+  });
+  it('نصوصها في قسم واحد آخر المقال', () => {
+    const h = renderBlocks(withNotes, 'web');
+    expect(h).toContain('الحواشي');
+    expect(h.indexOf('المادة الخامسة')).toBeGreaterThan(h.indexOf('الثانية'));
+  });
+  it('بلا حواشٍ لا قسم', () => {
+    expect(renderBlocks([{ type: 'text', text: 'ن' }], 'web')).not.toContain('الحواشي');
+  });
+  it('«رجوع» كلمةً لا سهماً — §3 يمنع الإيموجي', () => {
+    const h = renderBlocks(withNotes, 'web');
+    expect(h).toContain('رجوع');
+    expect(h).not.toContain('\u21A9'); // بالمهرب لا بالحرف — الملف نفسه يخلو منه
+  });
+});
+
+describe('فهرس المحتويات', () => {
+  const withToc: Block[] = [
+    { type: 'toc' },
+    { type: 'heading', text: 'التمهيد', level: 2 },
+    { type: 'heading', text: 'الخاتمة', level: 2 },
+  ];
+  it('يُبنى من عناوين لاحقة له — مرورٌ أوّل لا واحد', () => {
+    const h = renderBlocks(withToc, 'web');
+    expect(h).toContain('التمهيد');
+    expect(h).toContain('الخاتمة');
+  });
+  it('الويب يربط والبريد لا — Gmail يحذف id', () => {
+    expect(renderBlocks(withToc, 'web')).toContain('href="#h-1-');
+    const mail = renderBlocks(withToc, 'email');
+    expect(mail).toContain('التمهيد');
+    expect(mail).not.toContain('href="#h-');
+  });
+  it('العناوين تحمل معرّفاتها في الويب وحده', () => {
+    expect(renderBlocks(withToc, 'web')).toContain('<h2 id="h-1-');
+    expect(renderBlocks(withToc, 'email')).not.toContain('id="h-');
+  });
+  it('فهرسٌ بلا عناوين لا يُعرض فارغاً', () => {
+    expect(renderBlocks([{ type: 'toc' }], 'web')).toBe('');
+  });
+});
+
+describe('blocksToText مع الكتل الجديدة', () => {
+  it('تدخل البطاقة ويخرج الكود والجدول والحاشية', () => {
+    const t = blocksToText([
+      { type: 'callout', text: 'نصّ البطاقة' },
+      { type: 'code', text: 'const x = 1' },
+      { type: 'table', rows: [['خلية']] },
+      { type: 'footnote', text: 'مرجع' },
+    ]);
+    expect(t).toContain('نصّ البطاقة');
+    expect(t).not.toContain('const x');
+    expect(t).not.toContain('خلية');
+    expect(t).not.toContain('مرجع');
   });
 });

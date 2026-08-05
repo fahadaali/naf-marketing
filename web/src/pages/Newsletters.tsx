@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
-  Images, CalendarClock,
+  Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
@@ -32,13 +32,28 @@ const AUTOSAVE_MS = 2000;
 
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
 
+type CalloutTone = 'info' | 'warning' | 'primary';
+
 type Block =
   | { type: 'heading'; text: string; level?: 2 | 3 }
   | { type: 'text'; text: string }
   | { type: 'image'; mediaId?: string; url?: string; alt?: string; caption?: string }
   | { type: 'button'; text: string; url: string }
   | { type: 'quote'; text: string; cite?: string }
-  | { type: 'divider' };
+  | { type: 'divider' }
+  | { type: 'callout'; text: string; tone?: CalloutTone; title?: string }
+  | { type: 'table'; rows: string[][]; header?: boolean }
+  | { type: 'code'; text: string }
+  | { type: 'footnote'; text: string }
+  | { type: 'toc' };
+
+/* عناوين النغمات الافتراضية — من naf-terms.md §١٤. «تمييز» بلا عنوان
+   افتراضي لأنها إبرازٌ بلا حكم، فلا شيء تقوله عن صحّة المحتوى. */
+const TONE_LABEL: Record<CalloutTone, string> = {
+  info: 'معلومة',
+  warning: 'تحذير',
+  primary: 'تمييز',
+};
 
 
 export default function Newsletters() {
@@ -513,6 +528,11 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><SquareMousePointer size={20} /> زر</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={20} /> اقتباس</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={20} /> فاصل</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'callout', text: '', tone: 'info' })}><StickyNote size={20} /> بطاقة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'table', rows: [['', ''], ['', '']], header: true })}><Table2 size={20} /> جدول</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'footnote', text: '' })}><Superscript size={20} /> حاشية</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'toc' })}><TableOfContents size={20} /> فهرس المحتويات</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'code', text: '' })}><Code size={20} /> كود</button>
           </div>
 
           {blocks.map((b, i) => (
@@ -570,7 +590,11 @@ function pct(n: number, d: number): number {
 }
 
 function blockLabel(t: string): string {
-  return { heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل' }[t] || t;
+  // كلّها من naf-terms.md §١٤ — كتل المحتوى.
+  return {
+    heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل',
+    callout: 'بطاقة', table: 'جدول', code: 'كود', footnote: 'حاشية', toc: 'فهرس المحتويات',
+  }[t] || t;
 }
 
 /* حقل فقرة بشريط تنسيق. مفصول في مكوّن لأن الاقتباس يستعمله أيضاً —
@@ -720,7 +744,134 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
                  onChange={(e) => onChange({ cite: e.target.value })} />
         </div>
       );
+    case 'callout':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <select
+              className="select"
+              style={{ maxWidth: 140 }}
+              value={block.tone || 'primary'}
+              onChange={(e) => onChange({ tone: e.target.value as CalloutTone })}
+            >
+              {(['info', 'warning', 'primary'] as CalloutTone[]).map((t) => (
+                <option key={t} value={t}>{TONE_LABEL[t]}</option>
+              ))}
+            </select>
+            <input
+              className="input"
+              style={{ flex: 1 }}
+              placeholder={block.tone && block.tone !== 'primary' ? TONE_LABEL[block.tone] : 'عنوان البطاقة'}
+              value={block.title || ''}
+              onChange={(e) => onChange({ title: e.target.value })}
+            />
+          </div>
+          <InlineField value={block.text} rows={2} placeholder="نص البطاقة"
+                       onChange={(text) => onChange({ text })} />
+        </div>
+      );
+
+    case 'table':
+      return <TableFields block={block} onChange={onChange} />;
+
+    case 'code':
+      return (
+        <textarea
+          className="input"
+          rows={5}
+          dir="ltr"
+          spellCheck={false}
+          style={{ fontFamily: 'var(--font-mono)', textAlign: 'start' }}
+          placeholder="الكود"
+          value={block.text}
+          onChange={(e) => onChange({ text: e.target.value })}
+        />
+      );
+
+    case 'footnote':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <InlineField value={block.text} rows={2} placeholder="نص الحاشية"
+                       onChange={(text) => onChange({ text })} />
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+            يظهر رقمها في موضعها من المقال، ونصّها في «الحواشي» آخره.
+          </p>
+        </div>
+      );
+
+    case 'toc':
+      return (
+        <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+          فهرس يُبنى من عناوين المقال تلقائياً. رسالة البريد تعرضه قائمةً بلا روابط — صناديق الوارد لا تنتقل داخل الرسالة.
+        </p>
+      );
+
     default:
       return <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>خط فاصل بين الأقسام.</p>;
   }
+}
+
+/* محرّر الجدول. شبكة حقول لا محرّر جداول كامل: النشرة القانونية تحمل
+   جدول مقارنةٍ صغيراً، ومحرّرٌ بدمج خلايا وتنسيقها بابٌ لا يُغلق. */
+function TableFields({ block, onChange }: { block: Extract<Block, { type: 'table' }>; onChange: (p: any) => void }) {
+  const rows: string[][] = Array.isArray(block.rows) && block.rows.length ? block.rows : [['', '']];
+  const cols = Math.max(...rows.map((r) => r.length), 1);
+
+  const setCell = (ri: number, ci: number, v: string) =>
+    onChange({ rows: rows.map((r, i) => (i === ri ? r.map((c, j) => (j === ci ? v : c)) : r)) });
+  const addRow = () => onChange({ rows: [...rows, Array(cols).fill('')] });
+  const addCol = () => onChange({ rows: rows.map((r) => [...r, '']) });
+  const delRow = (ri: number) => onChange({ rows: rows.length > 1 ? rows.filter((_, i) => i !== ri) : rows });
+  const delCol = (ci: number) => onChange({ rows: cols > 1 ? rows.map((r) => r.filter((_, j) => j !== ci)) : rows });
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <label className="row" style={{ gap: 6, fontSize: 'var(--text-xs)' }}>
+        <input type="checkbox" checked={!!block.header} onChange={(e) => onChange({ header: e.target.checked })} />
+        صفّ العناوين
+      </label>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>
+                {Array.from({ length: cols }).map((_, ci) => (
+                  <td key={ci} style={{ padding: 2 }}>
+                    <input
+                      className="input"
+                      style={{ minWidth: 90, fontWeight: block.header && ri === 0 ? 600 : 400 }}
+                      value={r[ci] ?? ''}
+                      onChange={(e) => setCell(ri, ci, e.target.value)}
+                      aria-label={`صف ${ri + 1} عمود ${ci + 1}`}
+                    />
+                  </td>
+                ))}
+                <td style={{ padding: 2 }}>
+                  <button className="btn sm ghost" type="button" title="حذف الصف" onClick={() => delRow(ri)}>
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              {Array.from({ length: cols }).map((_, ci) => (
+                <td key={ci} style={{ padding: 2 }}>
+                  <button className="btn sm ghost" type="button" title="حذف العمود" onClick={() => delCol(ci)}>
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              ))}
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn sm ghost" type="button" onClick={addRow}><Plus size={20} /> صف</button>
+        <button className="btn sm ghost" type="button" onClick={addCol}><Plus size={20} /> عمود</button>
+      </div>
+    </div>
+  );
 }
