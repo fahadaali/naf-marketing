@@ -54,7 +54,13 @@ export function FieldModal({
 }) {
   return (
     <Modal title={title} onClose={onClose}>
+      {/* `noValidate` مقصودة: تحقّق المتصفح المدمج يفتح فقاعةً بلغة
+          المتصفح لا بلغة المستخدم — «Please enter a URL» — ويمنع
+          الإرسال فلا تصل رسالتنا المسجّلة أصلاً. وهي العلّة نفسها التي
+          أخرجت `prompt` من الشاشة. ويبقى `type` لأنه يختار لوحة
+          مفاتيح الجوّال، والتحقّق لنا. */}
       <form
+        noValidate
         onSubmit={(e) => {
           e.preventDefault();
           const el = (e.currentTarget.elements.namedItem('value') as HTMLInputElement);

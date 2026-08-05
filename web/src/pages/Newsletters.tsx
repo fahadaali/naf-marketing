@@ -142,6 +142,23 @@ export default function Newsletters() {
   );
 }
 
+/* حقول الإعدادات التي تُحفظ. مصدرٌ واحد يقرؤه الحفظ اليدوي والتلقائي
+   ونسخة المتصفح معاً.
+
+   و«الشريحة المستهدفة» و«العنوان البديل» كانا يُحرَّران ولا يُرسلان:
+   الحمولة كانت أربعة حقول مكتوبة بأيديها في موضعين. فيختار الكاتب
+   شريحةً ويقرأ «تم الحفظ» ثم تُرسل النشرة إلى الجميع. */
+function settingsPayload(nl: any) {
+  return {
+    title: nl.title,
+    subject: nl.subject,
+    subject_b: nl.subject_b ?? null,
+    segment_tag: nl.segment_tag ?? null,
+    preheader: nl.preheader,
+    excerpt: nl.excerpt,
+  };
+}
+
 /* ===== محرّر النشرة بالكتل ===== */
 function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [nl, setNl] = useState<any>(null);
@@ -164,9 +181,11 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [proofing, setProofing] = useState(false);
   const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
   const [theme, setTheme] = useState<NewsletterTheme>(DEFAULT_THEME);
+  const [previewTheme, setPreviewTheme] = useState<NewsletterTheme>(DEFAULT_THEME);
   const [showTheme, setShowTheme] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testErr, setTestErr] = useState('');
   // الكتلة التي فُتح شريط تخصيصها. واحدةٌ في كل مرة: سبعة عشر شريطاً
   // مفتوحاً يجعلان المحرر جدارَ أزرار.
   const [styling, setStyling] = useState<number | null>(null);
@@ -210,7 +229,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     setMsg('');
     try {
       await api.patch(`/newsletters/${id}`, {
-        title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
+        ...settingsPayload(nl),
         blocks_json: JSON.stringify(blocks), theme_json: JSON.stringify(theme), ...extra,
       });
       // «تم الحفظ» من naf-terms.md §٤ — كانت «حُفظت»، وهي خارج القاموس.
@@ -236,16 +255,14 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
      تُحفظ النشرة فور فتحها وتُكتب «تم الحفظ تلقائياً» بلا أن يلمسها أحد. */
   useEffect(() => {
     if (!nl || !dirty) return;
-    const snapshot = JSON.stringify({
-      title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt, blocks, theme,
-    });
+    const snapshot = JSON.stringify({ ...settingsPayload(nl), blocks, theme });
     try { localStorage.setItem(draftKey, snapshot); } catch { /* مساحة ممتلئة — النداء يبقى */ }
 
     const t = setTimeout(async () => {
       setAuto('saving');
       try {
         await api.patch(`/newsletters/${id}`, {
-          title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
+          ...settingsPayload(nl),
           blocks_json: JSON.stringify(blocks), theme_json: JSON.stringify(theme),
         });
         setAuto('saved');
@@ -264,11 +281,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       await save();
       const d = await api.get(`/newsletters/${id}/preview`);
       setPreview(d.html);
+      /* السمة من ردّ الخادم لا من حالة الواجهة: هي التي مرّت على
+         `parseTheme` هناك، فما يُعرض هو ما سيُرسل فعلاً. */
+      if (d.theme) setPreviewTheme(d.theme);
     } catch (e: any) { setMsg(e.message); }
   }
 
   async function sendTest(email: string) {
-    if (!email.trim()) return;
+    // الرسالة من naf-terms.md — حقلٌ فارغ يُقال له لماذا، لا يُتجاهل صامتاً
+    if (!email.trim()) return setTestErr('أدخل بريداً للاختبار');
+    setTestErr('');
     setTesting(false);
     try { await save(); await api.post(`/newsletters/${id}/test`, { email: email.trim() }); setMsg('أُرسلت رسالة الاختبار'); }
     catch (e: any) { setMsg(e.message); }
@@ -326,10 +348,18 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const touch = () => setDirty(true);
   const add = (b: Block) => { touch(); setBlocks((x) => [...x, b]); };
   const upd = (i: number, patch: any) => { touch(); setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b))); };
-  const del = (i: number) => { touch(); setBlocks((x) => x.filter((_, j) => j !== i)); };
+  /* الحذف والنقل يحرّكان الفهارس، وشريط التخصيص مفتوحٌ على فهرس لا على
+     كتلة. فبلا هذين السطرين يبقى الشريط مفتوحاً على موضعٍ صار لكتلةٍ
+     أخرى، فيُخصَّص غيرُ المقصود. */
+  const del = (i: number) => {
+    touch();
+    setStyling((s) => (s === null ? s : s === i ? null : s > i ? s - 1 : s));
+    setBlocks((x) => x.filter((_, j) => j !== i));
+  };
   const move = (i: number, d: number) => { touch(); return setBlocks((x) => {
     const j = i + d;
     if (j < 0 || j >= x.length) return x;
+    setStyling((s) => (s === i ? j : s === j ? i : s));
     const c = [...x];
     [c[i], c[j]] = [c[j], c[i]];
     return c;
@@ -450,8 +480,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
           placeholder="name@example.com"
           actionLabel="إرسال"
           hint="تصل نسخةٌ واحدة بهذا العنوان قبل الإرسال للمشتركين."
+          error={testErr}
           onSubmit={sendTest}
-          onClose={() => setTesting(false)}
+          onClose={() => { setTesting(false); setTestErr(''); }}
         />
       )}
 
@@ -540,13 +571,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button
               className="btn sm"
               onClick={() => {
-                setNl((n: any) => ({
-                  ...n,
-                  title: recovered.title ?? n.title,
-                  subject: recovered.subject ?? n.subject,
-                  preheader: recovered.preheader ?? n.preheader,
-                  excerpt: recovered.excerpt ?? n.excerpt,
-                }));
+                // كل ما تحفظه `settingsPayload` يُستعاد — وإلا استُعيد
+                // بعضُ المسودة وضاع بعضها بلا أن يُقال.
+                setNl((n: any) => ({ ...n, ...settingsPayload(recovered) }));
                 setBlocks(recovered.blocks || []);
                 if (recovered.theme) setTheme(recovered.theme);
                 setRecovered(null);
@@ -791,17 +818,17 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
               يبنيان الرسالة فعلاً. وتتبع سمة النشرة: الغلاف يُصبغ في
               الخادم أيضاً، ومعاينةٌ ببطاقةٍ بيضاء حول متنٍ فاتح تُخفي
               عن الكاتب أن رسالته لا تُقرأ. */}
-          <div style={{ background: theme.pageBackground, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
+          <div style={{ background: previewTheme.pageBackground, padding: 20, marginTop: 10, borderRadius: 'var(--radius)' }}>
             <div
               style={{
-                background: theme.cardBackground,
-                color: theme.text,
+                background: previewTheme.cardBackground,
+                color: previewTheme.text,
                 fontFamily: EMAIL.fontStack,
-                fontSize: BODY_PX[theme.size],
+                fontSize: BODY_PX[previewTheme.size],
                 padding: 28,
-                borderRadius: RADIUS_PX[theme.radius],
-                border: `1px solid ${theme.border}`,
-                maxWidth: WIDTH_PX[theme.width],
+                borderRadius: RADIUS_PX[previewTheme.radius],
+                border: `1px solid ${previewTheme.border}`,
+                maxWidth: WIDTH_PX[previewTheme.width],
                 margin: '0 auto',
               }}
               dangerouslySetInnerHTML={{ __html: preview }}

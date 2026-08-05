@@ -70,25 +70,6 @@ export function hexColor(v: unknown): string {
   return s.toUpperCase();
 }
 
-/** لوحة الألوان المعروضة للكاتب — مرايا رموز naf-theme الحرفية وحدها.
-    قيمةٌ خارجها يكتبها الكاتب بنفسه من منتقي اللون، ولا تُخترع هنا. */
-export const SWATCHES: { value: string; label: string }[] = [
-  { value: EMAIL.primary, label: 'الأساسي' },
-  { value: EMAIL.primarySoft, label: 'الأساسي الهادئ' },
-  { value: EMAIL.info, label: 'معلومة' },
-  { value: EMAIL.infoStrong, label: 'معلومة داكن' },
-  { value: EMAIL.infoSoft, label: 'معلومة هادئ' },
-  { value: EMAIL.warning, label: 'تحذير' },
-  { value: EMAIL.warningStrong, label: 'تحذير داكن' },
-  { value: EMAIL.warningSoft, label: 'تحذير هادئ' },
-  { value: EMAIL.foreground, label: 'المتن' },
-  { value: EMAIL.mutedForeground, label: 'ثانوي' },
-  { value: EMAIL.border, label: 'الحدّ' },
-  { value: EMAIL.muted, label: 'سطح هادئ' },
-  { value: EMAIL.card, label: 'أبيض' },
-  { value: EMAIL.background, label: 'رمادي فاتح' },
-];
-
 /** ينظّف تخصيصاً وارداً من الواجهة أو من ملف قالب مستورد. */
 export function parseStyle(v: unknown): BlockStyle | undefined {
   if (!v || typeof v !== 'object') return undefined;

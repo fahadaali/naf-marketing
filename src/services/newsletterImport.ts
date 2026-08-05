@@ -221,9 +221,33 @@ export function htmlToBlocks(html: string): Block[] {
     blocks.push(style ? { type: 'text', text: t, style } : { type: 'text', text: t });
   };
 
-  /** هل كلّ أبناء العنصر نصٌّ داخل الفقرة؟ عندها يصير فقرةً واحدة. */
-  const isLeafText = (el: El): boolean =>
-    el.children.length > 0 && el.children.every((c) => !isEl(c) || INLINE_TAGS.has(c.tag));
+  /* حاويةٌ تُقرأ بالتجميع لا بالكلّ أو لا شيء.
+
+     كانت الفقرة تصير فقرةً واحدة إن كان **كلّ** أبنائها نصّاً داخلياً،
+     وإلا فُتحت ومُشي على أبنائها واحداً واحداً. و`<p>نصّ <img> وبقيّة
+     الجملة</p>` — وهي شائعة في قوالب البريد — كانت تسقط في الفرع
+     الثاني: ثلاث فقرات مبتورة، ولونُ ما بداخل `<span>` ضائع لأنه
+     يُقرأ في `inlineText` وحدها.
+
+     فالآن يُجمع كلّ ما تتابع من نصٍّ داخليّ في فقرة، ويُقطع الجمع عند
+     أوّل ابنٍ كتليّ فيُصيَّر كتلةً في موضعه، ثم يُستأنف. */
+  const walkContainer = (el: El, style?: BlockStyle) => {
+    let run: Node[] = [];
+    const flush = () => {
+      if (!run.length) return;
+      const text = inlineText(run).trim();
+      run = [];
+      if (text) pushText(text, style);
+    };
+    for (const c of el.children) {
+      // رابطٌ يبدو زرّاً كتلةٌ ولو كان وسمه داخلياً
+      const isInline = !isEl(c) || (INLINE_TAGS.has(c.tag) && !(c.tag === 'a' && looksLikeButton(c)));
+      if (isInline) { run.push(c); continue; }
+      flush();
+      walk([c]);
+    }
+    flush();
+  };
 
   const walk = (nodes: Node[]) => {
     for (const n of nodes) {
@@ -315,18 +339,7 @@ export function htmlToBlocks(html: string): Block[] {
 
         case 'p': case 'div': case 'td': case 'th': case 'li': case 'section':
         case 'article': case 'header': case 'footer': case 'center': {
-          if (isLeafText(n)) {
-            const text = inlineText(n.children).trim();
-            // فقرةٌ كلُّها رابطٌ يبدو زرّاً تصير زرّاً لا نصّاً
-            const only = n.children.filter((c) => isEl(c) || c.text.trim());
-            if (only.length === 1 && isEl(only[0]) && only[0].tag === 'a' && looksLikeButton(only[0])) {
-              walk(only);
-              continue;
-            }
-            if (text) pushText(text, style);
-            continue;
-          }
-          walk(n.children);
+          walkContainer(n, style);
           continue;
         }
 

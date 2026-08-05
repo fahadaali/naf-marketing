@@ -79,7 +79,9 @@ export const WIDTH_PX: Record<NewsletterTheme['width'], number> = { narrow: 520,
 export const RADIUS_PX: Record<RadiusStep, string> = { none: '0', sm: '6px', md: EMAIL.radius, full: '999px' };
 export const BODY_PX: Record<NewsletterTheme['size'], number> = { sm: 15, md: 16, lg: 18 };
 
-/** لوحة الألوان المعروضة للكاتب — مرايا الرموز وحدها، ولا لون يُخترع هنا. */
+/* لوحة الألوان المعروضة للكاتب — مرايا الرموز وحدها، ولا لون يُخترع
+   هنا. وموضعها الواجهة وحدها: الخادم لا يعرض مربّعات، وإنما يتحقّق من
+   اللون أياً كان مصدره. فنسخةٌ ثانية هناك بلا مستهلك انحرافٌ ينتظر. */
 export const SWATCHES: { value: string; label: string }[] = [
   { value: EMAIL.primary, label: 'الأساسي' },
   { value: EMAIL.primarySoft, label: 'الأساسي الهادئ' },
