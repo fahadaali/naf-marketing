@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks } from '../src/services/newsletter';
+import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks, embedSrc } from '../src/services/newsletter';
 import type { Block } from '../src/services/newsletter';
 import { retryWindowPassed } from '../src/services/newsletterSend';
 
@@ -258,5 +258,80 @@ describe('blocksToText مع الكتل الجديدة', () => {
     expect(t).not.toContain('const x');
     expect(t).not.toContain('خلية');
     expect(t).not.toContain('مرجع');
+  });
+});
+
+// ===== التضمين: القائمة البيضاء هي الحدّ الأمني =====
+describe('embedSrc', () => {
+  it('يوتيوب بصيغتيه إلى nocookie', () => {
+    expect(embedSrc('https://www.youtube.com/watch?v=abc123XY')).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
+    expect(embedSrc('https://youtu.be/abc123XY')).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
+  });
+  it('ڤيميو', () => {
+    expect(embedSrc('https://vimeo.com/123456789')).toBe('https://player.vimeo.com/video/123456789');
+  });
+  it('يرفض ما ليس في القائمة', () => {
+    expect(embedSrc('https://example.com/x')).toBeNull();
+    expect(embedSrc('https://x.com/naf/status/1')).toBeNull();
+    expect(embedSrc('https://www.linkedin.com/posts/1')).toBeNull();
+  });
+  it('يرفض http وjavascript — https وحدها', () => {
+    expect(embedSrc('http://www.youtube.com/watch?v=abc123XY')).toBeNull();
+    expect(embedSrc('javascript:alert(1)')).toBeNull();
+  });
+  it('يرفض نطاقاً يتشبّه بيوتيوب', () => {
+    expect(embedSrc('https://youtube.com.evil.test/watch?v=abc123XY')).toBeNull();
+    expect(embedSrc('https://notyoutube.com/watch?v=abc123XY')).toBeNull();
+  });
+});
+
+describe('كتل الوسائط — البريد يسقط إلى بطاقة رابط', () => {
+  it('الصوت بطاقة في البريد ومشغّل في الويب', () => {
+    const b: Block[] = [{ type: 'audio', mediaId: 'm1', title: 'المرافعة' }];
+    expect(renderBlocks(b, 'email', 'https://naf.sa')).toContain('المرافعة');
+    expect(renderBlocks(b, 'email', 'https://naf.sa')).not.toContain('<audio');
+    expect(renderBlocks(b, 'web')).toContain('<audio');
+  });
+  it('الفيديو لا يُضمَّن في البريد', () => {
+    const b: Block[] = [{ type: 'video', url: 'https://youtu.be/abc123XY' }];
+    expect(renderBlocks(b, 'email')).not.toContain('<iframe');
+    expect(renderBlocks(b, 'web')).toContain('<iframe');
+  });
+  it('التضمين غير المسجّل بطاقة في الوجهتين', () => {
+    const b: Block[] = [{ type: 'embed', url: 'https://example.com/a', title: 'مصدر' }];
+    expect(renderBlocks(b, 'web')).not.toContain('<iframe');
+    expect(renderBlocks(b, 'web')).toContain('مصدر');
+    expect(renderBlocks(b, 'email')).not.toContain('<iframe');
+  });
+  it('الإطار المسموح يحمل ضوابطه', () => {
+    const h = renderBlocks([{ type: 'embed', url: 'https://vimeo.com/123456789' }], 'web');
+    expect(h).toContain('referrerpolicy="strict-origin-when-cross-origin"');
+    expect(h).toContain('loading="lazy"');
+  });
+  it('بطاقة الرابط ترفض ما ليس http(s)', () => {
+    expect(renderBlocks([{ type: 'embed', url: 'javascript:alert(1)' }], 'web')).toBe('');
+  });
+  it('الملف بلا مصدر يُتخطّى', () => {
+    expect(renderBlocks([{ type: 'file' }], 'web')).toBe('');
+  });
+});
+
+describe('الأعمدة وقائمة المهام', () => {
+  it('الأعمدة جدولٌ في البريد وgrid في الويب', () => {
+    const b: Block[] = [{ type: 'columns', start: 'أ', end: 'ب' }];
+    expect(renderBlocks(b, 'email')).toContain('<table');
+    expect(renderBlocks(b, 'web')).toContain('class="columns"');
+  });
+  it('قائمة المهام input معطَّل في الويب ومؤشّر نصّي في البريد', () => {
+    const b: Block[] = [{ type: 'checklist', items: [{ text: 'أنجز', done: true }, { text: 'لم يُنجز' }] }];
+    const web = renderBlocks(b, 'web');
+    expect(web).toContain('type="checkbox" disabled checked');
+    expect(web).toContain('type="checkbox" disabled>');
+    const mail = renderBlocks(b, 'email');
+    expect(mail).not.toContain('<input');
+    expect(mail).toContain('[x]');
+  });
+  it('قائمة فارغة لا تُعرض', () => {
+    expect(renderBlocks([{ type: 'checklist', items: [] }], 'web')).toBe('');
   });
 });

@@ -20,7 +20,41 @@ export type Block =
   | { type: 'table'; rows: string[][]; header?: boolean }
   | { type: 'code'; text: string }
   | { type: 'footnote'; text: string }
-  | { type: 'toc' };
+  | { type: 'toc' }
+  | { type: 'audio'; mediaId?: string; url?: string; title?: string }
+  | { type: 'file'; mediaId?: string; url?: string; title?: string; note?: string }
+  | { type: 'video'; mediaId?: string; url?: string }
+  | { type: 'embed'; url: string; title?: string }
+  | { type: 'columns'; start: string; end: string }
+  | { type: 'checklist'; items: { text: string; done?: boolean }[] };
+
+/* ===== التضمين الخارجي =====
+
+   الصفحة العامة لا تضمّن أي عنوان يكتبه الكاتب داخل iframe. القائمة
+   بيضاء لا سوداء: مزوّدٌ مسجَّل هنا يُضمَّن، وما عداه يُعرض بطاقة رابط.
+
+   السبب أمنيّ لا ذوقيّ — iframe لموقع عشوائي يشغّل شيفرة طرفٍ ثالث في
+   سياق صفحتنا، ويكسر سياسة المحتوى، وقد يُستعمل في التصيّد. وبطاقة
+   الرابط ليست تنازلاً: القارئ يرى الوجهة ويقرّر.
+
+   ومنصات التواصل ليست في القائمة عمداً: تضمين منشور إكس أو لينكدإن
+   يحتاج تحميل شيفرة المنصة نفسها في صفحتنا — تتبّعٌ للقارئ لم يطلبه —
+   فتُعرض بطاقة رابط. */
+const EMBED_PROVIDERS: { test: RegExp; src: (m: RegExpMatchArray) => string }[] = [
+  { test: /^https:\/\/(?:www\.)?youtube\.com\/watch\?v=([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
+  { test: /^https:\/\/youtu\.be\/([\w-]{6,})/i, src: (m) => `https://www.youtube-nocookie.com/embed/${m[1]}` },
+  { test: /^https:\/\/(?:www\.)?vimeo\.com\/(\d{6,})/i, src: (m) => `https://player.vimeo.com/video/${m[1]}` },
+];
+
+/** عنوان الإطار لمزوّد مسجَّل، أو null فتُعرض بطاقة رابط. */
+export function embedSrc(url: string): string | null {
+  const u = String(url || '').trim();
+  for (const p of EMBED_PROVIDERS) {
+    const m = u.match(p.test);
+    if (m) return p.src(m);
+  }
+  return null;
+}
 
 /* نغمات البطاقة. «معلومة» و«تحذير» حالتان مسجّلتان في naf-terms.md
    بلونيهما، فعنوانهما ظاهر دائماً — §6 يمنع نقل المعنى باللون وحده،
@@ -63,6 +97,25 @@ export function parseBlocks(json: string | null): Block[] {
   } catch {
     return [];
   }
+}
+
+/* بطاقة رابط — البديل الموحّد لكل ما لا يُشغَّل في موضعه.
+
+   رسالة البريد لا تشغّل صوتاً ولا فيديو ولا تقبل iframe، والصفحة
+   العامة لا تضمّن مزوّداً غير مسجَّل. الحالتان تنتهيان هنا: عنوانٌ
+   ووصفٌ ورابطٌ ظاهر. القارئ يرى الوجهة قبل أن يضغط. */
+function linkCard(url: string, title: string, note: string, inline: boolean): string {
+  const safe = /^https?:\/\//i.test(url) ? url : '';
+  if (!safe) return '';
+  const st = inline
+    ? ` style="display:block;margin:18px 0;padding:14px 16px;background:${EMAIL.muted};border:1px solid ${EMAIL.border};border-radius:${EMAIL.radius};text-decoration:none"`
+    : ' class="link-card"';
+  const tSt = inline ? ` style="display:block;font-weight:600;color:${EMAIL.primary};margin-bottom:4px"` : '';
+  const nSt = inline ? ` style="display:block;font-size:13px;color:${EMAIL.mutedForeground}"` : ' class="link-card-note"';
+  return `<a href="${escapeHtml(safe)}"${st}>` +
+    `<span${tSt}>${escapeHtml(title || safe)}</span>` +
+    (note ? `<span${nSt}>${escapeHtml(note)}</span>` : '') +
+    `</a>`;
 }
 
 // mediaBase: أصل مطلق لروابط الوسائط (البريد لا يعرض الروابط النسبية)
@@ -196,6 +249,104 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
           : ' class="fn-ref"';
         const href = inline ? '' : ` href="#fn-${noteNo}" id="fnref-${noteNo}"`;
         out.push(`<sup><a${href}${st}>${noteNo}</a></sup>`);
+        break;
+      }
+
+      case 'audio': {
+        const src = mediaUrl(b);
+        if (!src) break;
+        const title = b.title || 'صوت';
+        // البريد لا يشغّل صوتاً — ولا عميلَ واحداً يُعوَّل عليه — فبطاقة رابط.
+        out.push(inline
+          ? linkCard(src, title, 'استماع', true)
+          : `<figure class="media-block"><figcaption>${escapeHtml(title)}</figcaption>` +
+            `<audio controls preload="none" src="${escapeHtml(src)}"></audio></figure>`);
+        break;
+      }
+
+      case 'file': {
+        const src = mediaUrl(b);
+        if (!src) break;
+        // «تنزيل» وصفُ الفعل في البطاقة، من naf-terms.md §١.
+        out.push(inline
+          ? linkCard(src, b.title || 'ملف', b.note || 'تنزيل', true)
+          : `<a class="link-card" href="${escapeHtml(src)}" download>` +
+            `<span class="link-card-title">${escapeHtml(b.title || 'ملف')}</span>` +
+            `<span class="link-card-note">${escapeHtml(b.note || 'تنزيل')}</span></a>`);
+        break;
+      }
+
+      case 'video': {
+        const src = mediaUrl(b);
+        const provider = b.url ? embedSrc(b.url) : null;
+        if (inline) {
+          // لا فيديو في صندوق الوارد: بطاقة رابط في الحالتين.
+          const target = provider ? (b.url as string) : src;
+          if (target) out.push(linkCard(target, 'فيديو', 'مشاهدة', true));
+          break;
+        }
+        if (provider) {
+          out.push(`<div class="embed-frame"><iframe src="${escapeHtml(provider)}" title="فيديو" ` +
+            `loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`);
+        } else if (src) {
+          out.push(`<figure class="media-block"><video controls preload="none" src="${escapeHtml(src)}"></video></figure>`);
+        } else if (b.url) {
+          out.push(linkCard(b.url, 'فيديو', 'مشاهدة', false));
+        }
+        break;
+      }
+
+      case 'embed': {
+        const provider = embedSrc(b.url);
+        // البريد يحذف iframe دائماً، والويب لا يضمّن إلا مزوّداً مسجّلاً.
+        if (inline || !provider) {
+          out.push(linkCard(b.url, b.title || '', 'فتح الرابط', inline));
+          break;
+        }
+        out.push(`<div class="embed-frame"><iframe src="${escapeHtml(provider)}" ` +
+          `title="${escapeHtml(b.title || 'تضمين')}" loading="lazy" allowfullscreen ` +
+          `referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`);
+        break;
+      }
+
+      case 'columns': {
+        /* البريد يبني الأعمدة بجدول لا بـflex — عملاء أوتلوك يتجاهلون
+           flex وgrid فتنهار الأعمدة فوق بعضها بلا فاصل. والجدول يعمل
+           في كل عميل منذ عشرين سنة.
+
+           والويب يستعمل grid ينهار عمودياً تحت 480px: عمودان بعرض
+           ١٨٧ بكسل على شاشة ٣٧٥ لا يُقرآن. */
+        const a = renderInline(b.start, inline);
+        const z = renderInline(b.end, inline);
+        if (inline) {
+          const cSt = ` style="width:50%;vertical-align:top;padding:0 8px;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"`;
+          out.push(`<table style="width:100%;border-collapse:collapse;margin:18px 0"><tr>` +
+            `<td${cSt}>${a}</td><td${cSt}>${z}</td></tr></table>`);
+        } else {
+          out.push(`<div class="columns"><div>${a}</div><div>${z}</div></div>`);
+        }
+        break;
+      }
+
+      case 'checklist': {
+        const items = Array.isArray(b.items) ? b.items : [];
+        if (!items.length) break;
+        /* لا مربّع تحديد تفاعليّ: البريد لا يحفظ حالته والصفحة العامة
+           تُقرأ ولا تُملأ. فالويب يستعمل input معطَّلاً — دلالةٌ صحيحة
+           يعلنها قارئ الشاشة بنفسه ويتبع رسمُها الثيم — والبريد يستعمل
+           مؤشّراً نصّياً لأن العملاء تحذف input.
+
+           والمؤشّر `[x]` لا U+2611: الثاني رمزٌ تصويري يُعرض إيموجي ملوّناً
+           في أنظمة، و§3 يمنعه. ويُعزل اتجاهياً وإلا أعادت العربية
+           ترتيب قوسيه. */
+        const liSt = inline ? ` style="margin:6px 0;line-height:1.9;font-size:16px;color:${EMAIL.foreground}"` : '';
+        const body = items.map((it) => {
+          const text = renderInline(it.text || '', inline);
+          if (inline) return `<li${liSt}><bdi>${it.done ? '[x]' : '[&nbsp;]'}</bdi> ${text}</li>`;
+          return `<li><label><input type="checkbox" disabled${it.done ? ' checked' : ''}> <span>${text}</span></label></li>`;
+        }).join('');
+        const ulSt = inline ? ' style="margin:18px 0;padding-right:20px;list-style:none"' : ' class="checklist"';
+        out.push(`<ul${ulSt}>${body}</ul>`);
         break;
       }
 

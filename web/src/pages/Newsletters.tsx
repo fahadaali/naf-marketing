@@ -4,6 +4,7 @@ import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
   Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
+  Video, AudioLines, FileDown, Columns2, ListTodo, Upload,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
@@ -45,7 +46,13 @@ type Block =
   | { type: 'table'; rows: string[][]; header?: boolean }
   | { type: 'code'; text: string }
   | { type: 'footnote'; text: string }
-  | { type: 'toc' };
+  | { type: 'toc' }
+  | { type: 'audio'; mediaId?: string; url?: string; title?: string }
+  | { type: 'file'; mediaId?: string; url?: string; title?: string; note?: string }
+  | { type: 'video'; mediaId?: string; url?: string }
+  | { type: 'embed'; url: string; title?: string }
+  | { type: 'columns'; start: string; end: string }
+  | { type: 'checklist'; items: { text: string; done?: boolean }[] };
 
 /* عناوين النغمات الافتراضية — من naf-terms.md §١٤. «تمييز» بلا عنوان
    افتراضي لأنها إبرازٌ بلا حكم، فلا شيء تقوله عن صحّة المحتوى. */
@@ -533,6 +540,12 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn sm ghost" onClick={() => add({ type: 'footnote', text: '' })}><Superscript size={20} /> حاشية</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'toc' })}><TableOfContents size={20} /> فهرس المحتويات</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'code', text: '' })}><Code size={20} /> كود</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'video' })}><Video size={20} /> فيديو</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'audio' })}><AudioLines size={20} /> صوت</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'file' })}><FileDown size={20} /> ملف</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'embed', url: '' })}><Globe size={20} /> تضمين</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'columns', start: '', end: '' })}><Columns2 size={20} /> أعمدة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'checklist', items: [{ text: '', done: false }] })}><ListTodo size={20} /> قائمة مهام</button>
           </div>
 
           {blocks.map((b, i) => (
@@ -594,6 +607,7 @@ function blockLabel(t: string): string {
   return {
     heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل',
     callout: 'بطاقة', table: 'جدول', code: 'كود', footnote: 'حاشية', toc: 'فهرس المحتويات',
+    audio: 'صوت', file: 'ملف', video: 'فيديو', embed: 'تضمين', columns: 'أعمدة', checklist: 'قائمة مهام',
   }[t] || t;
 }
 
@@ -806,9 +820,144 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         </p>
       );
 
+    case 'audio':
+      return <MediaRefFields block={block} onChange={onChange} accept="audio/*" titlePlaceholder="عنوان المقطع" />;
+
+    case 'file':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <MediaRefFields block={block} onChange={onChange} accept="*/*" titlePlaceholder="اسم الملف كما يراه القارئ" />
+          <input className="input" placeholder="وصف مختصر (اختياري)" value={block.note || ''}
+                 onChange={(e) => onChange({ note: e.target.value })} />
+        </div>
+      );
+
+    case 'video':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <MediaRefFields block={block} onChange={onChange} accept="video/*" titlePlaceholder="" hideTitle />
+          <input className="input" placeholder="أو رابط يوتيوب أو ڤيميو" value={block.url || ''}
+                 onChange={(e) => onChange({ url: e.target.value, mediaId: '' })} />
+          <EmbedNote url={block.url || ''} />
+        </div>
+      );
+
+    case 'embed':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <input className="input" placeholder="رابط الصفحة أو المقطع" value={block.url || ''}
+                 onChange={(e) => onChange({ url: e.target.value })} />
+          <input className="input" placeholder="عنوان البطاقة (اختياري)" value={block.title || ''}
+                 onChange={(e) => onChange({ title: e.target.value })} />
+          <EmbedNote url={block.url || ''} />
+        </div>
+      );
+
+    case 'columns':
+      return (
+        <div className="grid cols-2" style={{ gap: 8 }}>
+          <InlineField value={block.start} rows={3} placeholder="العمود الأول"
+                       onChange={(start) => onChange({ start })} />
+          <InlineField value={block.end} rows={3} placeholder="العمود الثاني"
+                       onChange={(end) => onChange({ end })} />
+        </div>
+      );
+
+    case 'checklist':
+      return <ChecklistFields block={block} onChange={onChange} />;
+
     default:
       return <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>خط فاصل بين الأقسام.</p>;
   }
+}
+
+/* يخبر الكاتب بما سيراه القارئ فعلاً قبل الإرسال، لا بعده.
+
+   الرسالة الأولى من naf-terms.md §١٤، والثانية تصف قاعدة القائمة
+   البيضاء في newsletter.ts — مزوّدٌ غير مسجَّل يصير بطاقة رابط في
+   الوجهتين، ومنصات التواصل ليست مسجَّلة عمداً. */
+function EmbedNote({ url }: { url: string }) {
+  if (!url.trim()) return null;
+  const framed = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|vimeo\.com\/\d)/i.test(url.trim());
+  return (
+    <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+      {framed
+        ? 'هذا التضمين يظهر في الصفحة العامة فقط. رسالة البريد تعرض بطاقة رابط بدلاً منه.'
+        : 'هذا الرابط يظهر بطاقة رابط في الصفحة العامة وفي البريد — التضمين المباشر ليوتيوب وڤيميو وحدهما.'}
+    </p>
+  );
+}
+
+/* حقول كتلةٍ تشير إلى وسيط: صوت أو ملف أو فيديو. المصدر واحد لا اثنان،
+   كما في كتلة الصورة. */
+function MediaRefFields({ block, onChange, accept, titlePlaceholder, hideTitle }: {
+  block: any; onChange: (p: any) => void; accept: string; titlePlaceholder: string; hideTitle?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function upload(f: File) {
+    setBusy(true);
+    setErr('');
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      const d = await api.upload('/media', form);
+      onChange({ mediaId: d.id, url: '', title: block.title || d.filename || '' });
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn sm ghost" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+          <Upload size={20} /> {busy ? 'جارٍ الرفع…' : 'رفع'}
+        </button>
+        {block.mediaId && (
+          <>
+            <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{block.title || block.mediaId}</bdi></span>
+            <button className="btn sm ghost" type="button" onClick={() => onChange({ mediaId: '' })}>مسح</button>
+          </>
+        )}
+        <div className="spacer" />
+        {err && <span className="err" style={{ fontSize: 'var(--text-xs)' }}>{err}</span>}
+        <input ref={fileRef} type="file" hidden accept={accept}
+               onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
+      </div>
+      {!hideTitle && (
+        <input className="input" placeholder={titlePlaceholder} value={block.title || ''}
+               onChange={(e) => onChange({ title: e.target.value })} />
+      )}
+    </div>
+  );
+}
+
+function ChecklistFields({ block, onChange }: { block: Extract<Block, { type: 'checklist' }>; onChange: (p: any) => void }) {
+  const items = Array.isArray(block.items) && block.items.length ? block.items : [{ text: '', done: false }];
+  const set = (i: number, patch: any) => onChange({ items: items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      {items.map((it, i) => (
+        <div className="row" key={i} style={{ gap: 8 }}>
+          <input type="checkbox" checked={!!it.done} onChange={(e) => set(i, { done: e.target.checked })}
+                 aria-label={`البند ${i + 1} منجز`} />
+          <input className="input" style={{ flex: 1 }} placeholder="نصّ البند" value={it.text}
+                 onChange={(e) => set(i, { text: e.target.value })} />
+          <button className="btn sm ghost" type="button" title="حذف"
+                  onClick={() => onChange({ items: items.length > 1 ? items.filter((_, j) => j !== i) : items })}>
+            <Trash2 size={16} />
+          </button>
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn sm ghost" type="button"
+                onClick={() => onChange({ items: [...items, { text: '', done: false }] })}>
+          <Plus size={20} /> بند
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /* محرّر الجدول. شبكة حقول لا محرّر جداول كامل: النشرة القانونية تحمل

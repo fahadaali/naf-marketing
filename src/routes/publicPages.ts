@@ -95,6 +95,29 @@ ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
   .fn-back { font-size:var(--text-xs); margin-inline-start:6px; }
   .fn-ref:focus-visible, .fn-back:focus-visible, .article-toc a:focus-visible {
     outline:2px solid var(--ring); outline-offset:2px; }
+
+  .link-card { display:block; margin:20px 0; padding:14px 16px; background: var(--muted);
+               border:1px solid var(--border); border-radius: var(--radius); text-decoration:none; }
+  .link-card-title, .link-card > span:first-child { display:block; font-weight:600;
+                                                    color: var(--primary); margin-bottom:4px; }
+  .link-card-note { display:block; font-size:var(--text-xs); color: var(--muted-foreground); }
+  .link-card:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+
+  .media-block { margin:20px 0; }
+  .media-block audio, .media-block video { width:100%; border-radius: var(--radius); }
+  /* الإطار بنسبة 16:9 يحفظ ارتفاعه قبل التحميل فلا تقفز الصفحة */
+  .embed-frame { position:relative; margin:20px 0; aspect-ratio:16/9;
+                 border-radius: var(--radius); overflow:hidden; border:1px solid var(--border); }
+  .embed-frame iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+
+  /* عمودان ينهاران عمودياً على الجوّال — ١٨٧ بكسل للعمود لا يُقرأ */
+  .columns { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0; }
+  @media (max-width: 480px) { .columns { grid-template-columns:1fr; } }
+
+  .checklist { list-style:none; margin:20px 0; padding:0; }
+  .checklist li { margin:6px 0; }
+  .checklist label { display:flex; align-items:flex-start; gap:8px; }
+  .checklist input { margin-top:6px; flex:none; }
   .btn { display:inline-block; background: var(--primary); color: var(--primary-foreground);
          text-decoration:none; padding:12px 24px; border-radius: var(--radius); font-weight:600; }
   .btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
