@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderBlocks, blocksToText, slugify, splitThread, toXThread, toLinkedInPost, escapeHtml, parseBlocks, embedSrc, embedInfo, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST } from '../src/services/newsletter';
+import { renderBlocks, blocksToText, slugify, splitThread, toXThread, escapeHtml, parseBlocks, embedInfo, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST } from '../src/services/newsletter';
 import type { Block } from '../src/services/newsletter';
 import { retryWindowPassed } from '../src/services/newsletterSend';
 
@@ -75,18 +75,20 @@ describe('splitThread / toXThread', () => {
   });
 });
 
-describe('toLinkedInPost', () => {
+describe('صياغة لينكدإن عبر socialText', () => {
+  // كانت toLinkedInPost صيغةً ثانية بحدّ تسعمئة حرف، فحُذفت: مصدرٌ واحد
+  // لكل منصة، وهو socialText بحدّها المسجّل.
   it('يتضمّن العنوان والرابط', () => {
-    const p = toLinkedInPost('عنوان', blocks, 'https://naf.sa/a/x');
+    const p = socialText('linkedin', 'عنوان', blocks, 'https://naf.sa/a/x');
     expect(p).toContain('عنوان');
     expect(p).toContain('https://naf.sa/a/x');
   });
-  it('يقصّ النص الطويل', () => {
-    const long: Block[] = [{ type: 'text', text: 'ا'.repeat(3000) }];
-    expect(toLinkedInPost('ع', long, 'https://naf.sa/x').length).toBeLessThan(1100);
+  it('يحترم حدّ لينكدإن', () => {
+    const long: Block[] = [{ type: 'text', text: 'ا'.repeat(9000) }];
+    expect(socialText('linkedin', 'ع', long, 'https://naf.sa/x').length).toBeLessThanOrEqual(3000);
   });
   it('يفضّل المقتطف عند وجوده', () => {
-    expect(toLinkedInPost('ع', blocks, 'https://x.co', 'مقتطف مخصّص')).toContain('مقتطف مخصّص');
+    expect(socialText('linkedin', 'ع', blocks, 'https://x.co', 'مقتطف مخصّص')).toContain('مقتطف مخصّص');
   });
 });
 
@@ -262,26 +264,26 @@ describe('blocksToText مع الكتل الجديدة', () => {
 });
 
 // ===== التضمين: القائمة البيضاء هي الحدّ الأمني =====
-describe('embedSrc', () => {
+describe('embedInfo — يوتيوب وڤيميو', () => {
   it('يوتيوب بصيغتيه إلى nocookie', () => {
-    expect(embedSrc('https://www.youtube.com/watch?v=abc123XY')).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
-    expect(embedSrc('https://youtu.be/abc123XY')).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
+    expect(embedInfo('https://www.youtube.com/watch?v=abc123XY')?.src).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
+    expect(embedInfo('https://youtu.be/abc123XY')?.src).toBe('https://www.youtube-nocookie.com/embed/abc123XY');
   });
   it('ڤيميو', () => {
-    expect(embedSrc('https://vimeo.com/123456789')).toBe('https://player.vimeo.com/video/123456789');
+    expect(embedInfo('https://vimeo.com/123456789')?.src).toBe('https://player.vimeo.com/video/123456789');
   });
   it('يرفض ما ليس في القائمة', () => {
-    expect(embedSrc('https://example.com/x')).toBeNull();
-    expect(embedSrc('https://x.com/naf/status/1')).toBeNull();
-    expect(embedSrc('https://www.linkedin.com/posts/1')).toBeNull();
+    expect(embedInfo('https://example.com/x')).toBeNull();
+    expect(embedInfo('https://x.com/naf/status/1')).toBeNull();
+    expect(embedInfo('https://www.linkedin.com/posts/1')).toBeNull();
   });
   it('يرفض http وjavascript — https وحدها', () => {
-    expect(embedSrc('http://www.youtube.com/watch?v=abc123XY')).toBeNull();
-    expect(embedSrc('javascript:alert(1)')).toBeNull();
+    expect(embedInfo('http://www.youtube.com/watch?v=abc123XY')).toBeNull();
+    expect(embedInfo('javascript:alert(1)')).toBeNull();
   });
   it('يرفض نطاقاً يتشبّه بيوتيوب', () => {
-    expect(embedSrc('https://youtube.com.evil.test/watch?v=abc123XY')).toBeNull();
-    expect(embedSrc('https://notyoutube.com/watch?v=abc123XY')).toBeNull();
+    expect(embedInfo('https://youtube.com.evil.test/watch?v=abc123XY')).toBeNull();
+    expect(embedInfo('https://notyoutube.com/watch?v=abc123XY')).toBeNull();
   });
 });
 
@@ -413,6 +415,16 @@ describe('إطار التضمين يحمل ضوابطه', () => {
 describe('socialText', () => {
   const long: Block[] = [{ type: 'text', text: 'جملة قانونية طويلة نسبياً. '.repeat(200) }];
   const url = 'https://naf.sa/articles/x';
+
+  /* متنٌ بلا فراغ لا يجد ما يتراجع إليه عند القصّ، فيكشف خطأ الحرف
+     الواحد الذي تخفيه الجمل العادية. */
+  it('كل منصة تحترم حدّها ولو كان المتن بلا فراغ', () => {
+    const solid: Block[] = [{ type: 'text', text: 'ا'.repeat(9000) }];
+    for (const p of socialTargets()) {
+      if (p === 'x') continue;
+      expect(socialText(p, 'عنوان', solid, url).length, p).toBeLessThanOrEqual(SOCIAL_LIMIT[p]);
+    }
+  });
 
   it('كل منصة تحترم حدّها', () => {
     for (const p of socialTargets()) {

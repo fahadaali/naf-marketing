@@ -81,6 +81,12 @@ export function printDocument(title: string, bodyHtml: string, opts: { autoPrint
   /* رابط «رجوع» من الحاشية إلى موضعها لا معنى له على الورق: لا نقرة
      في مستندٍ مطبوع، والكلمة تبقى ضجيجاً في آخر كل حاشية. */
   .fn-back { display: none; }
+
+  /* مشغّلا الصوت والفيديو لا يُشغَّلان على ورق. يُخفى المشغّل ويبقى
+     عنوانه (figcaption) فيعرف القارئ أن في المقال مادةً مسموعة ولم
+     تُطبع — وإخفاء الاثنين معاً يحذف الخبر لا الضجيج. */
+  .media-block audio, .media-block video { display: none; }
+  .media-block figcaption { text-align: start; font-weight: 700; }
   .article-footnotes { margin-top: 16pt; padding-top: 8pt; border-top: 1pt solid #000000; font-size: 10pt; }
   .columns { display: block; }
   .checklist { list-style: none; padding: 0; }

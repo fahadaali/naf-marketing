@@ -55,8 +55,14 @@ type Block =
   | { type: 'columns'; start: string; end: string }
   | { type: 'checklist'; items: { text: string; done?: boolean }[] };
 
-/* عناوين النغمات الافتراضية — من naf-terms.md §١٤. «تمييز» بلا عنوان
-   افتراضي لأنها إبرازٌ بلا حكم، فلا شيء تقوله عن صحّة المحتوى. */
+/* عناوين النغمات — من naf-terms.md §١٤.
+
+   ونسخةٌ ثانية من CALLOUT في src/services/newsletter.ts بالضرورة:
+   حزمتان منفصلتان لا تستوردان من بعضهما، كما في EMAIL_PREVIEW أعلاه.
+   أي تغيير هناك يُنقل هنا وإلا اختلف ما يختاره الكاتب عمّا يُطبع.
+
+   و«تمييز» تظهر هنا خياراً في القائمة ولا عنوانَ افتراضيَّ لها في
+   الخادم — إبرازٌ بلا حكم لا يحمل عنواناً على البطاقة. */
 const TONE_LABEL: Record<CalloutTone, string> = {
   info: 'معلومة',
   warning: 'تحذير',

@@ -48,7 +48,7 @@ function tableXml(rows: string[][], header?: boolean): string {
 }
 
 /** يحوّل كتل المقالة إلى جسم المستند. */
-function bodyXml(title: string, blocks: Block[]): string {
+function bodyXml(title: string, blocks: Block[], mediaBase: string): string {
   const out: string[] = [para(title, 'Title')];
   let noteNo = 0;
   const notes: string[] = [];
@@ -89,6 +89,28 @@ function bodyXml(title: string, blocks: Block[]): string {
       case 'embed':
         if (b.url) out.push(para(`${(b as any).text || (b as any).title || 'رابط'}: ${b.url}`));
         break;
+      /* الصوت والفيديو والملف لا تُشغَّل في مستند — يُذكر اسمها ورابطها.
+         كانت تسقط صامتةً: نشرةٌ فيها مرفقٌ تُصدَّر Word بلا أثرٍ له، فيظنّ
+         القارئ أن المقال لا يحمل مرفقاً أصلاً. */
+      case 'audio':
+      case 'file':
+      case 'video': {
+        const label = (b as any).title || { audio: 'صوت', file: 'ملف', video: 'فيديو' }[b.type];
+        const href = (b as any).url || ((b as any).mediaId ? `${mediaBase}/api/media/${(b as any).mediaId}` : '');
+        out.push(para(href ? `${label}: ${href}` : `[${label}]`));
+        if (b.type === 'file' && (b as any).note) out.push(para(String((b as any).note), 'Quote'));
+        break;
+      }
+      /* الفهرس يُبنى هنا لا يُنسخ: Word يبني فهرسه من الأنماط بحقل
+         TOC، وحقلٌ لا يُحدَّث حتى يضغط القارئ F9 يصل فارغاً. فيُكتب
+         نصّاً من العناوين — يُقرأ فور الفتح. */
+      case 'toc': {
+        const heads = blocks.filter((x) => x.type === 'heading') as Extract<Block, { type: 'heading' }>[];
+        if (!heads.length) break;
+        out.push(para('المحتويات', 'Heading1'));
+        heads.forEach((h, i) => out.push(para(`${i + 1}. ${h.text}`)));
+        break;
+      }
       case 'image':
         // الصورة لا تُضمَّن: تضمينها يحتاج جلبها وقياسها وربطها في
         // relationships. تُذكر بوصفها البديل كي لا يختفي معناها صامتاً.
@@ -164,9 +186,9 @@ const STYLES = `${XML_HEAD}
 </w:styles>`;
 
 /** يبني مستند Word من عنوان المقالة وكتلها. */
-export function buildDocx(title: string, blocks: Block[]): Uint8Array {
+export function buildDocx(title: string, blocks: Block[], mediaBase = ''): Uint8Array {
   const document = `${XML_HEAD}
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${bodyXml(title, blocks)}</w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${bodyXml(title, blocks, mediaBase)}</w:document>`;
   return zipStore([
     { name: '[Content_Types].xml', data: enc(CONTENT_TYPES) },
     { name: '_rels/.rels', data: enc(ROOT_RELS) },

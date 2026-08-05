@@ -5,7 +5,7 @@ import { getEmailProvider } from '../services/email';
 import { newId, nowIso } from '../util';
 import {
   parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl,
-  toXThread, toLinkedInPost, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST,
+  toXThread, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST,
 } from '../services/newsletter';
 import { getProvider } from '../adapters';
 import { proofreadArabic } from '../services/claude';
@@ -159,7 +159,9 @@ newsletterRoutes.get('/:id/export.docx', async (c) => {
   const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
     .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
   if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
-  const bytes = buildDocx(row.title, parseBlocks(row.blocks_json));
+  // الأصل المطلق: رابطٌ نسبيّ في مستندٍ يُفتح من سطح المكتب لا يفتح شيئاً
+  const { base } = await publicSettings(c.env, c.req.url);
+  const bytes = buildDocx(row.title, parseBlocks(row.blocks_json), base);
   return new Response(bytes, {
     headers: {
       'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -274,9 +276,11 @@ newsletterRoutes.get('/:id/social', async (c) => {
     targets: socialTargets(),
     limits: SOCIAL_LIMIT,
     drafts,
-    // يبقيان للتوافق مع نداءات قائمة
+    /* سلسلة إكس تُعرض أجزاءً مرقّمة فتبقى مصفوفةً مستقلة. ولا مفتاح
+       linkedin بعد اليوم: كان يُبنى بـtoLinkedInPost بحدّ تسعمئة حرف
+       بينما يُنشر فعلاً بـsocialText بحدّ ثلاثة آلاف — صيغتان لنفس
+       المنصة، تُعرض إحداهما وتُرسل الأخرى. ولا مستهلك له في الواجهة. */
     x: toXThread(row.title, blocks, url),
-    linkedin: toLinkedInPost(row.title, blocks, url, row.excerpt),
   });
 });
 

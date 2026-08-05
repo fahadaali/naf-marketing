@@ -98,11 +98,6 @@ export function embedInfo(url: string): EmbedInfo | null {
   return null;
 }
 
-/** عنوان الإطار وحده — يبقى لأن الاختبارات والنداءات القائمة تستعمله. */
-export function embedSrc(url: string): string | null {
-  return embedInfo(url)?.src ?? null;
-}
-
 /* نغمات البطاقة. «معلومة» و«تحذير» حالتان مسجّلتان في naf-terms.md
    بلونيهما، فعنوانهما ظاهر دائماً — §6 يمنع نقل المعنى باللون وحده،
    والبريد يشدّده: أيقونة SVG لا تصل عملاء سطح المكتب أصلاً.
@@ -114,7 +109,7 @@ const CALLOUT: Record<CalloutTone, { label: string; bg: string; fg: string }> = 
 };
 
 /** معرّف عنوانٍ للربط من الفهرس. الترتيب يمنع تكرار المعرّف عند تشابه العناوين. */
-export function headingId(text: string, index: number): string {
+function headingId(text: string, index: number): string {
   return `h-${index + 1}-${slugify(text).slice(0, 40)}`;
 }
 
@@ -182,6 +177,16 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
   const out: string[] = [];
   const inline = mode === 'email';
   const mediaUrl = (b: any) => (b.url ? b.url : b.mediaId ? `${mediaBase}/api/media/${b.mediaId}` : '');
+
+  /* مصدرٌ يصلح لوسم <video>/<audio> فعلاً: وسيطٌ مرفوع، أو رابطٌ ينتهي
+     بامتداد وسيط. ورابطُ صفحةٍ عادية ليس منهما — ووضعُه في src يُخرج
+     مشغّلاً لا يشتغل، وهو فشلٌ صامت لا يراه الكاتب إلا بعد النشر. */
+  const playable = (b: any, exts: RegExp): string => {
+    if (b.mediaId) return `${mediaBase}/api/media/${b.mediaId}`;
+    return b.url && exts.test(b.url) ? b.url : '';
+  };
+  const VIDEO_EXT = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?|#|$)/i;
+  const AUDIO_EXT = /\.(mp3|m4a|aac|wav|oga|ogg|opus|flac)(\?|#|$)/i;
 
   /* مرورٌ أوّل قبل التصيير: الحواشي تُرقَّم بترتيب ورودها، والعناوين
      تأخذ معرّفاتها. كلاهما يُقرأ من كتلٍ لاحقة أو سابقة — الفهرس قد
@@ -312,14 +317,20 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       }
 
       case 'audio': {
-        const src = mediaUrl(b);
-        if (!src) break;
         const title = b.title || 'صوت';
+        const src = playable(b, AUDIO_EXT);
         // البريد لا يشغّل صوتاً — ولا عميلَ واحداً يُعوَّل عليه — فبطاقة رابط.
-        out.push(inline
-          ? linkCard(src, title, 'استماع', true)
-          : `<figure class="media-block"><figcaption>${escapeHtml(title)}</figcaption>` +
+        if (inline) {
+          const target = b.url || src;
+          if (target) out.push(linkCard(target, title, 'استماع', true));
+          break;
+        }
+        if (src) {
+          out.push(`<figure class="media-block"><figcaption>${escapeHtml(title)}</figcaption>` +
             `<audio controls preload="none" src="${escapeHtml(src)}"></audio></figure>`);
+        } else if (b.url) {
+          out.push(linkCard(b.url, title, 'استماع', false));
+        }
         break;
       }
 
@@ -336,21 +347,17 @@ export function renderBlocks(blocks: Block[], mode: 'email' | 'web', mediaBase =
       }
 
       case 'video': {
-        const src = mediaUrl(b);
         const provider = b.url ? embedInfo(b.url) : null;
+        const src = playable(b, VIDEO_EXT);
         if (inline) {
-          // لا فيديو في صندوق الوارد: بطاقة رابط في الحالتين.
-          const target = provider ? (b.url as string) : src;
+          // لا فيديو في صندوق الوارد: بطاقة رابط أياً كان المصدر.
+          const target = b.url || src;
           if (target) out.push(linkCard(target, 'فيديو', 'مشاهدة', true));
           break;
         }
-        if (provider) {
-          out.push(iframeHtml(provider, 'فيديو'));
-        } else if (src) {
-          out.push(`<figure class="media-block"><video controls preload="none" src="${escapeHtml(src)}"></video></figure>`);
-        } else if (b.url) {
-          out.push(linkCard(b.url, 'فيديو', 'مشاهدة', false));
-        }
+        if (provider) out.push(iframeHtml(provider, 'فيديو'));
+        else if (src) out.push(`<figure class="media-block"><video controls preload="none" src="${escapeHtml(src)}"></video></figure>`);
+        else if (b.url) out.push(linkCard(b.url, 'فيديو', 'مشاهدة', false));
         break;
       }
 
@@ -583,15 +590,12 @@ export function socialText(
   const body = (excerpt || blocksToText(blocks)).trim();
   const tail = `\n\nاقرأ المقالة كاملة:\n${url}`;
   // الرابط والعنوان يُحجزان أولاً، وما بقي هو مساحة المتن.
-  const room = limit - title.length - tail.length - 2;
+  const room = limit - title.length - tail.length - 2; // 2 لسطرَي الفصل
   if (room <= 0) return `${title}\n${url}`.slice(0, limit);
-  const trimmed = body.length > room ? `${body.slice(0, room).replace(/\s+\S*$/, '')}…` : body;
+  /* القصّ إلى room-1 لا room: علامة الحذف حرفٌ يُضاف بعده. ومتنٌ بلا
+     فراغ (لا يجد ما يتراجع إليه) كان يُخرج limit+1 فيُرفض المنشور
+     على منصةٍ تحسب الحرف. */
+  const trimmed = body.length > room ? `${body.slice(0, room - 1).replace(/\s+\S*$/, '')}…` : body;
   return `${title}\n\n${trimmed}${tail}`;
 }
 
-// لينكدإن: مقتطف مهني متوسط الطول مع دعوة لقراءة المقالة
-export function toLinkedInPost(title: string, blocks: Block[], url: string, excerpt?: string | null): string {
-  const body = (excerpt || blocksToText(blocks)).trim();
-  const trimmed = body.length > 900 ? `${body.slice(0, 900).replace(/\s+\S*$/, '')}…` : body;
-  return `${title}\n\n${trimmed}\n\nاقرأ المقالة كاملة:\n${url}`;
-}
