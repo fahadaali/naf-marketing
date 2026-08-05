@@ -46,6 +46,14 @@ export type Env = {
   MESSAGING_API_KEY?: string;
   CALL_TRACKING_API_KEY?: string;
   LISTENING_API_KEY?: string;
+
+  /* ═══ الموقع الرئيسي (naf-home) ═══
+     رمزٌ واحد للاتجاهين: تحمله نقاط `/api/site` هنا، ويحمله الموقع في
+     `NEWSLETTER_API_TOKEN` عنده. وسرُّ الخطاف مستقلٌّ عنه لأنه يحمي
+     اتجاهاً معاكساً — لو اتّحدا لفتح تسريبُ أحدهما البابين. */
+  SITE_API_TOKEN?: string;
+  SITE_WEBHOOK_URL?: string;
+  SITE_WEBHOOK_SECRET?: string;
 };
 
 export type Role = 'writer' | 'marketing_manager' | 'general_manager';

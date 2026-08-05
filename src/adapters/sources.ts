@@ -444,6 +444,9 @@ function sourceSecret(env: Env, key: string): string {
     key === 'messaging' ? env.MESSAGING_API_KEY :
     key === 'call_tracking' ? env.CALL_TRACKING_API_KEY :
     key === 'listening' ? env.LISTENING_API_KEY :
+    /* الموقع الرئيسي: الرمز نفسه الذي تحمله نقاطه العامة، فسرٌّ واحد
+       للاتجاهين لا اثنان يفترقان عند التدوير. */
+    key === 'website' ? env.SITE_API_TOKEN :
     undefined;
   return (raw || '').trim();
 }
@@ -564,6 +567,23 @@ export const SOURCES: Record<string, SourceDefinition> = {
     secretName: 'LISTENING_API_KEY',
     fields: [{ key: 'endpoint', label: 'عنوان المصدر', placeholder: 'https://…/metrics' }],
     fetch: (env, cfg, range) => fetchByContract(env, 'listening', cfg, range),
+  },
+  /*
+   * الموقع الرئيسي — مصدرٌ يُقرأ منه ما لا يعرفه مزوّد تحليلات: عدد
+   * طلبات التواصل التي وصلت فعلاً، وطلبات التوظيف، ومن اشترك في النشرة
+   * من الموقع، وما نُشر من مقالات وخدمات. GA4 يرى الصفحة ولا يرى الصفّ
+   * في القاعدة، ويعدّ الإرسال حدثاً لا سجلّاً — والرقمان يفترقان.
+   *
+   * وهو من مصادر العقد العام: الموقع يردّ `{ points: [...] }` نفسه الذي
+   * تردّه بقية المصادر المتعاقَد عليها، فلا محوّل خاصّاً له.
+   */
+  website: {
+    key: 'website',
+    secretName: 'SITE_API_TOKEN',
+    fields: [
+      { key: 'endpoint', label: 'عنوان المصدر', placeholder: 'https://naflaw.sa/api/public/metrics' },
+    ],
+    fetch: (env, cfg, range) => fetchByContract(env, 'website', cfg, range),
   },
 };
 
