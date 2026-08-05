@@ -6,6 +6,7 @@ import { logAudit } from './audit';
 import {
   parseBlocks, renderBlocks, escapeHtml, publicSettings, articleUrl,
 } from './newsletter';
+import { pushIssueToSite } from './siteSync';
 
 // ===== إرسال النشرة على دفعات =====
 // Cloudflare يحدّ زمن الطلب/المهمة، فنرسل دفعة في كل دورة Cron بدل حلقة طويلة.
@@ -179,6 +180,9 @@ export async function sendQueuedBatch(env: Env, requestOrigin?: string): Promise
     await env.DB.prepare("UPDATE newsletters SET status = 'sent', sent_at = ?, updated_at = ? WHERE id = ?")
       .bind(nowIso(), nowIso(), nl.id)
       .run();
+    // الموقع الرئيسي يسحب كل ثلاثين دقيقة؛ وهذا يختصرها إلى ثوانٍ.
+    // وفشلُه لا يُفشل الإرسال — السحب التالي يلتقط ما فاته.
+    await pushIssueToSite(env, nl.id, requestOrigin);
     return { sent: 0, failed: 0 };
   }
 

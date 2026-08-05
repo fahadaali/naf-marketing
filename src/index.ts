@@ -24,6 +24,8 @@ import { webhookRoutes } from './routes/webhooks';
 import { newsletterRoutes } from './routes/newsletters';
 import { subscriberRoutes } from './routes/subscribers';
 import { publicRoutes } from './routes/publicPages';
+import { siteApiRoutes } from './routes/siteApi';
+import { siteMediaRoutes } from './routes/siteMedia';
 import { emailTrackRoutes } from './routes/emailTracking';
 import { handleScheduled } from './cron';
 import { ssoGuard, ssoRoutes } from './sso';
@@ -60,6 +62,16 @@ api.route('/socialapi', socialApiRoutes);
 api.route('/webhooks', webhookRoutes);
 api.route('/newsletters', newsletterRoutes);
 api.route('/subscribers', subscriberRoutes);
+
+/*
+ * الموقع الرئيسي. المسار `/api/public` لا اسمٌ من عندنا: الموقع يناديه
+ * بهذا الاسم في `lib/newsletter/client.ts` وهو منشورٌ يعمل، فالعقد يُوفَّى
+ * لا يُعاد التفاوض عليه.
+ */
+api.route('/public', siteApiRoutes);
+
+// وسائط المحتوى المنشور: خارج الحارس، لأن جالبها متصفّحٌ وزاحفٌ لا جلسة
+api.route('/public-media', siteMediaRoutes);
 
 api.get('/health', (c) => c.json({ ok: true, app: c.env.APP_NAME || 'naf-marketing' }));
 

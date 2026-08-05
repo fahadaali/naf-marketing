@@ -1,0 +1,69 @@
+name: نشر يدوي
+
+# مسار نشرٍ احتياطي — لا بديلٌ عن Workers Builds.
+#
+# النشر المعتاد في هذا المستودع من وصلة Cloudflare Workers Builds: تبني
+# عند الدفع إلى `main` بلا سيرٍ هنا. وهذا الملف لا يعمل عند الدفع إطلاقاً
+# (`workflow_dispatch` وحده)، فلا بناءان يتسابقان على نفس العامل.
+#
+# وسببُ وجوده أن البناء هناك يقف أحياناً: بناءٌ واحد لكل عامل في كل مرّة،
+# فمعلَّقٌ لا ينتهي يحجز الطابور خلفه، ويبقى المنشور ما قبل الدمج بلا أثرٍ
+# ظاهر في المستودع. فيُشغَّل هذا يدوياً من تبويب Actions ويصل التغيير.
+#
+# ويطبّق الهجرات قبل النشر — وWorkers Builds لا تفعل: أمرُها `npm run
+# deploy` وحده، والهجرات نصٌّ منفصل. فصفٌّ جديد في القاعدة كان يحتاج
+# جهازاً عليه نسخةٌ من المستودع.
+#
+# يحتاج سرَّين في إعدادات المستودع (Settings ← Secrets and variables ←
+# Actions): `CLOUDFLARE_API_TOKEN` بصلاحية تحرير العوامل وD1، و
+# `CLOUDFLARE_ACCOUNT_ID`.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-manual
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: البناء والهجرات والنشر
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: فحص الأنواع
+        run: npm run typecheck
+
+      - name: الاختبارات
+        run: npm test
+
+      # يبني واجهة React إلى `web/dist` — يخدمها العامل نفسه عبر ASSETS
+      - name: البناء
+        run: npm run build
+
+      # قبل النشر لا بعده: عاملٌ جديد يقرأ جدولاً لم يُنشأ بعد يردّ ٥٠٠
+      # على أول طلب، والنافذة بينهما تُقاس بالثواني لكنها ليست صفراً.
+      - name: تطبيق الهجرات
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply naf_marketing --remote
+
+      - name: النشر
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

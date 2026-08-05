@@ -580,6 +580,9 @@
 | `form_completions` | تعبئات النموذج | `count` | `north_star` |
 | `form_abandonment_rate` | نسبة عدم إكمال النموذج | `percentage` | `operational` |
 | `gated_downloads` | تحميلات المحتوى المسوّر | `count` | `north_star` |
+| `site_contact_requests` | طلبات التواصل من الموقع | `count` | `north_star` |
+| `site_contact_by_service` | طلبات التواصل حسب الخدمة | `count` | `operational` |
+| `site_job_applications` | طلبات التوظيف من الموقع | `count` | `operational` |
 
 **مراحل مسار البيع ستّ، بهذه الأسماء وهذا الترتيب:** زائر ← محتمل ← مؤهل ← اجتماع ← عرض ← تعاقد. لا تُختصر ولا يُضاف إليها في منصة واحدة — معدل التحويل يُقاس على كل انتقال، ومرحلةٌ تظهر في منصة دون أخرى تجعل الرقمين غير قابلين للمقارنة.
 
@@ -652,6 +655,7 @@
 | `email_spam_rate` | معدل شكاوى البريد المزعج | `percentage` | `operational` |
 | `list_growth_rate` | معدل النمو في قائمة المشتركين | `percentage` | `operational` |
 | `revenue_per_email` | الإيراد المنسوب للبريد | `currency` | `north_star` |
+| `site_newsletter_signups` | اشتراكات النشرة من الموقع | `count` | `operational` |
 
 **«معدل ارتداد البريد» يحمل كلمة «البريد» في اسمه.** `Bounce Rate` مصطلحان مختلفان في طبقتين: ارتدادُ زائرٍ غادر الصفحة، وارتدادُ رسالةٍ لم تصل. وتسميتُهما بالاسم نفسه في لوحة واحدة يجعل الرقمين يبدوان مقارنَين وهما ليسا كذلك.
 
@@ -687,6 +691,8 @@
 | `data_completeness` | اكتمال بيانات العميل المحتمل | `percentage` | `operational` |
 | `duplicate_rate` | نسبة السجلات المكررة | `percentage` | `operational` |
 | `privacy_compliance` | الالتزام بحماية البيانات | `percentage` | `operational` |
+| `site_articles_published` | المقالات المنشورة في الموقع | `count` | `operational` |
+| `site_missing_translations` | الحقول بلا ترجمة إنجليزية | `count` | `operational` |
 
 **«زمن الاستجابة الأول» مؤشر قيادي لا تشغيلي في القطاع القانوني.** من يردّ أولاً غالباً يفوز بالعميل، فالرقم يقع في اللوحة الأسبوعية لا في تقرير التشغيل الشهري.
 
@@ -819,6 +825,7 @@
 | `messaging` | قنوات المراسلة |
 | `call_tracking` | تتبّع المكالمات |
 | `listening` | رصد الذكر والمشاعر |
+| `website` | الموقع الرئيسي |
 
 **و«مزوّد النشر» هو المزوّد المضبوط في الإعدادات باسمه المسجّل، لا اسمٌ ثانٍ له.** والمصدر يقرأ منه أرقام الحساب — المتابعين والمراجعات — بمفتاحه القائم، فلا حقلَ يُملأ في شاشته ولا سرَّ ثانٍ له.
 
