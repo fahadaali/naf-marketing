@@ -13,8 +13,42 @@ type Row = {
   cover_media_id: string | null; published_at: string | null;
 };
 
+/* بيانات منظّمة للمقالة — شقّ AEO.
+
+   الوسوم أعلاه تكفي محرّكات البحث ولا تكفي نماذج الإجابة: تلك تقرأ
+   schema.org لتعرف من كتب ومتى نُشر وأيّ جهة تقف خلف النصّ. وبلا
+   JSON-LD تُقتبس المقالة بلا نسبة أو لا تُقتبس.
+
+   والقيم كلّها من الصفحة نفسها — لا يُخترع تاريخ ولا مؤلّف. حقلٌ
+   بلا قيمة يسقط من الكائن ولا يُملأ بفراغ: بياناتٌ منظّمة كاذبة أسوأ
+   من غيابها. */
+export function articleJsonLd(o: {
+  title: string; description: string; canonical: string; image?: string; siteName: string;
+  published?: string | null; modified?: string | null; author?: string | null;
+}): string {
+  const data: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: o.title,
+    inLanguage: 'ar',
+    mainEntityOfPage: { '@type': 'WebPage', '@id': o.canonical },
+    url: o.canonical,
+    publisher: { '@type': 'Organization', name: o.siteName },
+  };
+  if (o.description) data.description = o.description;
+  if (o.image) data.image = [o.image];
+  if (o.published) data.datePublished = o.published;
+  if (o.modified) data.dateModified = o.modified;
+  if (o.author) data.author = { '@type': 'Person', name: o.author };
+
+  /* JSON داخل <script> يُنهى بـ`</script>` لو حملت قيمةٌ ذلك النصّ.
+     نهرّب الشرطة المائلة فيبقى JSON صحيحاً ويستحيل كسر الوسم. */
+  return JSON.stringify(data).replace(/</g, '\\u003c');
+}
+
 function layout(opts: {
   title: string; description: string; canonical: string; image?: string; body: string; siteName: string;
+  published?: string | null; modified?: string | null; author?: string | null;
 }): string {
   const { title, description, canonical, image, body, siteName } = opts;
   return `<!doctype html>
@@ -37,6 +71,10 @@ ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ''}
 ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg">
 <link rel="stylesheet" href="/naf-public.css">
+<script type="application/ld+json">${articleJsonLd({
+  title, description, canonical, image, siteName,
+  published: opts.published, modified: opts.modified, author: opts.author,
+})}</script>
 <style>
   /* رموز ناف كلها من /naf-public.css المولَّد من naf-theme.css في السجلّ.
      لا قيمة لون ولا خط هنا — الوضع الداكن يتبع تفضيل النظام تلقائياً. */
@@ -246,12 +284,16 @@ publicRoutes.get('/feed.json', async (c) => {
 // مقالة واحدة (يُسجَّل بعد المسارات الثابتة كي لا يبتلعها)
 publicRoutes.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
+  // updated_at واسم الكاتب للبيانات المنظّمة — لا يظهران في الصفحة
+  // نفسها، ويقرأهما من يفهرس المقالة.
   const row = await c.env.DB.prepare(
-    `SELECT id, title, slug, excerpt, blocks_json, cover_media_id, published_at
-     FROM newsletters WHERE slug = ? AND web_published = 1`,
+    `SELECT n.id, n.title, n.slug, n.excerpt, n.blocks_json, n.cover_media_id,
+            n.published_at, n.updated_at, u.name AS author_name
+     FROM newsletters n LEFT JOIN users u ON u.id = n.author_id
+     WHERE n.slug = ? AND n.web_published = 1`,
   )
     .bind(slug)
-    .first<Row>();
+    .first<Row & { updated_at?: string; author_name?: string | null }>();
 
   const { base, path } = await publicSettings(c.env, c.req.url);
   const name = await siteName(c.env);
@@ -275,6 +317,9 @@ publicRoutes.get('/:slug', async (c) => {
     canonical: articleUrl(base, path, row.slug),
     image: cover,
     siteName: name,
+    published: row.published_at,
+    modified: row.updated_at || row.published_at,
+    author: row.author_name || null,
     body: `<article>
       <h1>${escapeHtml(row.title)}</h1>
       ${row.published_at ? `<div class="meta">${publicDate(row.published_at)}</div>` : ''}

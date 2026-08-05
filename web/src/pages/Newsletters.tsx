@@ -4,7 +4,7 @@ import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
   Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
   Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
-  Video, AudioLines, FileDown, Columns2, ListTodo, Upload,
+  Video, AudioLines, FileDown, Columns2, ListTodo, Upload, SpellCheck,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
@@ -144,6 +144,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [dirty, setDirty] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [recovered, setRecovered] = useState<any>(null);
+  const [proofing, setProofing] = useState(false);
+  const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
   const draftKey = `naf.newsletter.draft.${id}`;
 
   function loadStats() {
@@ -306,6 +308,19 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     return c;
   }); };
 
+  /* التدقيق يحفظ أولاً: المدقّق يقرأ الكتل من الخادم، ونصٌّ لم يُحفظ
+     بعد يُدقَّق في نسخته القديمة فتصل الملاحظات عن كلامٍ غُيّر. */
+  async function proofread() {
+    setProofing(true);
+    setMsg('');
+    try {
+      await save();
+      const d = await api.post(`/newsletters/${id}/proofread`);
+      setProof(d.notes || []);
+      if (!(d.notes || []).length) setMsg('لا ملاحظات على النصّ');
+    } catch (e: any) { setMsg(e.message); } finally { setProofing(false); }
+  }
+
   async function schedule(iso: string) {
     try {
       await save(); // المحتوى أولاً — نشرة تُجدول بمحتوى قديم تُرسله قديماً
@@ -336,6 +351,9 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         <div className="spacer" />
         <AutosaveState state={auto} />
         {msg && <span className="ok">{msg}</span>}
+        <button className="btn ghost" disabled={proofing} onClick={proofread}>
+          <SpellCheck size={20} /> {proofing ? 'جارٍ التدقيق…' : 'تدقيق لغوي'}
+        </button>
         <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
         <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
         {nl.status === 'scheduled' ? (
@@ -357,6 +375,27 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       )}
 
       {scheduling && <ScheduleModal onClose={() => setScheduling(false)} onConfirm={schedule} />}
+
+      {proof && proof.length > 0 && (
+        <Modal title="تدقيق لغوي" onClose={() => setProof(null)}>
+          {/* الملاحظات تُقرأ ولا تُطبَّق: نصٌّ يُستبدل كاملاً يُدخل
+              تغييرات لم يطلبها الكاتب في مقالٍ تُحسب فيه الكلمة. */}
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
+            <bdi>{proof.length}</bdi> ملاحظة. صحّحها في الكتل بنفسك — لا تُطبَّق تلقائياً.
+          </p>
+          <div style={{ display: 'grid', gap: 'var(--space-2)', maxHeight: 420, overflowY: 'auto' }}>
+            {proof.map((n, i) => (
+              <div key={i} className="card" style={{ padding: 'var(--space-3)' }}>
+                <div style={{ fontSize: 'var(--text-sm)', textDecoration: 'line-through', color: 'var(--muted-foreground)' }}>
+                  {n.before}
+                </div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--success-strong)' }}>{n.after}</div>
+                {n.why && <div className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 4 }}>{n.why}</div>}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {recovered && (
         <div className="card" style={{ background: 'var(--warning-soft)', marginBottom: 12 }}>

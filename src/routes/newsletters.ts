@@ -8,6 +8,7 @@ import {
   toXThread, toLinkedInPost,
 } from '../services/newsletter';
 import { getProvider } from '../adapters';
+import { proofreadArabic } from '../services/claude';
 import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -123,6 +124,21 @@ newsletterRoutes.post('/:id/send', async (c) => {
     return c.json({ ok: true, queued });
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 400);
+  }
+});
+
+/* التدقيق اللغوي — يقرأ نصّ الكتل ويعيد ملاحظات لا نصّاً مستبدَلاً.
+   الصلاحية نفسها التي تحكم التوليد: كلاهما نداءٌ مدفوع إلى Claude. */
+newsletterRoutes.post('/:id/proofread', requirePermission('ai.generate'), async (c) => {
+  const row = await c.env.DB.prepare('SELECT blocks_json, title FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ blocks_json: string; title: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const text = blocksToText(parseBlocks(row.blocks_json));
+  if (!text.trim()) return c.json({ notes: [] });
+  try {
+    return c.json({ notes: await proofreadArabic(c.env, text) });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
   }
 });
 

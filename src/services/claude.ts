@@ -250,3 +250,63 @@ export async function generateFromMedia(
   const out = (data.content || []).map((b: any) => b.text || '').join('').trim();
   return out || '(لم يُرجِع النموذج نصاً)';
 }
+
+/* ===== التدقيق اللغوي العربي =====
+
+   «تدقيق لغوي» لا «إملائي» — naf-terms.md §١٤: المدقّق يراجع الإملاء
+   والنحو وعلامات الترقيم معاً، وتسميته إملائياً تَعِد بأقلّ مما يفعل.
+
+   ويعيد ملاحظات لا نصّاً مستبدَلاً. الفرق مقصود: نصٌّ يُستبدل كاملاً
+   يُدخل تغييرات لم يطلبها الكاتب في مقالٍ قانونيّ تُحسب فيه الكلمة،
+   ويفقده القدرة على الرفض. الملاحظة تُقرأ وتُقبل واحدةً واحدة. */
+
+export type ProofNote = { before: string; after: string; why: string };
+
+const PROOF_SYSTEM = `أنت مدقّق لغوي عربي محترف تراجع نصّاً في نشرة قانونية سعودية.
+راجع الإملاء والنحو وعلامات الترقيم وسلامة التركيب.
+لا تُعِد صياغة الأسلوب ولا تختصر ولا تضف محتوى — التدقيق لا التحرير.
+اترك المصطلحات القانونية كما هي، واترك الأرقام والتواريخ وأسماء الأنظمة دون تغيير.
+أعد النتيجة JSON فقط بلا أي نصّ خارجه، بالشكل:
+{"notes":[{"before":"النصّ كما ورد","after":"النصّ بعد التصحيح","why":"سبب مختصر"}]}
+وإن كان النصّ سليماً فأعد {"notes":[]}.`;
+
+export async function proofreadArabic(env: Env, text: string): Promise<ProofNote[]> {
+  const src = String(text || '').trim();
+  if (!src) return [];
+  // بلا مفتاح لا تدقيق — ولا ملاحظات مخترعة توهم الكاتب أنه رُوجع.
+  if (!env.CLAUDE_API_KEY) throw new Error('التدقيق اللغوي غير مضبوط. اضبط مفتاح Claude في الإعدادات.');
+
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': env.CLAUDE_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2048,
+      system: PROOF_SYSTEM,
+      messages: [{ role: 'user', content: src.slice(0, 12000) }],
+    }),
+  });
+
+  const data = (await res.json()) as any;
+  if (!res.ok) throw new Error(`خطأ من Claude API: ${data?.error?.message || res.status}`);
+  const raw = (data.content || []).map((b: any) => b.text || '').join('').trim();
+
+  // النموذج قد يلفّ JSON بسياج شيفرة رغم التعليمات — نستخرج أول كائن.
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[0]);
+    const notes = Array.isArray(parsed?.notes) ? parsed.notes : [];
+    return notes
+      .filter((n: any) => n && typeof n.before === 'string' && typeof n.after === 'string' && n.before !== n.after)
+      .slice(0, 50)
+      .map((n: any) => ({ before: n.before, after: n.after, why: String(n.why || '') }));
+  } catch {
+    // ردٌّ غير قابل للقراءة يُعدّ «لا ملاحظات» لا خطأً يوقف الكاتب
+    return [];
+  }
+}
