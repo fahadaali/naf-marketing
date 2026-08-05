@@ -335,3 +335,17 @@ describe('الأعمدة وقائمة المهام', () => {
     expect(renderBlocks([{ type: 'checklist', items: [] }], 'web')).toBe('');
   });
 });
+
+describe('الأعمدة في المقتطف', () => {
+  /* كانت كتلة الأعمدة تسقط من blocksToText، فتُحذف فقرتان كاملتان من
+     المقتطف ومن منشور التواصل بلا أثر ظاهر. */
+  it('يدخل نصّ العمودين', () => {
+    const t = blocksToText([{ type: 'columns', start: 'العمود الأول', end: 'العمود الثاني' }]);
+    expect(t).toContain('العمود الأول');
+    expect(t).toContain('العمود الثاني');
+  });
+  it('ويُجرَّد تنسيقهما', () => {
+    const t = blocksToText([{ type: 'columns', start: '**غامق**', end: '[نصّ](https://naf.sa)' }]);
+    expect(t).toBe('غامق\n\nنصّ');
+  });
+});

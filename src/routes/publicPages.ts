@@ -22,13 +22,16 @@ type Row = {
    والقيم كلّها من الصفحة نفسها — لا يُخترع تاريخ ولا مؤلّف. حقلٌ
    بلا قيمة يسقط من الكائن ولا يُملأ بفراغ: بياناتٌ منظّمة كاذبة أسوأ
    من غيابها. */
+export type JsonLdKind = 'Article' | 'CollectionPage';
+
 export function articleJsonLd(o: {
   title: string; description: string; canonical: string; image?: string; siteName: string;
   published?: string | null; modified?: string | null; author?: string | null;
+  kind?: JsonLdKind;
 }): string {
   const data: Record<string, unknown> = {
     '@context': 'https://schema.org',
-    '@type': 'Article',
+    '@type': o.kind || 'Article',
     headline: o.title,
     inLanguage: 'ar',
     mainEntityOfPage: { '@type': 'WebPage', '@id': o.canonical },
@@ -49,6 +52,13 @@ export function articleJsonLd(o: {
 function layout(opts: {
   title: string; description: string; canonical: string; image?: string; body: string; siteName: string;
   published?: string | null; modified?: string | null; author?: string | null;
+  /* البيانات المنظّمة اختيارية ولا تُصدَّر إلا حين تُطلب صراحةً.
+
+     كانت تُصدَّر من هنا بلا شرط، فحملت صفحةُ الفهرس و٤٠٤ وتأكيدُ
+     الاشتراك وإلغاؤه كلُّها `"@type":"Article"` — أربعُ صفحاتٍ تُخبر
+     المفهرس أنها مقالات وليست. وهو ما يمنعه التعليق فوق الدالة
+     نفسها: بياناتٌ منظّمة كاذبة أسوأ من غيابها. */
+  jsonLd?: JsonLdKind;
 }): string {
   const { title, description, canonical, image, body, siteName } = opts;
   return `<!doctype html>
@@ -59,7 +69,7 @@ function layout(opts: {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="canonical" href="${escapeHtml(canonical)}">
-<meta property="og:type" content="article">
+<meta property="og:type" content="${opts.jsonLd === 'Article' ? 'article' : 'website'}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(canonical)}">
@@ -71,10 +81,10 @@ ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ''}
 ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg">
 <link rel="stylesheet" href="/naf-public.css">
-<script type="application/ld+json">${articleJsonLd({
-  title, description, canonical, image, siteName,
+${opts.jsonLd ? `<script type="application/ld+json">${articleJsonLd({
+  title, description, canonical, image, siteName, kind: opts.jsonLd,
   published: opts.published, modified: opts.modified, author: opts.author,
-})}</script>
+})}</script>` : ''}
 <style>
   /* رموز ناف كلها من /naf-public.css المولَّد من naf-theme.css في السجلّ.
      لا قيمة لون ولا خط هنا — الوضع الداكن يتبع تفضيل النظام تلقائياً. */
@@ -231,6 +241,7 @@ publicRoutes.get('/', async (c) => {
     description: `أحدث المقالات والنشرات من ${name}`,
     canonical: `${base}${path}`,
     siteName: name,
+    jsonLd: 'CollectionPage',
     body: `<h1>المقالات</h1>${items}${subscribeForm(`${base}${path}`)}`,
   }));
 });
@@ -317,6 +328,7 @@ publicRoutes.get('/:slug', async (c) => {
     canonical: articleUrl(base, path, row.slug),
     image: cover,
     siteName: name,
+    jsonLd: 'Article',
     published: row.published_at,
     modified: row.updated_at || row.published_at,
     author: row.author_name || null,

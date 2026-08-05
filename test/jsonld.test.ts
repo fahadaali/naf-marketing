@@ -47,3 +47,15 @@ describe('articleJsonLd', () => {
     expect(d.headline).toBe('أ</script>ب');
   });
 });
+
+/* النوع يتبع الصفحة. كانت layout تُصدّر Article بلا شرط، فحملته
+   صفحةُ الفهرس و٤٠٤ وتأكيدُ الاشتراك وإلغاؤه — أربعُ صفحات تُخبر
+   المفهرس أنها مقالات وليست. */
+describe('نوع البيانات المنظّمة', () => {
+  it('Article هو الافتراضي', () => {
+    expect(JSON.parse(articleJsonLd(base))['@type']).toBe('Article');
+  });
+  it('الفهرس CollectionPage لا Article', () => {
+    expect(JSON.parse(articleJsonLd({ ...base, kind: 'CollectionPage' }))['@type']).toBe('CollectionPage');
+  });
+});

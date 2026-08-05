@@ -407,6 +407,10 @@ export function blocksToText(blocks: Block[]): string {
     // بنيةٌ لا تُقرأ منشوراً على إكس.
     if (b.type === 'heading' || b.type === 'text' || b.type === 'quote' || b.type === 'callout') {
       parts.push(stripInline((b as any).text || ''));
+    } else if (b.type === 'columns') {
+      // العمودان متنٌ يقرؤه القارئ لا بنية — إسقاطهما كان يحذف فقرتين
+      // كاملتين من المقتطف ومن منشور التواصل بلا أثر ظاهر.
+      parts.push(stripInline(b.start), stripInline(b.end));
     }
   }
   return parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
