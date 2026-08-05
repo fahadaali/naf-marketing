@@ -2,6 +2,10 @@ export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   ASSETS: Fetcher;
+  /* تصيير المتصفح — لتوليد PDF. اختياريّ بحقّ: الربط يحتاج خطة
+     Workers مدفوعة، والمنصة تعمل بدونه وتعرض «نسخة للطباعة» بدلاً
+     منه. الشيفرة تفحصه ولا تفترضه. */
+  BROWSER?: Fetcher;
   // الدخول الموحّد (naf-auth): جلسات وكاش مفاتيح وحالة عابرة
   AUTH_KV?: KVNamespace;
   // vars

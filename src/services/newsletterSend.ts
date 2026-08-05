@@ -2,6 +2,7 @@ import type { Env } from '../types';
 import { newId, nowIso } from '../util';
 import { getEmailProvider } from './email';
 import { EMAIL } from './emailTheme';
+import { logAudit } from './audit';
 import {
   parseBlocks, renderBlocks, escapeHtml, publicSettings, articleUrl,
 } from './newsletter';
@@ -107,6 +108,51 @@ export async function queueNewsletter(env: Env, newsletterId: string): Promise<n
     .bind(nowIso(), newsletterId)
     .run();
   return n.n;
+}
+
+/* ===== النشرات المجدولة =====
+
+   عمود scheduled_at وحالة 'scheduled' موجودان في الترحيل 0020 منذ أول
+   يوم، ولم يكن يقرؤهما أحد: لا واجهة تضبط الموعد ولا كرون يبلغه.
+   هذه الدالة هي القارئ الناقص.
+
+   والفشل هنا لا مستخدمَ أمامه. أشيع أسبابه «لا مشترك نشط في الشريحة»،
+   وهو سببٌ يزول بإضافة مشترك — فتُعاد المحاولة كل دورة. لكن الإعادة
+   الأبدية بصمت أسوأ من التوقّف: بعد نافذة RETRY_WINDOW تعود النشرة
+   مسودةً بلا موعد، ويُسجَّل السبب في سجلّ التدقيق ليُقرأ. */
+const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** هل انقضت نافذة إعادة المحاولة على نشرةٍ فشل إدخالها الطابور؟ */
+export function retryWindowPassed(scheduledAt: string, now: number): boolean {
+  const due = Date.parse(scheduledAt);
+  if (!Number.isFinite(due)) return true; // موعد تالف لا يُعاد إلى الأبد
+  return now - due > RETRY_WINDOW_MS;
+}
+
+export async function queueDueNewsletters(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, scheduled_at FROM newsletters
+      WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?
+      ORDER BY scheduled_at ASC LIMIT 5`,
+  ).bind(nowIso()).all<{ id: string; scheduled_at: string }>();
+
+  let started = 0;
+  for (const r of results) {
+    try {
+      await queueNewsletter(env, r.id);
+      started++;
+    } catch (e: any) {
+      if (!retryWindowPassed(r.scheduled_at, Date.now())) continue; // تُعاد في الدورة التالية
+      await env.DB.prepare(
+        "UPDATE newsletters SET status = 'draft', scheduled_at = NULL, updated_at = ? WHERE id = ?",
+      ).bind(nowIso(), r.id).run();
+      await logAudit(
+        env, { id: null, name: 'النظام' },
+        'newsletter.schedule.expired', 'newsletter', r.id, String(e?.message || e),
+      );
+    }
+  }
+  return started;
 }
 
 // يرسل دفعة واحدة من النشرات قيد الإرسال — يُستدعى من Cron

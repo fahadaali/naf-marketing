@@ -1,12 +1,19 @@
 import { isolate } from '../lib/format';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ArrowRight, Eye, Globe, Mail, Save, ExternalLink,
-  Heading2, Type, Image as ImageIcon, Link2, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
+  Heading2, Type, Image as ImageIcon, SquareMousePointer, Quote, Minus, Send, MousePointerClick, Share2, FlaskConical,
+  Images, CalendarClock, StickyNote, Table2, Superscript, TableOfContents, Code,
+  Video, AudioLines, FileDown, Columns2, ListTodo, Upload, SpellCheck, FileOutput, Printer,
 } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { DeliveryBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
+import InlineToolbar from '../components/InlineToolbar';
+import MediaPicker from '../components/MediaPicker';
+import { DateTimePicker } from '../components/DatePicker';
+import Modal from '../components/Modal';
+import { PlatformIcon, platformLabel } from '../platforms';
 
 /* قيم قالب البريد الحرفية — نسخة طبق الأصل من src/services/emailTheme.ts.
    لا يمكن استيراد ملف الخادم هنا (حزمتان منفصلتان)، فالنسخ مقصود
@@ -20,7 +27,14 @@ const EMAIL_PREVIEW = {
   fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
 } as const;
 
+/* مهلة الحفظ التلقائي بعد آخر تغيير. ثانيتان: أقصر منها يحفظ في وسط
+   الكلمة فيغرق D1 بكتابات، وأطول منها يجعل «تم الحفظ تلقائياً» تصل
+   بعد أن ينصرف الكاتب عن الشاشة. */
+const AUTOSAVE_MS = 2000;
+
 // ===== النشرات والمقالات — مصدر واحد يُنشر بريداً وصفحةً عامة (ولاحقاً إكس/لينكدإن) =====
+
+type CalloutTone = 'info' | 'warning' | 'primary';
 
 type Block =
   | { type: 'heading'; text: string; level?: 2 | 3 }
@@ -28,7 +42,32 @@ type Block =
   | { type: 'image'; mediaId?: string; url?: string; alt?: string; caption?: string }
   | { type: 'button'; text: string; url: string }
   | { type: 'quote'; text: string; cite?: string }
-  | { type: 'divider' };
+  | { type: 'divider' }
+  | { type: 'callout'; text: string; tone?: CalloutTone; title?: string }
+  | { type: 'table'; rows: string[][]; header?: boolean }
+  | { type: 'code'; text: string }
+  | { type: 'footnote'; text: string }
+  | { type: 'toc' }
+  | { type: 'audio'; mediaId?: string; url?: string; title?: string }
+  | { type: 'file'; mediaId?: string; url?: string; title?: string; note?: string }
+  | { type: 'video'; mediaId?: string; url?: string }
+  | { type: 'embed'; url: string; title?: string }
+  | { type: 'columns'; start: string; end: string }
+  | { type: 'checklist'; items: { text: string; done?: boolean }[] };
+
+/* عناوين النغمات — من naf-terms.md §١٤.
+
+   ونسخةٌ ثانية من CALLOUT في src/services/newsletter.ts بالضرورة:
+   حزمتان منفصلتان لا تستوردان من بعضهما، كما في EMAIL_PREVIEW أعلاه.
+   أي تغيير هناك يُنقل هنا وإلا اختلف ما يختاره الكاتب عمّا يُطبع.
+
+   و«تمييز» تظهر هنا خياراً في القائمة ولا عنوانَ افتراضيَّ لها في
+   الخادم — إبرازٌ بلا حكم لا يحمل عنواناً على البطاقة. */
+const TONE_LABEL: Record<CalloutTone, string> = {
+  info: 'معلومة',
+  warning: 'تحذير',
+  primary: 'تمييز',
+};
 
 
 export default function Newsletters() {
@@ -108,6 +147,15 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const [socialPick, setSocialPick] = useState<Record<string, boolean>>({ x: true, linkedin: true });
   const [ab, setAb] = useState<any>(null);
   const [tags, setTags] = useState<string[]>([]);
+  const [auto, setAuto] = useState<'' | 'saving' | 'saved' | 'failed'>('');
+  const [dirty, setDirty] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [recovered, setRecovered] = useState<any>(null);
+  const [exporting, setExporting] = useState(false);
+  const [caps, setCaps] = useState<{ pdf: boolean }>({ pdf: false });
+  const [proofing, setProofing] = useState(false);
+  const [proof, setProof] = useState<{ before: string; after: string; why: string }[] | null>(null);
+  const draftKey = `naf.newsletter.draft.${id}`;
 
   function loadStats() {
     api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
@@ -117,14 +165,28 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   useEffect(() => {
     loadStats();
     api.get('/newsletters/meta/tags').then((d) => setTags(d.tags || [])).catch(() => {});
+    api.get('/newsletters/meta/export-capabilities').then(setCaps).catch(() => {});
     api.get(`/newsletters/${id}`).then((d) => {
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
       try { setBlocks(JSON.parse(d.newsletter.blocks_json || '[]')); } catch { setBlocks([]); }
+
+      /* مسودة بقيت في المتصفح من جلسة سابقة تعذّر فيها الحفظ. لا تُطبَّق
+         تلقائياً: الخادم قد يحمل نسخةً أحدث حُرّرت من جهاز آخر، وتطبيقها
+         بلا سؤال يدوس عليها. تُعرض ويُترك الحكم للكاتب. */
+      try {
+        const raw = localStorage.getItem(`naf.newsletter.draft.${id}`);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        const same = JSON.stringify(saved.blocks || []) === (d.newsletter.blocks_json || '[]')
+          && (saved.title || '') === (d.newsletter.title || '');
+        if (!same) setRecovered(saved);
+        else localStorage.removeItem(`naf.newsletter.draft.${id}`);
+      } catch { /* مسودة تالفة تُتجاهل — لا تمنع فتح النشرة */ }
     }).catch((e) => setMsg(e.message));
   }, [id]);
 
-  function field(k: string, v: any) { setNl((n: any) => ({ ...n, [k]: v })); }
+  function field(k: string, v: any) { setDirty(true); setNl((n: any) => ({ ...n, [k]: v })); }
 
   async function save(extra: Record<string, unknown> = {}) {
     setSaving(true);
@@ -134,12 +196,51 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
         blocks_json: JSON.stringify(blocks), ...extra,
       });
-      setMsg('حُفظت');
+      // «تم الحفظ» من naf-terms.md §٤ — كانت «حُفظت»، وهي خارج القاموس.
+      setMsg('تم الحفظ');
+      // بدونها يبقى dirty مرفوعاً بعد الحفظ اليدوي، فيُطلق المؤقّت حفظاً
+      // ثانياً بلا تغيير ويكتب «تم الحفظ تلقائياً» فوق «تم الحفظ».
+      setDirty(false);
+      setAuto('');
+      localStorage.removeItem(draftKey);
       const d = await api.get(`/newsletters/${id}`);
       setNl(d.newsletter);
       setPublicUrl(d.public_url || '');
     } catch (e: any) { setMsg(e.message); } finally { setSaving(false); }
   }
+
+  /* ===== الحفظ التلقائي =====
+
+     كل تغيير يؤجّل حفظاً بعد AUTOSAVE_MS من آخر ضغطة. والنسخة تُكتب في
+     المتصفح قبل النداء لا بعده: رسالة الفشل تَعِد بأن «النصّ محفوظ في
+     المتصفح»، ووعدٌ في رسالة خطأ يجب أن يكون صادقاً وقت قراءته.
+
+     ولا يُشغَّل قبل أول تحميل: useEffect يعمل عند التركيب، فبلا الحارس
+     تُحفظ النشرة فور فتحها وتُكتب «تم الحفظ تلقائياً» بلا أن يلمسها أحد. */
+  useEffect(() => {
+    if (!nl || !dirty) return;
+    const snapshot = JSON.stringify({
+      title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt, blocks,
+    });
+    try { localStorage.setItem(draftKey, snapshot); } catch { /* مساحة ممتلئة — النداء يبقى */ }
+
+    const t = setTimeout(async () => {
+      setAuto('saving');
+      try {
+        await api.patch(`/newsletters/${id}`, {
+          title: nl.title, subject: nl.subject, preheader: nl.preheader, excerpt: nl.excerpt,
+          blocks_json: JSON.stringify(blocks),
+        });
+        setAuto('saved');
+        setDirty(false);
+        localStorage.removeItem(draftKey);
+      } catch {
+        setAuto('failed');
+      }
+    }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // nl بأكمله في التبعيات مقصود: أي حقل في الإعدادات يستحق الحفظ
+  }, [nl, blocks, dirty, id, draftKey]);
 
   async function showPreview() {
     try {
@@ -203,16 +304,68 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   // ===== أدوات الكتل =====
-  const add = (b: Block) => setBlocks((x) => [...x, b]);
-  const upd = (i: number, patch: any) => setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b)));
-  const del = (i: number) => setBlocks((x) => x.filter((_, j) => j !== i));
-  const move = (i: number, d: number) => setBlocks((x) => {
+  // كلّها تُعلّم dirty — الحفظ التلقائي يقرؤه، وبدونه تُحفظ الإعدادات
+  // وحدها ويبقى المحتوى معلّقاً.
+  const touch = () => setDirty(true);
+  const add = (b: Block) => { touch(); setBlocks((x) => [...x, b]); };
+  const upd = (i: number, patch: any) => { touch(); setBlocks((x) => x.map((b, j) => (j === i ? { ...b, ...patch } : b))); };
+  const del = (i: number) => { touch(); setBlocks((x) => x.filter((_, j) => j !== i)); };
+  const move = (i: number, d: number) => { touch(); return setBlocks((x) => {
     const j = i + d;
     if (j < 0 || j >= x.length) return x;
     const c = [...x];
     [c[i], c[j]] = [c[j], c[i]];
     return c;
-  });
+  }); };
+
+  /* التصدير يحفظ أولاً للسبب نفسه: كلا المسارين يقرأ الكتل من الخادم.
+
+     وWord ينزل ملفاً، وPDF يفتح نسخة الطباعة في نافذة تستدعي print()
+     — فيحفظها القارئ PDF من حوار الطباعة. ولا تُولَّد PDF في الخادم:
+     Workers بلا محرّك تصيير، والبديل الخفيف يسقط تشكيل العربية. */
+  async function exportDoc(fmt: 'pdf' | 'docx' | 'print') {
+    setMsg('');
+    try {
+      await save();
+      setExporting(false);
+      if (fmt === 'print') window.open(`/api/newsletters/${id}/print`, '_blank', 'noopener');
+      else window.location.href = `/api/newsletters/${id}/export.${fmt}`;
+      setMsg('تم التصدير');
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  /* التدقيق يحفظ أولاً: المدقّق يقرأ الكتل من الخادم، ونصٌّ لم يُحفظ
+     بعد يُدقَّق في نسخته القديمة فتصل الملاحظات عن كلامٍ غُيّر. */
+  async function proofread() {
+    setProofing(true);
+    setMsg('');
+    try {
+      await save();
+      const d = await api.post(`/newsletters/${id}/proofread`);
+      setProof(d.notes || []);
+      if (!(d.notes || []).length) setMsg('لا ملاحظات على النصّ');
+    } catch (e: any) { setMsg(e.message); } finally { setProofing(false); }
+  }
+
+  async function schedule(iso: string) {
+    try {
+      await save(); // المحتوى أولاً — نشرة تُجدول بمحتوى قديم تُرسله قديماً
+      await api.post(`/newsletters/${id}/schedule`, { scheduled_at: iso });
+      setMsg('تم جدولة الإرسال');
+      setScheduling(false);
+      const d = await api.get(`/newsletters/${id}`);
+      setNl(d.newsletter);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  async function cancelSchedule() {
+    try {
+      await api.post(`/newsletters/${id}/schedule/cancel`);
+      setMsg('تم إلغاء الجدولة');
+      const d = await api.get(`/newsletters/${id}`);
+      setNl(d.newsletter);
+    } catch (e: any) { setMsg(e.message); }
+  }
 
   if (!nl) return <p className="muted">جارٍ التحميل…</p>;
 
@@ -222,14 +375,112 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
         <button className="btn ghost sm" onClick={onBack}><ArrowRight size={20} /> رجوع</button>
         <h1 className="page-title" style={{ margin: 0, fontSize: 'var(--text-xl)' }}>{nl.title}</h1>
         <div className="spacer" />
+        <AutosaveState state={auto} />
         {msg && <span className="ok">{msg}</span>}
+        <button className="btn ghost" disabled={proofing} onClick={proofread}>
+          <SpellCheck size={20} /> {proofing ? 'جارٍ التدقيق…' : 'تدقيق لغوي'}
+        </button>
         <button className="btn ghost" onClick={showPreview}><Eye size={20} /> معاينة</button>
+        <button className="btn ghost" onClick={() => setExporting(true)}><FileOutput size={20} /> تصدير</button>
         <button className="btn ghost" onClick={sendTest}><Mail size={20} /> اختبار</button>
+        {nl.status === 'scheduled' ? (
+          <button className="btn ghost" onClick={cancelSchedule}><CalendarClock size={20} /> إلغاء الجدولة</button>
+        ) : nl.status === 'draft' ? (
+          <button className="btn ghost" onClick={() => setScheduling(true)}><CalendarClock size={20} /> جدولة الإرسال</button>
+        ) : null}
         {['draft', 'scheduled'].includes(nl.status) && (
           <button className="btn" onClick={sendAll}><Send size={20} /> إرسال للمشتركين</button>
         )}
         <button className="btn" disabled={saving} onClick={() => save()}><Save size={20} /> {saving ? 'جارٍ الحفظ…' : 'حفظ'}</button>
       </div>
+
+      {nl.status === 'scheduled' && nl.scheduled_at && (
+        <p className="muted" style={{ fontSize: 'var(--text-sm)', marginTop: 0 }}>
+          <CalendarClock size={16} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
+          مجدول — {formatRiyadh(nl.scheduled_at)}
+        </p>
+      )}
+
+      {scheduling && <ScheduleModal onClose={() => setScheduling(false)} onConfirm={schedule} />}
+
+      {exporting && (
+        <Modal title="تصدير" onClose={() => setExporting(false)}>
+          <div className="grid" style={{ gap: 'var(--space-2)' }}>
+            {/* زرّ PDF لا يُعرض إلا إذا كان ربط المتصفح متاحاً فعلاً —
+                زرٌّ يفشل عند الضغط أسوأ من زرٍّ غائب. */}
+            {caps.pdf && (
+              <button className="btn" onClick={() => exportDoc('pdf')}>
+                <FileOutput size={20} /> ملف PDF
+              </button>
+            )}
+            <button className={caps.pdf ? 'btn ghost' : 'btn'} onClick={() => exportDoc('docx')}>
+              <FileOutput size={20} /> مستند Word
+            </button>
+            <button className="btn ghost" onClick={() => exportDoc('print')}>
+              <Printer size={20} /> نسخة للطباعة
+            </button>
+            <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+              نسخة الطباعة تُفتح في نافذة جديدة، واحفظها PDF من حوار الطباعة.
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {proof && proof.length > 0 && (
+        <Modal title="تدقيق لغوي" onClose={() => setProof(null)}>
+          {/* الملاحظات تُقرأ ولا تُطبَّق: نصٌّ يُستبدل كاملاً يُدخل
+              تغييرات لم يطلبها الكاتب في مقالٍ تُحسب فيه الكلمة. */}
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
+            <bdi>{proof.length}</bdi> ملاحظة. صحّحها في الكتل بنفسك — لا تُطبَّق تلقائياً.
+          </p>
+          <div style={{ display: 'grid', gap: 'var(--space-2)', maxHeight: 420, overflowY: 'auto' }}>
+            {proof.map((n, i) => (
+              <div key={i} className="card" style={{ padding: 'var(--space-3)' }}>
+                <div style={{ fontSize: 'var(--text-sm)', textDecoration: 'line-through', color: 'var(--muted-foreground)' }}>
+                  {n.before}
+                </div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--success-strong)' }}>{n.after}</div>
+                {n.why && <div className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 4 }}>{n.why}</div>}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {recovered && (
+        <div className="card" style={{ background: 'var(--warning-soft)', marginBottom: 12 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <span style={{ color: 'var(--warning-strong)', fontSize: 'var(--text-sm)' }}>
+              مسودة لم تُحفظ على الخادم. استعدها أو تجاهلها.
+            </span>
+            <div className="spacer" />
+            <button
+              className="btn sm"
+              onClick={() => {
+                setNl((n: any) => ({
+                  ...n,
+                  title: recovered.title ?? n.title,
+                  subject: recovered.subject ?? n.subject,
+                  preheader: recovered.preheader ?? n.preheader,
+                  excerpt: recovered.excerpt ?? n.excerpt,
+                }));
+                setBlocks(recovered.blocks || []);
+                setRecovered(null);
+                setDirty(true); // تُحفظ تلقائياً بعد لحظة، فتصل الخادم هذه المرة
+                setMsg('تمت الاستعادة');
+              }}
+            >
+              استعادة
+            </button>
+            <button
+              className="btn sm ghost"
+              onClick={() => { localStorage.removeItem(draftKey); setRecovered(null); }}
+            >
+              تجاهل
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         {/* الإعدادات */}
@@ -296,12 +547,15 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             )}
             {nl.web_published && (
               <>
-                <div className="row" style={{ gap: 12, marginBottom: 8 }}>
-                  {['x', 'linkedin'].map((p) => (
-                    <label key={p} className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, cursor: 'pointer' }}>
+                {/* المنصات من الخادم لا مكتوبةً هنا: هو من يعرف أيّها
+                    تقبل منشوراً نصّياً وأيّها يحتاج وسيطاً. */}
+                <div className="row" style={{ gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {(social?.targets || ['x', 'linkedin']).map((p: string) => (
+                    <label key={p} className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, cursor: 'pointer', alignItems: 'center' }}>
                       <input type="checkbox" checked={!!socialPick[p]}
                              onChange={(e) => setSocialPick((v) => ({ ...v, [p]: e.target.checked }))} />
-                      {p === 'x' ? 'إكس (سلسلة)' : 'لينكدإن'}
+                      <PlatformIcon platform={p} size={16} />
+                      {platformLabel(p)}{p === 'x' ? ' (سلسلة)' : ''}
                     </label>
                   ))}
                   <div className="spacer" />
@@ -309,12 +563,22 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                 </div>
                 {social && (
                   <div style={{ fontSize: 'var(--text-xs)' }}>
-                    <div className="muted" style={{ marginBottom: 4 }}>سلسلة إكس ({social.x?.length} تغريدة):</div>
+                    <div className="muted" style={{ marginBottom: 4 }}>
+                      سلسلة إكس (<bdi>{social.x?.length}</bdi> تغريدة):
+                    </div>
                     {(social.x || []).map((t: string, i: number) => (
                       <div key={i} className="card" style={{ padding: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}>{t}</div>
                     ))}
-                    <div className="muted" style={{ margin: '8px 0 4px' }}>لينكدإن:</div>
-                    <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.linkedin}</div>
+                    {/* صياغة كل منصة مختارة، مع عدّاد حدّها — الحدّ حدُّ
+                        قَبولٍ لا ذوق: تجاوزه يعني بتر المنشور أو رفضه. */}
+                    {(social.targets || []).filter((p: string) => p !== 'x' && socialPick[p]).map((p: string) => (
+                      <div key={p}>
+                        <div className="muted" style={{ margin: '8px 0 4px' }}>
+                          {platformLabel(p)} — <bdi>{(social.drafts?.[p] || '').length}</bdi>/<bdi>{social.limits?.[p]}</bdi>
+                        </div>
+                        <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.drafts?.[p]}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </>
@@ -370,9 +634,20 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
             <button className="btn sm ghost" onClick={() => add({ type: 'heading', text: '', level: 2 })}><Heading2 size={20} /> عنوان</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'text', text: '' })}><Type size={20} /> فقرة</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'image', url: '' })}><ImageIcon size={20} /> صورة</button>
-            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><Link2 size={20} /> زر</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'button', text: '', url: '' })}><SquareMousePointer size={20} /> زر</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'quote', text: '' })}><Quote size={20} /> اقتباس</button>
             <button className="btn sm ghost" onClick={() => add({ type: 'divider' })}><Minus size={20} /> فاصل</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'callout', text: '', tone: 'info' })}><StickyNote size={20} /> بطاقة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'table', rows: [['', ''], ['', '']], header: true })}><Table2 size={20} /> جدول</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'footnote', text: '' })}><Superscript size={20} /> حاشية</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'toc' })}><TableOfContents size={20} /> فهرس المحتويات</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'code', text: '' })}><Code size={20} /> كود</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'video' })}><Video size={20} /> فيديو</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'audio' })}><AudioLines size={20} /> صوت</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'file' })}><FileDown size={20} /> ملف</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'embed', url: '' })}><Globe size={20} /> تضمين</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'columns', start: '', end: '' })}><Columns2 size={20} /> أعمدة</button>
+            <button className="btn sm ghost" onClick={() => add({ type: 'checklist', items: [{ text: '', done: false }] })}><ListTodo size={20} /> قائمة مهام</button>
           </div>
 
           {blocks.map((b, i) => (
@@ -430,7 +705,122 @@ function pct(n: number, d: number): number {
 }
 
 function blockLabel(t: string): string {
-  return { heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل' }[t] || t;
+  // كلّها من naf-terms.md §١٤ — كتل المحتوى.
+  return {
+    heading: 'عنوان', text: 'فقرة', image: 'صورة', button: 'زر', quote: 'اقتباس', divider: 'فاصل',
+    callout: 'بطاقة', table: 'جدول', code: 'كود', footnote: 'حاشية', toc: 'فهرس المحتويات',
+    audio: 'صوت', file: 'ملف', video: 'فيديو', embed: 'تضمين', columns: 'أعمدة', checklist: 'قائمة مهام',
+  }[t] || t;
+}
+
+/* حقل فقرة بشريط تنسيق. مفصول في مكوّن لأن الاقتباس يستعمله أيضاً —
+   وكلاهما يمرّ على renderInline في الخادم، فيجب أن يعرض للكاتب نفس
+   العلامات. */
+function InlineField({ value, rows, placeholder, onChange }: {
+  value: string; rows: number; placeholder: string; onChange: (v: string) => void;
+}) {
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const [err, setErr] = useState('');
+  return (
+    <div>
+      <InlineToolbar areaRef={areaRef} value={value} onChange={onChange} onError={setErr} />
+      <textarea
+        ref={areaRef}
+        className="input"
+        style={{ borderStartStartRadius: 0, borderStartEndRadius: 0 }}
+        rows={rows}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); if (err) setErr(''); }}
+      />
+      {err && <p className="err" style={{ fontSize: 'var(--text-xs)', margin: '4px 0 0' }}>{err}</p>}
+    </div>
+  );
+}
+
+/* حالة الحفظ التلقائي — نصٌّ لا أيقونة.
+
+   naf-icons.md ينصّ على ذلك صراحةً: أيقونة تومض عند كل ضغطة مفتاح
+   ضجيجٌ بصريّ لا معلومة. والألفاظ الثلاثة من naf-terms.md §١٤.
+
+   ورسالة الفشل تَعِد بأن النصّ محفوظ في المتصفح، وهو صادق: النسخة
+   تُكتب في localStorage قبل النداء لا بعد نجاحه. */
+function AutosaveState({ state }: { state: '' | 'saving' | 'saved' | 'failed' }) {
+  if (!state) return null;
+  if (state === 'saving') return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>جارٍ الحفظ…</span>;
+  if (state === 'saved') return <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>تم الحفظ تلقائياً</span>;
+  return (
+    <span className="err" style={{ fontSize: 'var(--text-xs)' }}>
+      تعذّر الحفظ التلقائي. تحقّق من الاتصال، والنصّ محفوظ في المتصفح.
+    </span>
+  );
+}
+
+/* نافذة جدولة الإرسال. الموعد يُدخل بتوقيت الرياض بصرف النظر عن توقيت
+   جهاز المحرر، ثم يُثبَّت +03:00 ويُحوَّل إلى UTC — نفس ما تفعله جدولة
+   المنشورات في Editor.tsx حرفياً، فلا توقيتان في منصة واحدة. */
+function ScheduleModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (iso: string) => void }) {
+  const [when, setWhen] = useState('');
+  return (
+    <Modal title="جدولة الإرسال" onClose={onClose}>
+      <div className="field">
+        <label>الموعد (بتوقيت الرياض)</label>
+        <DateTimePicker value={when} onChange={setWhen} inline />
+      </div>
+      <button className="btn" disabled={!when} onClick={() => onConfirm(new Date(`${when}:00+03:00`).toISOString())}>
+        <CalendarClock size={20} /> جدولة الإرسال
+      </button>
+    </Modal>
+  );
+}
+
+/* حقول كتلة الصورة. المصدر أحد اثنين لا كلاهما: وسيطٌ من المكتبة
+   (mediaId) أو رابطٌ خارجي (url) — واختيار أحدهما يمسح الآخر، وإلا
+   بقيت قيمتان والمصيّر يفضّل url صامتاً فيرى الكاتب غير ما اختار. */
+function ImageFields({ block, onChange }: { block: Extract<Block, { type: 'image' }>; onChange: (p: any) => void }) {
+  const [picking, setPicking] = useState(false);
+  const src = block.mediaId ? `/api/media/${block.mediaId}` : block.url || '';
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn sm ghost" type="button" onClick={() => setPicking(true)}>
+          <Images size={20} /> مكتبة الوسائط
+        </button>
+        {src && (
+          <img
+            src={src}
+            alt=""
+            style={{ height: 40, width: 60, objectFit: 'cover', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
+          />
+        )}
+        <div className="spacer" />
+        {block.mediaId && (
+          <button className="btn sm ghost" type="button" onClick={() => onChange({ mediaId: '' })}>مسح</button>
+        )}
+      </div>
+
+      {!block.mediaId && (
+        <input className="input" placeholder="أو رابط صورة خارجي" value={block.url || ''}
+               onChange={(e) => onChange({ url: e.target.value })} />
+      )}
+      <input className="input" placeholder="وصف بديل" value={block.alt || ''}
+             onChange={(e) => onChange({ alt: e.target.value })} />
+      <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
+             onChange={(e) => onChange({ caption: e.target.value })} />
+
+      {picking && (
+        <MediaPicker
+          onClose={() => setPicking(false)}
+          onPick={(m) => {
+            // الرابط يُمسح مع الاختيار — مصدر واحد لا اثنان.
+            onChange({ mediaId: m.id, url: '', alt: block.alt || m.filename || '' });
+            setPicking(false);
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => void }) {
@@ -448,19 +838,10 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
         </div>
       );
     case 'text':
-      return <textarea className="input" rows={4} placeholder="نص الفقرة (سطر فارغ يفصل فقرتين)" value={block.text}
-                       onChange={(e) => onChange({ text: e.target.value })} />;
+      return <InlineField value={block.text} rows={4} placeholder="نص الفقرة (سطر فارغ يفصل فقرتين)"
+                          onChange={(text) => onChange({ text })} />;
     case 'image':
-      return (
-        <div className="grid" style={{ gap: 6 }}>
-          <input className="input" placeholder="رابط الصورة أو /api/media/<id>" value={block.url || ''}
-                 onChange={(e) => onChange({ url: e.target.value })} />
-          <input className="input" placeholder="وصف بديل (\u2068alt\u2069)" value={block.alt || ''}
-                 onChange={(e) => onChange({ alt: e.target.value })} />
-          <input className="input" placeholder="تعليق أسفل الصورة (اختياري)" value={block.caption || ''}
-                 onChange={(e) => onChange({ caption: e.target.value })} />
-        </div>
-      );
+      return <ImageFields block={block} onChange={onChange} />;
     case 'button':
       return (
         <div className="row" style={{ gap: 8 }}>
@@ -473,13 +854,284 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (p: any) => 
     case 'quote':
       return (
         <div className="grid" style={{ gap: 6 }}>
-          <textarea className="input" rows={2} placeholder="نص الاقتباس" value={block.text}
-                    onChange={(e) => onChange({ text: e.target.value })} />
+          <InlineField value={block.text} rows={2} placeholder="نص الاقتباس"
+                       onChange={(text) => onChange({ text })} />
           <input className="input" placeholder="المصدر (اختياري)" value={block.cite || ''}
                  onChange={(e) => onChange({ cite: e.target.value })} />
         </div>
       );
+    case 'callout':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <select
+              className="select"
+              style={{ maxWidth: 140 }}
+              value={block.tone || 'primary'}
+              onChange={(e) => onChange({ tone: e.target.value as CalloutTone })}
+            >
+              {(['info', 'warning', 'primary'] as CalloutTone[]).map((t) => (
+                <option key={t} value={t}>{TONE_LABEL[t]}</option>
+              ))}
+            </select>
+            <input
+              className="input"
+              style={{ flex: 1 }}
+              placeholder={block.tone && block.tone !== 'primary' ? TONE_LABEL[block.tone] : 'عنوان البطاقة'}
+              value={block.title || ''}
+              onChange={(e) => onChange({ title: e.target.value })}
+            />
+          </div>
+          <InlineField value={block.text} rows={2} placeholder="نص البطاقة"
+                       onChange={(text) => onChange({ text })} />
+        </div>
+      );
+
+    case 'table':
+      return <TableFields block={block} onChange={onChange} />;
+
+    case 'code':
+      return (
+        <textarea
+          className="input"
+          rows={5}
+          dir="ltr"
+          spellCheck={false}
+          style={{ fontFamily: 'var(--font-mono)', textAlign: 'start' }}
+          placeholder="الكود"
+          value={block.text}
+          onChange={(e) => onChange({ text: e.target.value })}
+        />
+      );
+
+    case 'footnote':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <InlineField value={block.text} rows={2} placeholder="نص الحاشية"
+                       onChange={(text) => onChange({ text })} />
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+            يظهر رقمها في موضعها من المقال، ونصّها في «الحواشي» آخره.
+          </p>
+        </div>
+      );
+
+    case 'toc':
+      return (
+        <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+          فهرس يُبنى من عناوين المقال تلقائياً. رسالة البريد تعرضه قائمةً بلا روابط — صناديق الوارد لا تنتقل داخل الرسالة.
+        </p>
+      );
+
+    case 'audio':
+      return <MediaRefFields block={block} onChange={onChange} accept="audio/*" titlePlaceholder="عنوان المقطع" />;
+
+    case 'file':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <MediaRefFields block={block} onChange={onChange} accept="*/*" titlePlaceholder="اسم الملف كما يراه القارئ" />
+          <input className="input" placeholder="وصف مختصر (اختياري)" value={block.note || ''}
+                 onChange={(e) => onChange({ note: e.target.value })} />
+        </div>
+      );
+
+    case 'video':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <MediaRefFields block={block} onChange={onChange} accept="video/*" titlePlaceholder="" hideTitle />
+          <input className="input" placeholder="أو رابط يوتيوب أو ڤيميو" value={block.url || ''}
+                 onChange={(e) => onChange({ url: e.target.value, mediaId: '' })} />
+          <EmbedNote url={block.url || ''} />
+        </div>
+      );
+
+    case 'embed':
+      return (
+        <div className="grid" style={{ gap: 6 }}>
+          <input className="input" placeholder="رابط الصفحة أو المقطع" value={block.url || ''}
+                 onChange={(e) => onChange({ url: e.target.value })} />
+          <input className="input" placeholder="عنوان البطاقة (اختياري)" value={block.title || ''}
+                 onChange={(e) => onChange({ title: e.target.value })} />
+          <EmbedNote url={block.url || ''} />
+        </div>
+      );
+
+    case 'columns':
+      return (
+        <div className="grid cols-2" style={{ gap: 8 }}>
+          <InlineField value={block.start} rows={3} placeholder="العمود الأول"
+                       onChange={(start) => onChange({ start })} />
+          <InlineField value={block.end} rows={3} placeholder="العمود الثاني"
+                       onChange={(end) => onChange({ end })} />
+        </div>
+      );
+
+    case 'checklist':
+      return <ChecklistFields block={block} onChange={onChange} />;
+
     default:
       return <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>خط فاصل بين الأقسام.</p>;
   }
+}
+
+/* يخبر الكاتب بما سيراه القارئ فعلاً قبل الإرسال، لا بعده.
+
+   الرسالة الأولى من naf-terms.md §١٤، والثانية تصف قاعدة القائمة
+   البيضاء في newsletter.ts — مزوّدٌ غير مسجَّل يصير بطاقة رابط في
+   الوجهتين، ومنصات التواصل ليست مسجَّلة عمداً. */
+function EmbedNote({ url }: { url: string }) {
+  if (!url.trim()) return null;
+  /* نسخة مبسّطة من القائمة البيضاء في newsletter.ts — تكفي لتمييز
+     «سيُضمَّن» من «سيصير بطاقة»، والحكم النهائي للخادم. */
+  const framed = new RegExp(
+    '^https://(?:www\\.)?(?:' +
+    'youtube\\.com/(?:watch\\?v=|shorts/)|youtu\\.be/|vimeo\\.com/\\d|dailymotion\\.com/video/|loom\\.com/share/|' +
+    'open\\.spotify\\.com/|soundcloud\\.com/|tiktok\\.com/@|instagram\\.com/(?:p|reel)/|' +
+    'facebook\\.com/[\\w.-]+/(?:posts|videos)/|linkedin\\.com/embed/feed/update/|' +
+    'google\\.com/maps/embed|docs\\.google\\.com/)',
+    'i',
+  ).test(url.trim());
+  return (
+    <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+      {framed
+        ? 'هذا التضمين يظهر في الصفحة العامة فقط. رسالة البريد تعرض بطاقة رابط بدلاً منه.'
+        : 'هذا الرابط يظهر بطاقة رابط في الصفحة العامة وفي البريد. التضمين المباشر ليوتيوب وڤيميو وديلي موشن ولووم وسبوتيفاي وساوندكلاود وتيك توك وإنستغرام وفيسبوك وخرائط جوجل ومستنداتها، ولينكدإن برابط التضمين وحده.'}
+    </p>
+  );
+}
+
+/* حقول كتلةٍ تشير إلى وسيط: صوت أو ملف أو فيديو. المصدر واحد لا اثنان،
+   كما في كتلة الصورة. */
+function MediaRefFields({ block, onChange, accept, titlePlaceholder, hideTitle }: {
+  block: any; onChange: (p: any) => void; accept: string; titlePlaceholder: string; hideTitle?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function upload(f: File) {
+    setBusy(true);
+    setErr('');
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      const d = await api.upload('/media', form);
+      onChange({ mediaId: d.id, url: '', title: block.title || d.filename || '' });
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn sm ghost" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+          <Upload size={20} /> {busy ? 'جارٍ الرفع…' : 'رفع'}
+        </button>
+        {block.mediaId && (
+          <>
+            <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{block.title || block.mediaId}</bdi></span>
+            <button className="btn sm ghost" type="button" onClick={() => onChange({ mediaId: '' })}>مسح</button>
+          </>
+        )}
+        <div className="spacer" />
+        {err && <span className="err" style={{ fontSize: 'var(--text-xs)' }}>{err}</span>}
+        <input ref={fileRef} type="file" hidden accept={accept}
+               onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
+      </div>
+      {!hideTitle && (
+        <input className="input" placeholder={titlePlaceholder} value={block.title || ''}
+               onChange={(e) => onChange({ title: e.target.value })} />
+      )}
+    </div>
+  );
+}
+
+function ChecklistFields({ block, onChange }: { block: Extract<Block, { type: 'checklist' }>; onChange: (p: any) => void }) {
+  const items = Array.isArray(block.items) && block.items.length ? block.items : [{ text: '', done: false }];
+  const set = (i: number, patch: any) => onChange({ items: items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      {items.map((it, i) => (
+        <div className="row" key={i} style={{ gap: 8 }}>
+          <input type="checkbox" checked={!!it.done} onChange={(e) => set(i, { done: e.target.checked })}
+                 aria-label={`البند ${i + 1} منجز`} />
+          <input className="input" style={{ flex: 1 }} placeholder="نصّ البند" value={it.text}
+                 onChange={(e) => set(i, { text: e.target.value })} />
+          <button className="btn sm ghost" type="button" title="حذف"
+                  onClick={() => onChange({ items: items.length > 1 ? items.filter((_, j) => j !== i) : items })}>
+            <Trash2 size={16} />
+          </button>
+        </div>
+      ))}
+      <div className="row">
+        <button className="btn sm ghost" type="button"
+                onClick={() => onChange({ items: [...items, { text: '', done: false }] })}>
+          <Plus size={20} /> بند
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* محرّر الجدول. شبكة حقول لا محرّر جداول كامل: النشرة القانونية تحمل
+   جدول مقارنةٍ صغيراً، ومحرّرٌ بدمج خلايا وتنسيقها بابٌ لا يُغلق. */
+function TableFields({ block, onChange }: { block: Extract<Block, { type: 'table' }>; onChange: (p: any) => void }) {
+  const rows: string[][] = Array.isArray(block.rows) && block.rows.length ? block.rows : [['', '']];
+  const cols = Math.max(...rows.map((r) => r.length), 1);
+
+  const setCell = (ri: number, ci: number, v: string) =>
+    onChange({ rows: rows.map((r, i) => (i === ri ? r.map((c, j) => (j === ci ? v : c)) : r)) });
+  const addRow = () => onChange({ rows: [...rows, Array(cols).fill('')] });
+  const addCol = () => onChange({ rows: rows.map((r) => [...r, '']) });
+  const delRow = (ri: number) => onChange({ rows: rows.length > 1 ? rows.filter((_, i) => i !== ri) : rows });
+  const delCol = (ci: number) => onChange({ rows: cols > 1 ? rows.map((r) => r.filter((_, j) => j !== ci)) : rows });
+
+  return (
+    <div className="grid" style={{ gap: 6 }}>
+      <label className="row" style={{ gap: 6, fontSize: 'var(--text-xs)' }}>
+        <input type="checkbox" checked={!!block.header} onChange={(e) => onChange({ header: e.target.checked })} />
+        صفّ العناوين
+      </label>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>
+                {Array.from({ length: cols }).map((_, ci) => (
+                  <td key={ci} style={{ padding: 2 }}>
+                    <input
+                      className="input"
+                      style={{ minWidth: 90, fontWeight: block.header && ri === 0 ? 600 : 400 }}
+                      value={r[ci] ?? ''}
+                      onChange={(e) => setCell(ri, ci, e.target.value)}
+                      aria-label={`صف ${ri + 1} عمود ${ci + 1}`}
+                    />
+                  </td>
+                ))}
+                <td style={{ padding: 2 }}>
+                  <button className="btn sm ghost" type="button" title="حذف الصف" onClick={() => delRow(ri)}>
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              {Array.from({ length: cols }).map((_, ci) => (
+                <td key={ci} style={{ padding: 2 }}>
+                  <button className="btn sm ghost" type="button" title="حذف العمود" onClick={() => delCol(ci)}>
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              ))}
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn sm ghost" type="button" onClick={addRow}><Plus size={20} /> صف</button>
+        <button className="btn sm ghost" type="button" onClick={addCol}><Plus size={20} /> عمود</button>
+      </div>
+    </div>
+  );
 }

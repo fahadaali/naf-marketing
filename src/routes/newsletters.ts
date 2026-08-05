@@ -5,9 +5,13 @@ import { getEmailProvider } from '../services/email';
 import { newId, nowIso } from '../util';
 import {
   parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl,
-  toXThread, toLinkedInPost,
+  toXThread, socialText, socialTargets, SOCIAL_LIMIT, SOCIAL_MEDIA_FIRST,
 } from '../services/newsletter';
 import { getProvider } from '../adapters';
+import { proofreadArabic } from '../services/claude';
+import { buildDocx } from '../services/docx';
+import { printDocument } from '../services/printDoc';
+import { buildArticlePdf } from '../services/pdf';
 import { queueNewsletter, newsletterStats, sendQueuedBatch, abResults, decideAbWinner } from '../services/newsletterSend';
 
 export const newsletterRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -126,6 +130,116 @@ newsletterRoutes.post('/:id/send', async (c) => {
   }
 });
 
+/* تصدير PDF — يُصيَّر في متصفّح Cloudflare لا في مكتبة PDF: العربية
+   تحتاج تشكيلاً وربطَ حروف، وأي بديل خفيف يُخرجها منفصلةً مقلوبة.
+
+   والربط غير متاح على كل خطة، فالواجهة تسأل عنه أولاً عبر
+   ‎/meta/export-capabilities ولا تعرض زرّاً يفشل عند الضغط. */
+newsletterRoutes.get('/meta/export-capabilities', (c) => c.json({ pdf: !!c.env.BROWSER }));
+
+newsletterRoutes.get('/:id/export.pdf', async (c) => {
+  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  try {
+    const bytes = await buildArticlePdf(c.env, row.title, row.blocks_json);
+    return new Response(bytes, {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': `attachment; filename="article.pdf"; filename*=UTF-8''${encodeURIComponent(row.slug || 'article')}.pdf`,
+      },
+    });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 503);
+  }
+});
+
+/* تصدير Word — مستند OOXML حقيقي لا HTML بامتداد doc. */
+newsletterRoutes.get('/:id/export.docx', async (c) => {
+  const row = await c.env.DB.prepare('SELECT title, slug, blocks_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; slug: string; blocks_json: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  // الأصل المطلق: رابطٌ نسبيّ في مستندٍ يُفتح من سطح المكتب لا يفتح شيئاً
+  const { base } = await publicSettings(c.env, c.req.url);
+  const bytes = buildDocx(row.title, parseBlocks(row.blocks_json), base);
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // اسم الملف بترميز RFC 5987 — العنوان عربي ولا يمرّ في ASCII
+      'content-disposition': `attachment; filename="article.docx"; filename*=UTF-8''${encodeURIComponent(row.slug || 'article')}.docx`,
+    },
+  });
+});
+
+/* نسخة الطباعة — يفتحها المتصفح ويطبعها القارئ إلى PDF بنفسه.
+
+   وهي البديل حين لا يكون ربط BROWSER متاحاً، وتبقى مفيدةً معه: من
+   أراد ضبط الهوامش أو اختيار الصفحات يفعل ذلك من حوار الطباعة.
+   (كان مكتوباً هنا أن PDF لا تُولَّد في الخادم — صار ذلك ممكناً
+   بـBrowser Rendering، فسقطت الجملة مع بقاء المسار.)
+
+   وهذه هي حالة «مستند يُولَّد في نافذته» في CLAUDE.md §1 حرفياً:
+   لا يرث ورقة أنماط التطبيق ولا يقرأ var(--…)، ويبقى فاتحاً مهما كان
+   وضع القارئ — مذكّرةٌ داكنة لا تُقدَّم وفاتورةٌ داكنة تُهدر الحبر. */
+newsletterRoutes.get('/:id/print', async (c) => {
+  const row = await c.env.DB.prepare('SELECT title, blocks_json FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ title: string; blocks_json: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const { base } = await publicSettings(c.env, c.req.url);
+  const body = renderBlocks(parseBlocks(row.blocks_json), 'web', base);
+  return c.html(printDocument(row.title, body));
+});
+
+/* التدقيق اللغوي — يقرأ نصّ الكتل ويعيد ملاحظات لا نصّاً مستبدَلاً.
+   الصلاحية نفسها التي تحكم التوليد: كلاهما نداءٌ مدفوع إلى Claude. */
+newsletterRoutes.post('/:id/proofread', requirePermission('ai.generate'), async (c) => {
+  const row = await c.env.DB.prepare('SELECT blocks_json, title FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ blocks_json: string; title: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  const text = blocksToText(parseBlocks(row.blocks_json));
+  if (!text.trim()) return c.json({ notes: [] });
+  try {
+    return c.json({ notes: await proofreadArabic(c.env, text) });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+/* جدولة الإرسال. الموعد يصل بصيغة ISO بتوقيت UTC — الواجهة تُدخله
+   بتوقيت الرياض وتحوّله، كما في جدولة المنشورات. الكرون هو الذي يُدخل
+   النشرة الطابور عند بلوغه (queueDueNewsletters). */
+newsletterRoutes.post('/:id/schedule', async (c) => {
+  const { scheduled_at } = await c.req.json<{ scheduled_at: string }>();
+  const at = Date.parse(scheduled_at || '');
+  if (!Number.isFinite(at)) return c.json({ error: 'الموعد غير صالح' }, 400);
+  if (at <= Date.now()) return c.json({ error: 'الموعد مضى. اختر وقتاً لاحقاً.' }, 400);
+
+  const row = await c.env.DB.prepare('SELECT status FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ status: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  // نفس حكم queueNewsletter، وبنفس ألفاظه — نشرةٌ غادرت المسودة لا تُجدول.
+  if (row.status === 'sending') return c.json({ error: 'النشرة قيد الإرسال بالفعل' }, 400);
+  if (row.status === 'sent') return c.json({ error: 'أُرسلت هذه النشرة مسبقاً' }, 400);
+
+  await c.env.DB.prepare(
+    "UPDATE newsletters SET status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?",
+  ).bind(new Date(at).toISOString(), nowIso(), c.req.param('id')).run();
+  return c.json({ ok: true, scheduled_at: new Date(at).toISOString() });
+});
+
+// إلغاء الجدولة — تعود النشرة مسودةً بلا موعد
+newsletterRoutes.post('/:id/schedule/cancel', async (c) => {
+  const row = await c.env.DB.prepare('SELECT status FROM newsletters WHERE id = ?')
+    .bind(c.req.param('id')).first<{ status: string }>();
+  if (!row) return c.json({ error: 'النشرة غير موجودة' }, 404);
+  if (row.status !== 'scheduled') return c.json({ error: 'النشرة غير مجدولة' }, 400);
+
+  await c.env.DB.prepare(
+    "UPDATE newsletters SET status = 'draft', scheduled_at = NULL, updated_at = ? WHERE id = ?",
+  ).bind(nowIso(), c.req.param('id')).run();
+  return c.json({ ok: true });
+});
+
 // إرسال تجريبي لبريد واحد قبل الإرسال الجماعي
 newsletterRoutes.post('/:id/test', async (c) => {
   const { email } = await c.req.json<{ email: string }>();
@@ -154,10 +268,19 @@ newsletterRoutes.get('/:id/social', async (c) => {
   const { base, path } = await publicSettings(c.env, c.req.url);
   const url = articleUrl(base, path, row.slug);
   const blocks = parseBlocks(row.blocks_json);
+  // صياغةٌ لكل منصة تقبل النشر النصّي، لا صيغتان تُعمَّم إحداهما
+  const drafts: Record<string, string> = {};
+  for (const p of socialTargets()) drafts[p] = socialText(p, row.title, blocks, url, row.excerpt);
   return c.json({
     url,
+    targets: socialTargets(),
+    limits: SOCIAL_LIMIT,
+    drafts,
+    /* سلسلة إكس تُعرض أجزاءً مرقّمة فتبقى مصفوفةً مستقلة. ولا مفتاح
+       linkedin بعد اليوم: كان يُبنى بـtoLinkedInPost بحدّ تسعمئة حرف
+       بينما يُنشر فعلاً بـsocialText بحدّ ثلاثة آلاف — صيغتان لنفس
+       المنصة، تُعرض إحداهما وتُرسل الأخرى. ولا مستهلك له في الواجهة. */
     x: toXThread(row.title, blocks, url),
-    linkedin: toLinkedInPost(row.title, blocks, url, row.excerpt),
   });
 });
 
@@ -181,8 +304,13 @@ newsletterRoutes.post('/:id/social', async (c) => {
 
   for (const p of platforms) {
     // نص مُخصّص من الواجهة إن وُجد، وإلا الصياغة التلقائية لكل منصة
-    const body = text?.[p]?.trim()
-      || (p === 'x' ? toXThread(row.title, blocks, url).join('\n\n') : toLinkedInPost(row.title, blocks, url, row.excerpt));
+    if (SOCIAL_MEDIA_FIRST.has(p)) {
+      // منصةٌ وسائطُ أولاً: منشورٌ نصّيّ يُرفض من واجهتها، فيُقال ذلك
+      // صراحةً بدل تمريره ليعود خطأً غامضاً من المزوّد.
+      results.push({ platform: p, ok: false, error: 'هذه المنصة تحتاج صورة أو مقطعاً — انشر عليها من المحرر' });
+      continue;
+    }
+    const body = text?.[p]?.trim() || socialText(p, row.title, blocks, url, row.excerpt);
     try {
       await provider.publish({ platforms: [p], text: body });
       results.push({ platform: p, ok: true });

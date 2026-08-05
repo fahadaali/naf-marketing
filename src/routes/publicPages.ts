@@ -13,8 +13,52 @@ type Row = {
   cover_media_id: string | null; published_at: string | null;
 };
 
+/* بيانات منظّمة للمقالة — شقّ AEO.
+
+   الوسوم أعلاه تكفي محرّكات البحث ولا تكفي نماذج الإجابة: تلك تقرأ
+   schema.org لتعرف من كتب ومتى نُشر وأيّ جهة تقف خلف النصّ. وبلا
+   JSON-LD تُقتبس المقالة بلا نسبة أو لا تُقتبس.
+
+   والقيم كلّها من الصفحة نفسها — لا يُخترع تاريخ ولا مؤلّف. حقلٌ
+   بلا قيمة يسقط من الكائن ولا يُملأ بفراغ: بياناتٌ منظّمة كاذبة أسوأ
+   من غيابها. */
+export type JsonLdKind = 'Article' | 'CollectionPage';
+
+export function articleJsonLd(o: {
+  title: string; description: string; canonical: string; image?: string; siteName: string;
+  published?: string | null; modified?: string | null; author?: string | null;
+  kind?: JsonLdKind;
+}): string {
+  const data: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': o.kind || 'Article',
+    headline: o.title,
+    inLanguage: 'ar',
+    mainEntityOfPage: { '@type': 'WebPage', '@id': o.canonical },
+    url: o.canonical,
+    publisher: { '@type': 'Organization', name: o.siteName },
+  };
+  if (o.description) data.description = o.description;
+  if (o.image) data.image = [o.image];
+  if (o.published) data.datePublished = o.published;
+  if (o.modified) data.dateModified = o.modified;
+  if (o.author) data.author = { '@type': 'Person', name: o.author };
+
+  /* JSON داخل <script> يُنهى بـ`</script>` لو حملت قيمةٌ ذلك النصّ.
+     نهرّب الشرطة المائلة فيبقى JSON صحيحاً ويستحيل كسر الوسم. */
+  return JSON.stringify(data).replace(/</g, '\\u003c');
+}
+
 function layout(opts: {
   title: string; description: string; canonical: string; image?: string; body: string; siteName: string;
+  published?: string | null; modified?: string | null; author?: string | null;
+  /* البيانات المنظّمة اختيارية ولا تُصدَّر إلا حين تُطلب صراحةً.
+
+     كانت تُصدَّر من هنا بلا شرط، فحملت صفحةُ الفهرس و٤٠٤ وتأكيدُ
+     الاشتراك وإلغاؤه كلُّها `"@type":"Article"` — أربعُ صفحاتٍ تُخبر
+     المفهرس أنها مقالات وليست. وهو ما يمنعه التعليق فوق الدالة
+     نفسها: بياناتٌ منظّمة كاذبة أسوأ من غيابها. */
+  jsonLd?: JsonLdKind;
 }): string {
   const { title, description, canonical, image, body, siteName } = opts;
   return `<!doctype html>
@@ -25,7 +69,7 @@ function layout(opts: {
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="canonical" href="${escapeHtml(canonical)}">
-<meta property="og:type" content="article">
+<meta property="og:type" content="${opts.jsonLd === 'Article' ? 'article' : 'website'}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${escapeHtml(canonical)}">
@@ -37,6 +81,10 @@ ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ''}
 ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
 <link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg">
 <link rel="stylesheet" href="/naf-public.css">
+${opts.jsonLd ? `<script type="application/ld+json">${articleJsonLd({
+  title, description, canonical, image, siteName, kind: opts.jsonLd,
+  published: opts.published, modified: opts.modified, author: opts.author,
+})}</script>` : ''}
 <style>
   /* رموز ناف كلها من /naf-public.css المولَّد من naf-theme.css في السجلّ.
      لا قيمة لون ولا خط هنا — الوضع الداكن يتبع تفضيل النظام تلقائياً. */
@@ -56,6 +104,75 @@ ${image ? `<meta name="twitter:image" content="${escapeHtml(image)}">` : ''}
   blockquote { margin:20px 0; padding:12px 16px;
                border-inline-start:3px solid var(--primary); background: var(--primary-soft); }
   hr { border:none; border-top:1px solid var(--border); margin:28px 0; }
+
+  /* كتل المقال الجديدة. الصفحة العامة تقرأ الرموز — لا استثناء البريد
+     هنا — فكلّها من naf-theme.css وتتبع الوضعين. */
+  .callout { margin:20px 0; padding:14px 16px; border-radius: var(--radius);
+             border-inline-start:3px solid; }
+  .callout-title { display:block; margin-bottom:6px; font-size:var(--text-sm); }
+  .callout-info { background: var(--info-soft); border-color: var(--info-strong); }
+  .callout-info .callout-title { color: var(--info-strong); }
+  .callout-warning { background: var(--warning-soft); border-color: var(--warning-strong); }
+  .callout-warning .callout-title { color: var(--warning-strong); }
+  .callout-primary { background: var(--primary-soft); border-color: var(--primary); }
+  .callout-primary .callout-title { color: var(--primary-strong); }
+
+  .article-table { width:100%; border-collapse:collapse; margin:20px 0;
+                   font-size:var(--text-sm); font-variant-numeric: tabular-nums; }
+  .article-table th, .article-table td { border:1px solid var(--border);
+                                         padding:8px 10px; text-align:start; }
+  .article-table th { background: var(--muted); font-weight:600; }
+  /* الجدول العريض يمرّر داخل حاويته ولا يمدّ الصفحة أفقياً */
+  .table-scroll { overflow-x:auto; }
+
+  /* الكود اتجاهه LTR بطبيعته — لغةُ برمجةٍ لا نصٌّ عربي. */
+  .article-code { margin:20px 0; padding:14px 16px; background: var(--muted);
+                  border:1px solid var(--border); border-radius: var(--radius);
+                  font-family: var(--font-mono); font-size:var(--text-sm); line-height:1.7;
+                  direction:ltr; text-align:start; overflow-x:auto; }
+  .article-code code { font-family:inherit; }
+
+  .article-toc { margin:20px 0; padding:14px 16px; background: var(--muted);
+                 border-radius: var(--radius); }
+  .toc-title, .fn-title { display:block; margin-bottom:8px; font-size:var(--text-sm); }
+  .article-toc a { color: var(--foreground); }
+
+  .article-footnotes { margin-top:32px; padding-top:16px; border-top:1px solid var(--border);
+                       font-size:var(--text-sm); color: var(--muted-foreground); }
+  .fn-ref { color: var(--primary); text-decoration:none; }
+  .fn-back { font-size:var(--text-xs); margin-inline-start:6px; }
+  .fn-ref:focus-visible, .fn-back:focus-visible, .article-toc a:focus-visible {
+    outline:2px solid var(--ring); outline-offset:2px; }
+
+  .link-card { display:block; margin:20px 0; padding:14px 16px; background: var(--muted);
+               border:1px solid var(--border); border-radius: var(--radius); text-decoration:none; }
+  .link-card-title, .link-card > span:first-child { display:block; font-weight:600;
+                                                    color: var(--primary); margin-bottom:4px; }
+  .link-card-note { display:block; font-size:var(--text-xs); color: var(--muted-foreground); }
+  .link-card:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+
+  .media-block { margin:20px 0; }
+  .media-block audio, .media-block video { width:100%; border-radius: var(--radius); }
+  /* الإطار يحفظ ارتفاعه قبل التحميل فلا تقفز الصفحة عند وصوله.
+     والشكل من المزوّد لا من ذوقنا: مقطع تيك توك طوليّ، ومشغّل
+     سبوتيفاي شريط، ومنشور إنستغرام بطاقة. */
+  .embed-frame { position:relative; margin:20px 0; aspect-ratio:16/9;
+                 border-radius: var(--radius); overflow:hidden; border:1px solid var(--border); }
+  .embed-frame iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  .embed-wide { aspect-ratio:16/9; }
+  .embed-tall { aspect-ratio:9/16; max-width:340px; margin-inline:auto; }
+  .embed-card { aspect-ratio:4/5; max-width:540px; margin-inline:auto; }
+  /* الشريط ارتفاعه ثابت لا نسبة — مشغّل الصوت لا يتمدّد بعرض الصفحة */
+  .embed-strip { aspect-ratio:auto; height:180px; }
+
+  /* عمودان ينهاران عمودياً على الجوّال — ١٨٧ بكسل للعمود لا يُقرأ */
+  .columns { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0; }
+  @media (max-width: 480px) { .columns { grid-template-columns:1fr; } }
+
+  .checklist { list-style:none; margin:20px 0; padding:0; }
+  .checklist li { margin:6px 0; }
+  .checklist label { display:flex; align-items:flex-start; gap:8px; }
+  .checklist input { margin-top:6px; flex:none; }
   .btn { display:inline-block; background: var(--primary); color: var(--primary-foreground);
          text-decoration:none; padding:12px 24px; border-radius: var(--radius); font-weight:600; }
   .btn:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
@@ -131,6 +248,7 @@ publicRoutes.get('/', async (c) => {
     description: `أحدث المقالات والنشرات من ${name}`,
     canonical: `${base}${path}`,
     siteName: name,
+    jsonLd: 'CollectionPage',
     body: `<h1>المقالات</h1>${items}${subscribeForm(`${base}${path}`)}`,
   }));
 });
@@ -184,12 +302,16 @@ publicRoutes.get('/feed.json', async (c) => {
 // مقالة واحدة (يُسجَّل بعد المسارات الثابتة كي لا يبتلعها)
 publicRoutes.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
+  // updated_at واسم الكاتب للبيانات المنظّمة — لا يظهران في الصفحة
+  // نفسها، ويقرأهما من يفهرس المقالة.
   const row = await c.env.DB.prepare(
-    `SELECT id, title, slug, excerpt, blocks_json, cover_media_id, published_at
-     FROM newsletters WHERE slug = ? AND web_published = 1`,
+    `SELECT n.id, n.title, n.slug, n.excerpt, n.blocks_json, n.cover_media_id,
+            n.published_at, n.updated_at, u.name AS author_name
+     FROM newsletters n LEFT JOIN users u ON u.id = n.author_id
+     WHERE n.slug = ? AND n.web_published = 1`,
   )
     .bind(slug)
-    .first<Row>();
+    .first<Row & { updated_at?: string; author_name?: string | null }>();
 
   const { base, path } = await publicSettings(c.env, c.req.url);
   const name = await siteName(c.env);
@@ -213,6 +335,10 @@ publicRoutes.get('/:slug', async (c) => {
     canonical: articleUrl(base, path, row.slug),
     image: cover,
     siteName: name,
+    jsonLd: 'Article',
+    published: row.published_at,
+    modified: row.updated_at || row.published_at,
+    author: row.author_name || null,
     body: `<article>
       <h1>${escapeHtml(row.title)}</h1>
       ${row.published_at ? `<div class="meta">${publicDate(row.published_at)}</div>` : ''}

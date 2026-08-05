@@ -31,6 +31,12 @@ database_name = "naf_marketing"
 database_id = "4ab835ee-5c3d-477f-be4b-9def4f49e06a"
 migrations_dir = "migrations"
 
+# تصيير المتصفح — لتوليد PDF من صفحة المقالة.
+# يحتاج خطة Workers مدفوعة. وبدونه تعمل المنصة كاملةً: زرّ PDF يختفي
+# ويبقى «نسخة للطباعة»، والشيفرة تفحص env.BROWSER ولا تفترضه.
+[browser]
+binding = "BROWSER"
+
 # تخزين الوسائط R2
 [[r2_buckets]]
 binding = "MEDIA"

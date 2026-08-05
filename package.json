@@ -28,6 +28,7 @@
     "wrangler": "^3.60.0"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.2.0",
     "hono": "^4.4.6",
     "naf-auth": "github:fahadaali/naf-auth#v3.3.0"
   }
