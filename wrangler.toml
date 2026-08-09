@@ -71,7 +71,11 @@ MEMBERS_PERMS_COLUMN = "-"
 DEFAULT_ROLE = "writer"
 
 # المفاتيح السرية تُضبط عبر Secrets ولا تُخزَّن هنا:
-#   wrangler secret put CLAUDE_API_KEY
-#   wrangler secret put PROVIDER_API_KEY
-#   wrangler secret put AUTH_SECRET
-#   wrangler secret put AUTH_CLIENT_SECRET   # سرّ المنصة لدى naf-id
+#
+#   wrangler secret put <NAME>
+#
+# وقائمتها كاملةً في `.dev.vars.example` — هناك وحدها. وكانت مسرودةً هنا
+# أربعةً من أربعةٍ وعشرين، فقرأها من ضبطها وظنّها الكلّ.
+#
+# ونوع `AUTH_CLIENT_SECRET` في لوحة كلاودفلير Secret لا Text: بدونه لا
+# دخول أصلاً، ووضعُه متغيّراً نصّياً يجعله مقروءاً في اللوحة.
