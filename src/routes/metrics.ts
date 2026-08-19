@@ -66,13 +66,9 @@ metricsRoutes.get('/series/:key', async (c) => {
    قيمةٌ تُسجَّل باليد تدخل اللوحة كما يدخلها الرقم المسحوب، ومن يملك
    تسجيلها يملك تحريك مؤشر قيادي. */
 
-// احتساب المؤشرات الآلية لفترة
-metricsRoutes.post('/compute', requirePermission('metrics.manage'), async (c) => {
-  const p = resolvePeriod(c);
-  const result = await computeAuto(c.env, p);
-  await logAudit(c.env, c.get('user'), 'metrics_compute', 'metric', p.start, `${p.kind} · ${result.written}`);
-  return c.json({ ok: true, ...result });
-});
+/* حُذف `‎/compute`: احتسابٌ بلا سحبٍ قبله يعيد كتابة الأرقام نفسها،
+   و«سحب الآن» في الشاشة يسحب ثم يحتسب في نداءٍ واحد — وهو `‎/sync`
+   أدناه. و`computeAuto` نفسها باقيةٌ يستدعيها الكرون ومسارُ السحب. */
 
 // سحب كل المصادر المربوطة ثم إعادة الاحتساب — «سحب الآن» في الشاشة
 metricsRoutes.post('/sync', requirePermission('metrics.manage'), async (c) => {

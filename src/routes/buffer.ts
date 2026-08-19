@@ -9,13 +9,9 @@ export const bufferRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 bufferRoutes.use('*', requireAuth);
 
 // حالة تكامل Buffer: هل رمز الوصول مضبوط، وكم حساباً مربوطاً
-bufferRoutes.get('/status', requirePermission('settings.manage'), async (c) => {
-  const configured = !!providerKey(c.env, 'buffer');
-  const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
-  let mapped = 0;
-  try { mapped = Object.values(row?.value ? JSON.parse(row.value) : {}).filter(Boolean).length; } catch { /* */ }
-  return c.json({ configured, mapped });
-});
+/* حُذف `‎/status`: شاشة «المنصات والمزوّد» تقرأ خريطة الحسابات من
+   `‎/settings` وتعرض عددها من حالتها، وجاهزيةَ المفتاح من خطأ
+   `‎/profiles` نفسه. فلم يكن له قارئ، ولا سؤالٌ ينفرد بجوابه. */
 
 // جلب قنوات Buffer (channels) لربطها بمنصات المنصة — عبر واجهة Buffer الحديثة (GraphQL)
 bufferRoutes.get('/profiles', requirePermission('settings.manage'), async (c) => {

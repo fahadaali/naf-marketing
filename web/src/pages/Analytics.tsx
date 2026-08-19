@@ -125,6 +125,14 @@ export default function Analytics() {
     try {
       const d = await api.post(`/metrics/sync?period=${period}${start ? `&start=${start}` : ''}`);
       const failed = (d.sources || []).filter((s: any) => !s.ok);
+
+      /* لوحات المنصات تقرأ لقطات النشر لا المؤشرات، ومصدرُها سحبٌ آخر
+         يجريه الكرون كل ساعة. فـ«سحب الآن» يسحبهما معاً وإلا بقيت
+         الأرقام المعروضة تحت الزرّ على حالها ويُقرأ الزرّ عاطلاً. */
+      if (PANEL_LAYERS.has(tab)) {
+        await api.post('/analytics/refresh').catch(() => {});
+      }
+
       setMsg(
         failed.length
           ? `تم السحب، وتعذّر السحب من ${isolate(failed.length)} مصدراً. راجع التكاملات.`
