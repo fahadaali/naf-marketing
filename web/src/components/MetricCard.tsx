@@ -89,7 +89,7 @@ function TargetChip({ m }: { m: MetricReading }) {
   );
 }
 
-function TrendChip({ m }: { m: MetricReading }) {
+function TrendChip({ m, series }: { m: MetricReading; series?: number[] }) {
   const trend = trendOf(m.value, m.previous);
   const Icon = TREND_ICON[trend];
   if (!Icon) return <span className="muted metric-trend">{TREND_LABELS.no_baseline}</span>;
@@ -101,6 +101,12 @@ function TrendChip({ m }: { m: MetricReading }) {
 
   return (
     <span className={`metric-trend${tone}`} title={TREND_LABELS[trend]}>
+      {series && series.length > 1 && (
+        <Sparkline
+          points={series}
+          label={`مسار ${m.name_ar} عبر آخر ${formatNumber(series.length)} فترة`}
+        />
+      )}
       <Icon size={14} aria-hidden="true" />
       <span className="sr-only">{TREND_LABELS[trend]}</span>
       {change !== null && <bdi>{Math.abs(change)}%</bdi>}
@@ -108,7 +114,72 @@ function TrendChip({ m }: { m: MetricReading }) {
   );
 }
 
-export default function MetricCard({ m, onPick }: { m: MetricReading; onPick?: (m: MetricReading) => void }) {
+/**
+ * خطّ الاتجاه — سلسلة المؤشر عبر فتراته.
+ *
+ * سهمُ `TrendChip` يقارن فترةً بالتي قبلها وحدها: رقمٌ صعد بعد ثلاث
+ * نزلات يقرؤه القارئ صعوداً. والخطّ يقول أين هو من مساره.
+ *
+ * وهو رسمٌ واحد بلا محاور ولا شبكة — سلسلةٌ واحدة، فلا مفتاح ولا ألوان
+ * تصنيفية: يأخذ لونه من `currentColor` الذي يضبطه الأب من اتجاه
+ * المستهدف، فيتّحد مع السهم فوقه ولا يدخل لونٌ ثالث.
+ *
+ * والنقطة الأخيرة مُبرزة: عينُ القارئ تقع على «أين نحن الآن» أولاً.
+ *
+ * ولا مؤشّر تمرير: البطاقة نفسها زرٌّ يفتح تفصيل المؤشر، وطبقةُ تمرير
+ * فوق رسمٍ بعرض ستين بكسلاً تنازع النقرة ولا تُقرأ. والقيم كاملةً في
+ * التفصيل، وهي «العرض الجدولي» لهذا الرسم.
+ */
+function Sparkline({ points, label }: { points: number[]; label: string }) {
+  // نقطتان حدُّ الخطّ: واحدةٌ ليست مساراً
+  if (points.length < 2) return null;
+
+  const W = 64;
+  const H = 20;
+  const PAD = 1.5; // نصفُ سُمك الخطّ، كي لا يُقصّ عند الحافة
+
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min;
+
+  const x = (i: number) => (i / (points.length - 1)) * W;
+  // سلسلةٌ مسطّحة تُرسم في الوسط لا على الحافة — القسمة على صفرٍ تعطي NaN
+  const y = (v: number) => (span === 0 ? H / 2 : PAD + (1 - (v - min) / span) * (H - PAD * 2));
+
+  const d = points.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const lastX = x(points.length - 1);
+  const lastY = y(points[points.length - 1]);
+
+  return (
+    <svg
+      className="metric-spark"
+      viewBox={`0 0 ${W} ${H}`}
+      width={W}
+      height={H}
+      role="img"
+      aria-label={label}
+      /* لا قلب في RTL: إحداثيات SVG مطلقة لا تتبع `direction`، وقواعد
+         القلب في `naf-app-shell.css` تخصّ `.lucide-*` وحدها. ومحور
+         الرسم زمنٌ يُقرأ من الأقدم إلى الأحدث في كل لغة — وقلبُه يجعل
+         الخطّ الصاعد نازلاً. */
+      preserveAspectRatio="none"
+    >
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={lastX.toFixed(1)} cy={lastY.toFixed(1)} r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+export default function MetricCard({
+  m,
+  onPick,
+  series,
+}: {
+  m: MetricReading;
+  onPick?: (m: MetricReading) => void;
+  /** سلسلة المؤشر عبر فتراته — أقدمُها أوّلاً. تصل من نداءٍ واحد للوحة كلّها. */
+  series?: number[];
+}) {
   const ClassIcon = CLASS_ICON[m.class];
   const hasValue = m.value !== null;
 
@@ -121,7 +192,7 @@ export default function MetricCard({ m, onPick }: { m: MetricReading; onPick?: (
         </span>
         <span className="metric-name">{m.name_ar}</span>
         <div className="spacer" />
-        {hasValue && <TrendChip m={m} />}
+        {hasValue && <TrendChip m={m} series={series} />}
       </div>
 
       {hasValue ? (

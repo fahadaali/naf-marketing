@@ -45,6 +45,8 @@ export default function Analytics() {
   const [period, setPeriod] = useState<PeriodKind>('monthly');
   const [start, setStart] = useState<string>('');
   const [metrics, setMetrics] = useState<MetricReading[]>([]);
+  // مفتاح المؤشر ← قيمُه عبر الفترات، أقدمُها أوّلاً
+  const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
 
@@ -70,12 +72,24 @@ export default function Analytics() {
     const path = isBoard || isCatalogue ? '/metrics/board' : '/metrics/layer';
     api.get(`${path}?${q}`)
       .then((d) => {
-        setMetrics(d.metrics || []);
+        const rows = d.metrics || [];
+        setMetrics(rows);
         // الخادم يردّ حدود الفترة الفعلية — أيُّ يومٍ أُرسل يُردّ إلى بدايتها
         if (d.period?.start) setStart(d.period.start);
+        loadSeries(rows.map((r: MetricReading) => r.key));
       })
       .catch((e) => setMsg(e.message))
       .finally(() => setLoading(false));
+  }
+
+  /* سلاسل خطّ الاتجاه — نداءٌ واحد لكل البطاقات لا واحدٌ لكلٍّ منها.
+     ويسقط صامتاً: الخطّ زيادةٌ على الرقم لا شرطٌ لقراءته، فتعذّرُه لا
+     يمنع اللوحة من الظهور. */
+  function loadSeries(keys: string[]) {
+    if (!keys.length) { setSeries({}); return; }
+    api.get(`/metrics/series?period=${period}&keys=${encodeURIComponent(keys.join(','))}`)
+      .then((d) => setSeries(d.series || {}))
+      .catch(() => setSeries({}));
   }
 
   function loadDashboard() {
@@ -194,7 +208,7 @@ export default function Analytics() {
           ) : (
             <div className="grid cols-3">
               {metrics.map((m) => (
-                <MetricCard key={m.key} m={m} />
+                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
               ))}
             </div>
           )}

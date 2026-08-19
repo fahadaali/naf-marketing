@@ -22,12 +22,23 @@ export default function Dashboard() {
   const [posts, setPosts] = useState<any[]>([]);
   const [board, setBoard] = useState<MetricReading[]>([]);
   const [loadingBoard, setLoadingBoard] = useState(true);
+  // سلاسل خطّ الاتجاه — نداءٌ واحد بعد وصول اللوحة، ويسقط صامتاً:
+  // الخطّ زيادةٌ على الرقم لا شرطٌ لقراءته.
+  const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
 
   useEffect(() => {
     api.get('/posts').then((d) => setPosts(d.posts)).catch(() => {});
     if (can('analytics.view')) {
       api.get('/metrics/board?period=weekly')
-        .then((d) => setBoard(d.metrics || []))
+        .then((d) => {
+          const rows: MetricReading[] = d.metrics || [];
+          setBoard(rows);
+          if (!rows.length) return;
+          const keys = rows.map((r) => r.key).join(',');
+          api.get(`/metrics/series?period=weekly&keys=${encodeURIComponent(keys)}`)
+            .then((sd) => setSeries(sd.series || {}))
+            .catch(() => {});
+        })
         .catch(() => {})
         .finally(() => setLoadingBoard(false));
     } else {
@@ -65,7 +76,7 @@ export default function Dashboard() {
           ) : (
             <div className="grid cols-3">
               {board.map((m) => (
-                <MetricCard key={m.key} m={m} />
+                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
               ))}
             </div>
           )}

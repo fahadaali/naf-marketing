@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { parsePeriod, periodOf, previousPeriod, isPeriodKind, type Period } from '../services/period';
-import { computeAuto, listDefinitions, markReviewed, readBoard, readLayer, readSeries, recordManual } from '../services/metrics';
+import { computeAuto, listDefinitions, markReviewed, readBoard, readLayer, readSeries, readSeriesBulk, recordManual } from '../services/metrics';
 import { syncAllSources } from '../services/metricSync';
 import { syncCrm } from '../services/crmSync';
 import { newId } from '../util';
@@ -42,7 +42,18 @@ metricsRoutes.get('/layer', async (c) => {
   return c.json({ period: p, previous: previousPeriod(p), metrics: await readLayer(c.env, p, layer) });
 });
 
-// سلسلة مؤشر عبر الفترات — الاتجاه لا الرقم
+/* سلاسل عدّة مؤشرات دفعةً — خطّ الاتجاه في بطاقات اللوحة والطبقة.
+   نداءٌ واحد لا واحدٌ لكل بطاقة: اللوحة عشرٌ والطبقة تبلغ أربعاً وعشرين. */
+metricsRoutes.get('/series', async (c) => {
+  const kind = c.req.query('period');
+  const limit = Math.min(Math.max(Number(c.req.query('limit') || 12), 2), 52);
+  const keys = (c.req.query('keys') || '').split(',').map((k) => k.trim()).filter(Boolean);
+  return c.json({
+    series: await readSeriesBulk(c.env, keys, isPeriodKind(kind) ? kind : 'monthly', limit),
+  });
+});
+
+// سلسلة مؤشر واحد — يقرؤها من يريد مؤشراً بعينه
 metricsRoutes.get('/series/:key', async (c) => {
   const kind = c.req.query('period');
   const limit = Math.min(Math.max(Number(c.req.query('limit') || 12), 2), 52);
