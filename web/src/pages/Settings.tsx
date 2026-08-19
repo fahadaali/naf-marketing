@@ -74,7 +74,7 @@ function Users() {
         العضوية من الدخول الموحّد. يظهر العضو هنا بعد أول دخول له، ثم يُمنح دوره.
       </p>
       <table className="table">
-        <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الحالة</th><th></th></tr></thead>
+        <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>آخر ظهور</th><th>الحالة</th><th></th></tr></thead>
         <tbody>
           {users.map((u) => (
             <tr key={u.id}>
@@ -85,6 +85,9 @@ function Users() {
                   {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </td>
+              {/* آخر ظهور — يكتبه الدخول الموحّد مع كل طلب. و«—» لمن
+                  لم يدخل بعد، لا صفراً ولا تاريخاً مخترَعاً. */}
+              <td className="muted" style={{ whiteSpace: 'nowrap' }}>{formatRiyadh(u.last_seen_at)}</td>
               <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
               <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
             </tr>

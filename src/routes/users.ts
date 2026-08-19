@@ -10,7 +10,11 @@ userRoutes.use('*', requireAuth);
 
 userRoutes.get('/', requirePermission('users.manage'), async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT id, name, email, role_name, is_active, created_at FROM users ORDER BY created_at DESC',
+    /* `last_seen_at` معه: تكتبه حزمة naf-auth مع كل طلب منذ الترحيل
+       ‏0022 — أُضيف لهذا الغرض بعينه — ولم يكن يقرؤه أحد. وهو الفرق
+       بين «أما زال يستعمل المنصة؟» وتخمين. */
+    `SELECT id, name, email, role_name, is_active, created_at, last_seen_at
+     FROM users ORDER BY created_at DESC`,
   ).all();
   return c.json({ users: results });
 });

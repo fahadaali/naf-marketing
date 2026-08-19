@@ -8,6 +8,23 @@
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+
+    <!--
+      لون شريط المتصفّح ونظام التشغيل. الاستثناء الرابع في CLAUDE.md §١:
+      الوسم يأخذ قيمةً حرفية ولا يحلّ `var()` فيه متصفّحٌ واحد.
+
+      والقيمتان ليستا مختارتين بالعين: هما `--background` في الوضعين من
+      `naf-theme.css` بعد التحويل من oklch إلى sRGB — يطبع الفاتحة
+      `scripts/build-app-icons.mjs` عند كل تشغيل، وهي نفسها
+      `background_color` في المانيفست. فإن تغيّر جذر الثيم تُحدَّث
+      القيمتان معه، ويحرس تطابقهما اختبار `test/themeColor.test.ts`.
+
+      ووسمان لا واحد: بلا استعلام الوسائط يبقى الشريط فاتحاً حول صفحةٍ
+      داكنة — حدٌّ أبيض يحيط بالشاشة على الجوال.
+    -->
+    <meta name="theme-color" content="#e8ebed" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c2433" media="(prefers-color-scheme: dark)" />
+
     <link rel="icon" type="image/svg+xml" href="/brand/naf-mark.svg" />
     
     <!--
