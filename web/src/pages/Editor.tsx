@@ -29,6 +29,7 @@ import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import RichEditor, { type RichEditorHandle } from '../components/RichEditor';
 import Modal from '../components/Modal';
+import ConfirmModal from '../components/ConfirmModal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
@@ -88,6 +89,16 @@ export default function Editor() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [viewer, setViewer] = useState<MediaInfo | null>(null);
   const editorRef = useRef<RichEditorHandle>(null);
+
+  /* نوافذ المنصة بدل مربّعات المتصفح — العلّة مشروحة في `ConfirmModal`.
+     خمسةٌ كانت هنا: النشر الآن، وحذف المحتوى، وإلغاء موعد، واستعادة
+     نسخة، وحذف قالب. */
+  const [confirming, setConfirming] = useState<
+    | { kind: 'publish'; early: boolean; when: string }
+    | { kind: 'delete' }
+    | { kind: 'cancelSchedule'; id: string }
+    | null
+  >(null);
 
   /* الاعتماد ممنوع على الكاتب — والمدير العام مستثنى بحكم موقعه: لا
      معتمِد فوقه، فمنعُه يوقف محتواه عند بابٍ لا يفتحه أحد. القاعدة
@@ -196,10 +207,12 @@ export default function Editor() {
       .sort((a, b) => a - b)[0];
     const isEarly = earliest && earliest > Date.now();
     const when = earliest ? formatRiyadh(new Date(earliest).toISOString()) : '';
-    const confirmMsg = isEarly
-      ? `تنبيه: الموعد المجدول لم يحن بعد (${isolate(when)}).\nهل تريد النشر الآن فوراً على أي حال؟`
-      : 'تأكيد النشر الآن؟';
-    if (!confirm(confirmMsg)) return;
+    setConfirming({ kind: 'publish', early: !!isEarly, when });
+  }
+
+  async function doPublishNow() {
+    if (!postId) return;
+    setConfirming(null);
     setErr(''); setMsg('');
     try {
       const d = await api.post('/schedules/publish-now', { post_id: postId });
@@ -213,7 +226,7 @@ export default function Editor() {
 
   async function deletePost() {
     if (!postId) return;
-    if (!confirm('حذف هذا المحتوى نهائياً؟ لا يمكن التراجع.')) return;
+    setConfirming(null);
     try {
       await api.del(`/posts/${postId}`);
       navigate('/posts');
@@ -243,7 +256,7 @@ export default function Editor() {
   // إلغاء موعد نشر معلّق أو فاشل (الخادم يرفض إلغاء ما نُشر فعلاً)
   async function cancelSchedule(sid: string) {
     if (!postId) return;
-    if (!confirm('إلغاء موعد النشر هذا؟')) return;
+    setConfirming(null);
     try {
       await api.del(`/schedules/${sid}`);
       setMsg('أُلغي موعد النشر');
@@ -413,7 +426,7 @@ export default function Editor() {
                 <button className="btn ghost" onClick={() => doAction('archive')}><Archive size={20} /> أرشفة</button>
               )}
               {postId && (can('content.approve_final') || (['draft', 'rejected'].includes(status))) && (
-                <button className="btn danger" onClick={deletePost}><Trash2 size={20} /> حذف المحتوى</button>
+                <button className="btn danger" onClick={() => setConfirming({ kind: 'delete' })}><Trash2 size={20} /> حذف المحتوى</button>
               )}
             </div>
           </div>
@@ -492,7 +505,7 @@ export default function Editor() {
                       <button
                         className="btn sm ghost"
                         title="إلغاء هذا الموعد"
-                        onClick={() => cancelSchedule(s.id)}
+                        onClick={() => setConfirming({ kind: 'cancelSchedule', id: s.id })}
                       >
                         <Trash2 size={20} />
                       </button>
@@ -625,6 +638,42 @@ export default function Editor() {
           platforms={platforms}
           onClose={() => setShowSchedule(false)}
           onDone={async () => { setShowSchedule(false); await loadPost(postId); setStatus('scheduled'); }}
+        />
+      )}
+
+      {confirming?.kind === 'publish' && (
+        <ConfirmModal
+          title="النشر الآن"
+          message={
+            confirming.early
+              ? <>الموعد المجدول لم يحن بعد (<bdi>{confirming.when}</bdi>). يُنشر المحتوى فوراً على كل منصاته.</>
+              : 'يُنشر المحتوى فوراً على كل منصاته المجدولة.'
+          }
+          actionLabel="نشر"
+          onConfirm={doPublishNow}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.kind === 'delete' && (
+        <ConfirmModal
+          title="حذف المحتوى"
+          message="يُحذف المحتوى وكل ما ارتبط به من نسخ ومواعيد ونتائج. لا يمكن التراجع عن هذا."
+          actionLabel="حذف"
+          danger
+          onConfirm={deletePost}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.kind === 'cancelSchedule' && (
+        <ConfirmModal
+          title="إلغاء موعد النشر"
+          message="يُلغى هذا الموعد ولا يُنشر المحتوى عليه. يبقى المحتوى كما هو ويمكن جدولته من جديد."
+          actionLabel="إلغاء الموعد"
+          danger
+          onConfirm={() => cancelSchedule(confirming.id)}
+          onClose={() => setConfirming(null)}
         />
       )}
     </div>
@@ -988,6 +1037,12 @@ function VersionsModal({
   onClose: () => void;
   onRestore: (versionId: string) => void;
 }) {
+  /* التأكيد في مكانه لا في نافذةٍ فوق نافذة: `ConfirmModal` يرسم غطاءه
+     الخاص، وغطاءٌ داخل غطاء يجعل نقرة الإلغاء تُغلق الاثنين معاً —
+     تصعد إلى `onClick` الغطاء الخارجي. والصيغة من naf-terms §٤:
+     جملةٌ تقول ما سيحدث، وزرٌّ يحمل اسم الفعل. */
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
   return (
     <Modal title="سجل النسخ" onClose={onClose}>
       <div style={{ maxHeight: 400, overflow: 'auto' }}>
@@ -999,13 +1054,24 @@ function VersionsModal({
                 <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{v.editor_name} — {formatRiyadh(v.created_at)}</div>
               </div>
               <div className="spacer" />
-              <button
-                className="btn ghost sm"
-                onClick={() => { if (confirm('استعادة هذه النسخة؟ سيُحفظ المحتوى الحالي كنسخة أيضاً.')) onRestore(v.id); }}
-              >
-                <History size={20} /> استعادة
-              </button>
+              {confirmId !== v.id && (
+                <button className="btn ghost sm" onClick={() => setConfirmId(v.id)}>
+                  <History size={20} /> استعادة
+                </button>
+              )}
             </div>
+            {confirmId === v.id && (
+              <div style={{ marginTop: 'var(--space-2)' }}>
+                <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '0 0 var(--space-2)' }}>
+                  يعود المحتوى إلى هذه النسخة، ويُحفظ الحالي نسخةً قبلها فلا يضيع.
+                </p>
+                <div className="row" style={{ gap: 'var(--space-2)' }}>
+                  <div className="spacer" />
+                  <button className="btn ghost sm" onClick={() => setConfirmId(null)}>إلغاء</button>
+                  <button className="btn sm" onClick={() => { setConfirmId(null); onRestore(v.id); }}>استعادة</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
         {versions.length === 0 && <p className="muted">لا نسخ سابقة بعد. تُحفظ نسخة مع كل تعديل.</p>}
@@ -1026,6 +1092,8 @@ function TemplatesModal({
 }) {
   const [templates, setTemplates] = useState<any[]>([]);
   const [name, setName] = useState('');
+  // تأكيد الحذف في مكانه — انظر `VersionsModal` أعلاه لسبب ترك النافذة
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
 
@@ -1047,7 +1115,7 @@ function TemplatesModal({
   }
 
   async function remove(id: string) {
-    if (!confirm('حذف هذا القالب؟')) return;
+    setConfirmId(null);
     await api.del(`/templates/${id}`);
     load();
   }
@@ -1074,8 +1142,18 @@ function TemplatesModal({
                 <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{t.creator_name}</div>
               </div>
               <div className="spacer" />
-              <button className="btn sm" onClick={() => onInsert(t.body)}>إدراج</button>
-              <button className="btn danger sm" onClick={() => remove(t.id)}><Trash2 size={20} /></button>
+              {confirmId === t.id ? (
+                <>
+                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>يُحذف القالب نهائياً.</span>
+                  <button className="btn ghost sm" onClick={() => setConfirmId(null)}>إلغاء</button>
+                  <button className="btn danger sm" onClick={() => remove(t.id)}>حذف</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn sm" onClick={() => onInsert(t.body)}>إدراج</button>
+                  <button className="btn danger sm" title="حذف" onClick={() => setConfirmId(t.id)}><Trash2 size={20} /></button>
+                </>
+              )}
             </div>
           ))}
           {templates.length === 0 && <p className="muted">لا قوالب محفوظة بعد. احفظ المحتوى الحالي كقالب.</p>}

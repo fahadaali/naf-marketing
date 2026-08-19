@@ -12,6 +12,7 @@ import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '.
 import StatusBadge from '../components/StatusBadge';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
+import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
 import { DateRangePicker } from '../components/DatePicker';
 import { Popover } from '../components/Popover';
 
@@ -127,12 +128,24 @@ export default function ContentManagement() {
   }
   const selectedPosts = () => posts.filter((p) => sel.has(p.id));
 
-  async function bulkDelete() {
+  /* نوافذ المنصة بدل مربّعات المتصفح — العلّة مشروحة في `ConfirmModal`.
+     وأشدُّها سبب الرفض: كان يُطلب بـ`prompt`، وهو **إلزامي** يردّه
+     الخادم بـ٤٠٠ إن جاء فارغاً، ومربّعٌ بلا تحقّقٍ ولا رسالة خطأ لا
+     يصلح لحقلٍ إلزامي. */
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: string[] } | null>(null);
+  const [rejecting, setRejecting] = useState<{ post: any; toCol: string } | null>(null);
+  const [rejectErr, setRejectErr] = useState('');
+
+  function askBulkDelete() {
     const targets = selectedPosts().filter(canDelete);
     if (!targets.length) return setErr('لا يمكنك حذف العناصر المحددة');
-    if (!confirm(`حذف ${isolate(targets.length)} عنصراً نهائياً؟`)) return;
+    setConfirmDelete({ ids: targets.map((p) => p.id) });
+  }
+
+  async function bulkDelete(ids: string[]) {
+    setConfirmDelete(null);
     let ok = 0;
-    for (const p of targets) { try { await api.del(`/posts/${p.id}`); ok++; } catch {} }
+    for (const id of ids) { try { await api.del(`/posts/${id}`); ok++; } catch {} }
     setSel(new Set()); setMsg(`تم حذف ${isolate(ok)} عنصراً`); load();
   }
   async function bulkAssign(campaignId: string) {
@@ -158,12 +171,16 @@ export default function ContentManagement() {
       setErr('انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
       return;
     }
-    let note: string | undefined;
+    // الرفض يحتاج سبباً إلزامياً — يُطلب في نافذة بحقلٍ وتحقّقٍ ورسالة
     if (action === 'reject') {
-      const r = prompt('سبب الرفض (إلزامي):');
-      if (!r || !r.trim()) return;
-      note = r.trim();
+      setRejectErr('');
+      setRejecting({ post, toCol });
+      return;
     }
+    await applyMove(post, toCol, action);
+  }
+
+  async function applyMove(post: any, toCol: string, action: string, note?: string) {
     // تحديث تفاؤلي ثم تأكيد من الخادم
     const target = action === 'reject' ? 'rejected' : toCol;
     setPosts((ps) => ps.map((p) => (p.id === post.id ? { ...p, status: target } : p)));
@@ -290,7 +307,7 @@ export default function ContentManagement() {
           <div className="spacer" />
           {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={20} /> نقل إلى حملة</button>}
           <button className="btn ghost sm" onClick={() => doExport('csv')}><FileOutput size={20} /> تصدير المحدد</button>
-          <button className="btn danger sm" onClick={bulkDelete}><Trash2 size={20} /> حذف</button>
+          <button className="btn danger sm" onClick={askBulkDelete}><Trash2 size={20} /> حذف</button>
           <button className="btn ghost sm" onClick={() => setSel(new Set())}>إلغاء</button>
         </div>
       )}
@@ -299,11 +316,44 @@ export default function ContentManagement() {
         <TableView
           rows={filtered} sel={sel} toggleSel={toggleSel} allSelected={allSelected} selectAll={selectAllFiltered}
           sortKey={sortKey} sortDir={sortDir} toggleSort={toggleSort} navigate={navigate} canDelete={canDelete}
-          onDelete={async (id: string) => { if (confirm('حذف هذا المحتوى نهائياً؟')) { try { await api.del(`/posts/${id}`); load(); } catch (e: any) { setErr(e.message); } } }}
+          onDelete={(id: string) => setConfirmDelete({ ids: [id] })}
         />
       )}
       {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title={confirmDelete.ids.length > 1 ? 'حذف المحتوى المحدَّد' : 'حذف المحتوى'}
+          message={
+            confirmDelete.ids.length > 1
+              ? <>سيُحذف <bdi>{isolate(confirmDelete.ids.length)}</bdi> عنصراً وكل ما ارتبط بها من نسخ وجداول. لا يمكن التراجع عن هذا.</>
+              : 'سيُحذف المحتوى وكل ما ارتبط به من نسخ وجداول. لا يمكن التراجع عن هذا.'
+          }
+          actionLabel="حذف"
+          danger
+          onConfirm={() => bulkDelete(confirmDelete.ids)}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {rejecting && (
+        <FieldModal
+          title="رفض المحتوى"
+          label="سبب الرفض"
+          placeholder="ما الذي يلزم تعديله؟"
+          actionLabel="رفض"
+          hint="يصل السبب إلى كاتبه ويُسجَّل في سجلّ الاعتماد."
+          error={rejectErr}
+          onSubmit={(value) => {
+            if (!value.trim()) { setRejectErr('سبب الرفض إلزامي'); return; }
+            const { post, toCol } = rejecting;
+            setRejecting(null);
+            applyMove(post, toCol, 'reject', value.trim());
+          }}
+          onClose={() => { setRejecting(null); setRejectErr(''); }}
+        />
+      )}
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
       {showAssign && (

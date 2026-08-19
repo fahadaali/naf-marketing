@@ -4,6 +4,7 @@ import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
+import ConfirmModal from '../components/ConfirmModal';
 
 // إدارة التعليقات والرسائل والإشارات والتقييمات — مزامنة من المزوّد مع الرد والاقتراحات الذكية والإشراف.
 type Caps = Record<string, boolean>;
@@ -32,6 +33,9 @@ export default function Comments() {
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
   const [editing, setEditing] = useState<Record<string, string>>({}); // id → نص التعديل
   const [busy, setBusy] = useState<string>('');
+  /* نافذة تأكيدٍ من المنصة لا مربّع المتصفح — العلّة في `ConfirmModal`.
+     والحذفان مختلفان: حذفُ تعليقِ قارئٍ من المنصة، وحذفُ ردّنا نحن. */
+  const [confirming, setConfirming] = useState<{ kind: 'comment' | 'reply'; id: string } | null>(null);
 
   function load() {
     const q = filter ? `?replied=${filter}` : '';
@@ -71,7 +75,7 @@ export default function Comments() {
   }
 
   async function moderate(id: string, action: 'hide' | 'unhide' | 'delete' | 'like') {
-    if (action === 'delete' && !confirm('حذف هذا التعليق نهائياً؟')) return;
+    setConfirming(null);
     setBusy(id);
     try {
       await api.post(`/comments/${id}/moderate`, { action });
@@ -91,7 +95,7 @@ export default function Comments() {
   }
 
   async function removeReply(id: string) {
-    if (!confirm('حذف ردّك من المنصة؟')) return;
+    setConfirming(null);
     setBusy(id);
     try {
       await api.del(`/comments/${id}/reply`);
@@ -158,7 +162,7 @@ export default function Comments() {
                   {caps.can_hide && (c.is_hidden
                     ? <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'unhide')} title="إظهار"><Eye size={20} /></button>
                     : <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'hide')} title="إخفاء"><EyeOff size={20} /></button>)}
-                  {caps.can_delete && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => moderate(c.id, 'delete')} title="حذف"><Trash2 size={20} /></button>}
+                  {caps.can_delete && <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setConfirming({ kind: 'comment', id: c.id })} title="حذف"><Trash2 size={20} /></button>}
                 </div>
               )}
 
@@ -171,7 +175,7 @@ export default function Comments() {
                     {canEditReply && (
                       <>
                         <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((e) => ({ ...e, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={20} /></button>
-                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => removeReply(c.id)} title="حذف الرد"><Trash2 size={20} /></button>
+                        <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setConfirming({ kind: 'reply', id: c.id })} title="حذف الرد"><Trash2 size={20} /></button>
                       </>
                     )}
                   </div>
@@ -226,6 +230,28 @@ export default function Comments() {
         })}
         {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.</p>}
       </div>
+
+      {confirming?.kind === 'comment' && (
+        <ConfirmModal
+          title="حذف التعليق"
+          message="يُحذف التعليق من المنصة نفسها، فلا يراه أحد بعدها. لا يمكن التراجع عن هذا."
+          actionLabel="حذف"
+          danger
+          onConfirm={() => moderate(confirming.id, 'delete')}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.kind === 'reply' && (
+        <ConfirmModal
+          title="حذف الرد"
+          message="يُحذف ردّك من المنصة ويبقى التعليق. لا يمكن التراجع عن هذا."
+          actionLabel="حذف"
+          danger
+          onConfirm={() => removeReply(confirming.id)}
+          onClose={() => setConfirming(null)}
+        />
+      )}
     </div>
   );
 }
