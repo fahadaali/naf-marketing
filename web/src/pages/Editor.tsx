@@ -48,7 +48,7 @@ export default function Editor() {
   const { id } = useParams();
   const [sp] = useSearchParams();
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
 
   const [postId, setPostId] = useState<string | undefined>(id);
   const [title, setTitle] = useState('');
@@ -56,6 +56,10 @@ export default function Editor() {
   const [contentType, setContentType] = useState('text');
   const [campaignId, setCampaignId] = useState('');
   const [status, setStatus] = useState('draft');
+  // كاتبُ المحتوى — يُقرأ ليُخفى عنه زرُّ الاعتماد. الخادم هو الحكم
+  // (`transition` في `services/workflow.ts`)، وهذا يمنع زرّاً يُردّ عند
+  // الضغط: من يراه ثم يقرأ «لا يعتمد المحتوى كاتبُه» يظنّه عطلاً.
+  const [authorId, setAuthorId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
@@ -85,6 +89,11 @@ export default function Editor() {
   const [viewer, setViewer] = useState<MediaInfo | null>(null);
   const editorRef = useRef<RichEditorHandle>(null);
 
+  /* الاعتماد ممنوع على الكاتب — والمدير العام مستثنى بحكم موقعه: لا
+     معتمِد فوقه، فمنعُه يوقف محتواه عند بابٍ لا يفتحه أحد. القاعدة
+     نفسها في `transition` بالخادم، وهي الحكم. */
+  const canApprove = !authorId || !user || user.id !== authorId || user.role_name === 'general_manager';
+
   async function loadPost(pid: string) {
     const d = await api.get(`/posts/${pid}`);
     setTitle(d.post.title);
@@ -92,6 +101,7 @@ export default function Editor() {
     setContentType(d.post.content_type);
     setCampaignId(d.post.campaign_id || '');
     setStatus(d.post.status);
+    setAuthorId(d.post.author_id || '');
     setRejectReason(d.post.reject_reason || '');
     setApprovals(d.approvals);
     setNotes(d.notes || []);
@@ -378,15 +388,20 @@ export default function Editor() {
               )}
               {status === 'pending_marketing' && can('content.review') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد التسويق</button>
+                  {canApprove && <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد التسويق</button>}
                   <button className="btn danger" onClick={() => setShowReject(true)}><CircleX size={20} /> رفض</button>
                 </>
               )}
               {status === 'pending_gm' && can('content.approve_final') && (
                 <>
-                  <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد نهائي</button>
+                  {canApprove && <button className="btn success" onClick={() => doAction('approve')}><Check size={20} /> اعتماد نهائي</button>}
                   <button className="btn danger" onClick={() => setShowReject(true)}><CircleX size={20} /> رفض</button>
                 </>
+              )}
+              {['pending_marketing', 'pending_gm'].includes(status) && !canApprove && (
+                <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
+                  لا يعتمد المحتوى كاتبُه. يعتمده غيرك ممّن يملك الصلاحية.
+                </p>
               )}
               {['approved', 'scheduled'].includes(status) && can('content.schedule') && (
                 <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={20} /> جدولة النشر</button>
