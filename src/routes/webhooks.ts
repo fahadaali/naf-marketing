@@ -35,14 +35,30 @@ export async function verifySignature(secret: string, rawBody: string, header: s
   return diff === 0;
 }
 
+/* السرّ تحت البادئة المحجوزة `secret:` — لا يخرج من `GET /api/settings`.
+   وكان باسمٍ عاديّ في الجدول نفسه الذي تردّه تلك القراءة كاملاً لأي عضو. */
+const WEBHOOK_SECRET_KEY = 'secret:socialapi_webhook';
+
 // نقطة الاستقبال العامة (بلا مصادقة) — يجب أن تردّ 2xx خلال 10 ثوانٍ.
 // نتحقق من التوقيع، ثم — لأحداث الصندوق — نُشغّل مزامنة كاملة في الخلفية كي تُخزَّن
 // السجلات بترميز الرد الصحيح بدل الاعتماد على حمولة جزئية.
 webhookRoutes.post('/socialapi', async (c) => {
   const raw = await c.req.text();
-  const secret = await getSetting(c.env, 'socialapi_webhook_secret');
+  const secret = await getSetting(c.env, WEBHOOK_SECRET_KEY);
   const sig = c.req.header('X-SocialAPI-Signature') || '';
-  if (secret && !(await verifySignature(secret, raw, sig))) {
+
+  /* ═══ ولا يُقبل شيء بلا سرّ ═══
+
+     كان الشرط `if (secret && !verify)` — أي أن غياب السرّ يعني قبول كل
+     طلب. والمسار عام: `/api/webhooks/` مستثنًى في `PUBLIC_PREFIXES`،
+     فمن يعرف العنوان يُشغّل `syncComments` كاملةً متى شاء على حصّة
+     المزوّد. وخطّافٌ لم يُسجَّل بعدُ لا ينبغي أن يُستقبَل أصلاً — فالردّ
+     ٤٠١ لا ٢٠٠، ويُسجَّل ليُقرأ من اللوغ لأن المنادي آلةٌ لا إنسان. */
+  if (!secret) {
+    console.error('socialapi: webhook_unregistered — وصل حدثٌ ولا سرّ توقيع مخزَّن');
+    return c.text('Webhook not registered', 401);
+  }
+  if (!(await verifySignature(secret, raw, sig))) {
     return c.text('Invalid signature', 401);
   }
   let evt: any = null;
@@ -66,7 +82,7 @@ webhookRoutes.post('/socialapi/manage/register', async (c) => {
   const url = `${origin}/api/webhooks/socialapi`;
   try {
     const { id, secret } = await registerSocialApiWebhook(token, url, INBOX_EVENTS);
-    if (secret) await setSetting(c.env, 'socialapi_webhook_secret', secret);
+    if (secret) await setSetting(c.env, WEBHOOK_SECRET_KEY, secret);
     if (id) await setSetting(c.env, 'socialapi_webhook_id', id);
     return c.json({ ok: true, id, url });
   } catch (e: any) {
