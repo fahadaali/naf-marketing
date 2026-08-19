@@ -415,6 +415,8 @@ function SocialApiWebhook() {
   const [busy, setBusy] = useState(false);
 
   function refresh() {
+    // الصمت قرار: قائمةُ خطّافاتٍ مسجَّلة لدى المزوّد — تعذّرُها لا يمنع
+    // التسجيل، وزرُّه يُبلّغ بخطئه إن فشل
     api.get('/webhooks/socialapi/manage/list').then((d) => setHooks(d.webhooks || [])).catch(() => {});
   }
   useEffect(refresh, []);

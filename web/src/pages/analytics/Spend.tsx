@@ -37,6 +37,7 @@ export default function Spend({ canManage, period, start, onSaved }: {
       const list: string[] = d.settings?.enabled_platforms || [];
       setPlatforms(list);
       setForm((f) => (f.platform ? f : { ...f, platform: list[0] ?? '' }));
+      // الصمت قرار: قائمةُ منصاتٍ لحقل اختيار — والقراءة الأساسية أعلاه تُبلّغ
     }).catch(() => {});
   }, []);
 

@@ -74,6 +74,7 @@ export default function ContentManagement() {
 
   function load() {
     api.get('/posts').then((d) => setPosts(d.posts));
+    // الصمت قرار: قائمةُ حملاتٍ لمرشّحٍ اختياري — غيابُها يُسقط خياراً لا شاشة
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns)).catch(() => {});
   }
   useEffect(load, []);

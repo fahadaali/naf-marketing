@@ -3,7 +3,6 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { syncComments, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply } from '../services/commentsSync';
 import type { ModerateAction } from '../adapters/provider';
-import { providerKey } from '../adapters';
 import { suggestReplies } from '../services/claude';
 import { htmlToText } from '../util';
 

@@ -143,6 +143,9 @@ export function StaleAlerts() {
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<any[]>([]);
   useEffect(() => {
+    /* الصمت هنا قرار: البطاقة تُخفي نفسها بلا تنبيهات (`return null`
+       أدناه)، فالفشل يعني اختفاءها لا شاشةً تكذب. وستّ بطاقاتٍ تعرض
+       ستّ رسائل خطأ على انقطاعٍ واحد ضجيجٌ لا خبر. */
     api.get('/analytics/alerts').then((d) => setAlerts(d.stale || [])).catch(() => {});
   }, []);
   if (!alerts.length) return null;
@@ -170,8 +173,26 @@ export function StaleAlerts() {
 
 export function TeamPerformance() {
   const [perf, setPerf] = useState<any>(null);
-  useEffect(() => { api.get('/analytics/performance').then(setPerf).catch(() => {}); }, []);
+  /* هذه البطاقة تُرسم دائماً بخلاف بقيّة اللوحات — فالفشل يظهر فيها
+     «لا أداء مسجّل بعد. انشر محتوى ليظهر هنا»، وهي دعوةٌ إلى عملٍ قد
+     يكون مبذولاً فعلاً ولم يصل خبرُه. */
+  const [err, setErr] = useState('');
+  function load() {
+    setErr('');
+    api.get('/analytics/performance').then(setPerf).catch((e: any) => setErr(e.message));
+  }
+  useEffect(load, []);
   const maxCreated = Math.max(1, ...(perf?.writers || []).map((w: any) => w.created_count || 0));
+
+  if (err) {
+    return (
+      <div className="card" style={{ marginTop: 16 }}>
+        <h4 style={{ marginTop: 0 }}>أداء الفريق</h4>
+        <p className="err" style={{ margin: 0 }}>{err}</p>
+        <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={load}>إعادة المحاولة</button>
+      </div>
+    );
+  }
 
   return (
     <div className="grid cols-2" style={{ marginTop: 16 }}>
@@ -219,6 +240,7 @@ export function TeamPerformance() {
 /* ===== السمعة: متوسط التقييم وتوزيع النجوم ومعدل الرد والاتجاه ===== */
 export function ReputationCard() {
   const [rep, setRep] = useState<any>(null);
+  // تُخفي نفسها بلا تقييمات — انظر `StaleAlerts` لسبب الصمت
   useEffect(() => { api.get('/analytics/reputation').then(setRep).catch(() => {}); }, []);
   if (!rep || !rep.totals?.count) return null;
 
@@ -287,6 +309,7 @@ export function ReputationCard() {
    قبل أن يُفهم أنه لا يعمل. */
 export function HeatmapLink() {
   const [url, setUrl] = useState('');
+  // تُخفي نفسها بلا رابط — انظر `StaleAlerts` لسبب الصمت
   useEffect(() => { api.get('/analytics/heatmap').then((d) => setUrl(d.url || '')).catch(() => {}); }, []);
   if (!url) return null;
 
@@ -318,6 +341,7 @@ export function BestTimesCard({ platform }: { platform: string }) {
   const [data, setData] = useState<any>(null);
   useEffect(() => {
     const q = platform ? `?platform=${encodeURIComponent(platform)}` : '';
+    // تُخفي نفسها بلا عيّنة — انظر `StaleAlerts` لسبب الصمت
     api.get(`/analytics/best-times${q}`).then(setData).catch(() => {});
   }, [platform]);
   if (!data || !data.sample) return null;
@@ -389,11 +413,14 @@ export function VideoAnalyticsExport({ onImported }: { onImported: () => void })
   const [open, setOpen] = useState(false);
 
   function load() {
+    /* هذه فتحها المستخدم بنفسه، فالصمت فيها ليس تخفّياً بل سؤالٌ بلا
+       جواب: لوحةٌ خاوية بعد نقرةٍ صريحة تُقرأ «لا حسابات» وقد يكون
+       المزوّد متعذّراً. والشاشة تملك `setMsg` أصلاً. */
     api.get('/analytics/exports').then((d) => {
       setAccounts(d.accounts || []);
       setExports(d.exports || []);
       if (!account && d.accounts?.[0]) setAccount(d.accounts[0].id);
-    }).catch(() => {});
+    }).catch((e: any) => setMsg(e.message));
   }
   useEffect(() => { if (open) load(); }, [open]);
 

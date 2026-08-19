@@ -99,10 +99,13 @@ export default function Analytics() {
     // حدود اليوم بتوقيت الرياض (UTC+3)
     if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
     if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
+    // الصمت قرار: لوحات المنصات تُخفي نفسها بلا لقطات، وشريطُ الرسائل
+    // أعلى الشاشة يحمل خبر «سحب الآن» — ورسالتان متزاحمتان لا تُقرآن
     api.get('/analytics/dashboard?' + q).then(setDash).catch(() => {});
   }
 
   useEffect(() => {
+    // قائمتا المرشّحات: غيابُهما يُسقط خياراً لا شاشة
     api.get('/settings').then((d) => setPlatforms(d.settings?.enabled_platforms || [])).catch(() => {});
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns || [])).catch(() => {});
   }, []);
@@ -130,6 +133,7 @@ export default function Analytics() {
          يجريه الكرون كل ساعة. فـ«سحب الآن» يسحبهما معاً وإلا بقيت
          الأرقام المعروضة تحت الزرّ على حالها ويُقرأ الزرّ عاطلاً. */
       if (PANEL_LAYERS.has(tab)) {
+        // الصمت قرار: سحبٌ ثانويّ داخل «سحب الآن»، وخبرُ الأوّل يُقال أدناه
         await api.post('/analytics/refresh').catch(() => {});
       }
 

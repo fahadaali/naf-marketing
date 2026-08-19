@@ -126,6 +126,8 @@ export default function Editor() {
     }
     setVariants(vmap);
     setFirstComments(fcmap);
+    /* الصمت قرار: النسخ زيادةٌ على المحتوى، وفشلُ جلبها يخفي زرّ
+       «سجل النسخ» ولا يمنع التحرير ولا الحفظ. */
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
   }
 

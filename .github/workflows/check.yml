@@ -1,0 +1,75 @@
+name: الفحص
+
+# البوّابة. تعمل على كل دفعٍ وكل طلب دمج — وهي وحدها ما يحرس الفرع.
+#
+# وكانت غائبة: `deploy.yml` يشغّل الأنواع والاختبارات ولا يعمل إلا
+# بضغطة إنسان (`workflow_dispatch`)، و`release.yml` يعمل على `main` ولا
+# يفحص شيئاً، والنشر المعتاد من Workers Builds أمرُه `npm run deploy` —
+# بناءٌ وهجرات ونشر، بلا اختبار. فكانت ثلاثُ مئةٍ وثمانون اختباراً لا
+# تحرس شيئاً، ولا سيرَ على طلبات الدمج أصلاً.
+#
+# وأثرُ ذلك ظهر في تدقيق: نموذجٌ ينادي مساراً محذوفاً، وصلاحيتان بلا
+# تسمية عربية — كلاهما تلتقطه مقارنةٌ آلية في ثوانٍ.
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - CHANGELOG.md
+      - '**.md'
+  pull_request:
+
+# دفعتان متتاليتان على فرعٍ واحد: تكفي الأخيرة.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: الأنواع والاختبارات وعقد الدخول
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          # ملفّا قفل لا واحد — الواجهة حزمة منفصلة بقفلها
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # npm يسجّل تبعيات github في القفل بصيغة git+ssh مهما كُتبت، ولا
+      # مفتاح SSH في المشغّل — فيفشل `npm ci` عند `naf-auth`. الخطوة
+      # نفسها في `deploy.yml` و`release.yml`، وسببها هناك مشروح.
+      - name: جلب تبعيات ناف الداخلية عبر HTTPS
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
+      - run: npm ci
+
+      # الواجهة لا يمسّها `npm ci` أعلاه — لا workspaces في الجذر.
+      # وبدونها يسقط فحص الأنواع على «Cannot find module 'react'» قبل
+      # أن يبلغ سطراً من شيفرتنا.
+      - name: تركيب حزم الواجهة
+        run: npm --prefix web ci
+
+      - name: فحص الأنواع
+        run: npm run typecheck
+
+      # ‏٣٨٨ اختباراً: عقد الواجهة مع الخادم، وآلة حالات الاعتماد،
+      # وخريطة الأيقونات، ومربّعات المتصفح، وأعداد المؤشرات في الوثائق.
+      - name: الاختبارات
+        run: npm test
+
+      # فاحص عقد الدخول الموحّد — تسعةَ عشرَ بنداً من الملفات وحدها،
+      # بلا شبكة ولا قاعدة ولا سرّ. بُني لهذا ولم يكن يستدعيه أحد.
+      - name: عقد الدخول الموحّد
+        run: npm run check:sso
+
+      # يبني الواجهة كما يبنيها النشر — عطلُ بناءٍ يُكتشف هنا لا عند النشر
+      - name: البناء
+        run: npm run build
