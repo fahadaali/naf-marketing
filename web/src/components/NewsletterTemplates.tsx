@@ -215,6 +215,7 @@ export function TemplatesModal({
   const [removing, setRemoving] = useState<TemplateSummary | null>(null);
 
   function load() {
+    // الصمت قرار: القوالب المحفوظة زيادةٌ على المدمجة، وهي تصل دائماً
     api.get('/newsletters/meta/templates').then((d) => setSaved(d.saved || [])).catch(() => {});
   }
   useEffect(load, []);

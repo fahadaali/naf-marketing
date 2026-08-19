@@ -4,7 +4,6 @@ import { Plus, Trash2 } from 'lucide-react';
 import { ConnectionBadge } from '../components/StateBadge';
 import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
-import Modal from '../components/Modal';
 import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel, DEFAULT_PLATFORM_PROMPTS } from '../platforms';
 import { DEFAULT_TONES, type Tone } from '../tones';
 import MetricSources from '../components/MetricSources';
@@ -42,10 +41,18 @@ export default function Settings() {
   );
 }
 
-/* ===== المستخدمون ===== */
+/* ===== المستخدمون =====
+
+   لا إنشاء عضوٍ من هنا. كان زرّ «+ مستخدم» يفتح نموذجاً ينادي
+   `POST /api/users`، والمسار محذوفٌ من الخادم منذ أُغلق الدخول المحلي
+   (السبب في `src/routes/users.ts`). والطلب لا يطابق مساراً فيسقط إلى
+   طبقة الأصول، فيصل الواجهةَ HTML بحالة ٢٠٠ — فيُقرأ نجاحاً، وتُغلق
+   النافذة، ولا يُنشأ أحد، ولا رسالة. أي أن الزرّ كان يَعِد بما لا يقع.
+
+   والعضوية تأتي من المركز: يظهر العضو هنا بعد أول دخولٍ له بالدور
+   الافتراضي، ويُمنح دوره من هذا الجدول. */
 function Users() {
   const [users, setUsers] = useState<any[]>([]);
-  const [show, setShow] = useState(false);
   function load() { api.get('/users').then((d) => setUsers(d.users)); }
   useEffect(load, []);
 
@@ -60,13 +67,14 @@ function Users() {
 
   return (
     <div className="card">
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>المستخدمون</h3>
-        <div className="spacer" />
-        <button className="btn sm" onClick={() => setShow(true)}><Plus size={20} /> مستخدم</button>
       </div>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0, marginBottom: 12 }}>
+        العضوية من الدخول الموحّد. يظهر العضو هنا بعد أول دخول له، ثم يُمنح دوره.
+      </p>
       <table className="table">
-        <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الحالة</th><th></th></tr></thead>
+        <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>آخر ظهور</th><th>الحالة</th><th></th></tr></thead>
         <tbody>
           {users.map((u) => (
             <tr key={u.id}>
@@ -77,38 +85,16 @@ function Users() {
                   {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </td>
+              {/* آخر ظهور — يكتبه الدخول الموحّد مع كل طلب. و«—» لمن
+                  لم يدخل بعد، لا صفراً ولا تاريخاً مخترَعاً. */}
+              <td className="muted" style={{ whiteSpace: 'nowrap' }}>{formatRiyadh(u.last_seen_at)}</td>
               <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
               <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
             </tr>
           ))}
         </tbody>
       </table>
-      {show && <NewUser onClose={() => setShow(false)} onSaved={() => { setShow(false); load(); }} />}
     </div>
-  );
-}
-
-function NewUser({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ name: '', email: '', password: '', role_name: 'writer' });
-  const [err, setErr] = useState('');
-  async function save() {
-    setErr('');
-    try { await api.post('/users', f); onSaved(); } catch (e: any) { setErr(e.message); }
-  }
-  return (
-    <Modal title="مستخدم جديد" onClose={onClose}>
-      <div className="field"><label>الاسم</label><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
-      <div className="field"><label>البريد</label><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-      <div className="field"><label>كلمة المرور (8 أحرف فأكثر)</label><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
-      <div className="field">
-        <label>الدور</label>
-        <select className="select" value={f.role_name} onChange={(e) => setF({ ...f, role_name: e.target.value })}>
-          {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-      </div>
-      {err && <p className="err">{err}</p>}
-      <button className="btn" onClick={save}>حفظ</button>
-    </Modal>
   );
 }
 
@@ -429,6 +415,8 @@ function SocialApiWebhook() {
   const [busy, setBusy] = useState(false);
 
   function refresh() {
+    // الصمت قرار: قائمةُ خطّافاتٍ مسجَّلة لدى المزوّد — تعذّرُها لا يمنع
+    // التسجيل، وزرُّه يُبلّغ بخطئه إن فشل
     api.get('/webhooks/socialapi/manage/list').then((d) => setHooks(d.webhooks || [])).catch(() => {});
   }
   useEffect(refresh, []);
@@ -673,6 +661,14 @@ function NotificationSettings() {
   const [siteUrl, setSiteUrl] = useState('');
   const [articlePath, setArticlePath] = useState('');
   const [msg, setMsg] = useState('');
+  // جاهزية البريد من الخادم — المفتاح سرٌّ في كلاودفلير لا يُقرأ هنا،
+  // فالخادم يقول أمضبوطٌ هو أم لا. وبدون هذا السطر كان الاختيار يُحفظ
+  // ويبدو ناجحاً بينما لا يغادر بريدٌ واحد.
+  const [email, setEmail] = useState<{ configured: boolean; reason: string } | null>(null);
+  function loadEmailStatus() {
+    api.get('/newsletters/meta/email-status').then(setEmail).catch(() => setEmail(null));
+  }
+  useEffect(loadEmailStatus, []);
 
   useEffect(() => {
     api.get('/settings').then((d) => {
@@ -695,6 +691,8 @@ function NotificationSettings() {
       public_site_url: siteUrl.trim().replace(/\/$/, ''), public_article_path: articlePath.trim() || '/articles',
     });
     setMsg('تم الحفظ');
+    // الاختيار تغيّر، فتتغيّر معه الجاهزية — «Resend» بلا مفتاحه غير مضبوط
+    loadEmailStatus();
   }
 
   return (
@@ -717,6 +715,11 @@ function NotificationSettings() {
           <input className="input" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="notifications@naflaw.sa" />
         </div>
       </div>
+      <div className="row" style={{ gap: 'var(--space-2)', marginBottom: 4 }}>
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>حالة المزوّد</span>
+        {email && <ConnectionBadge kind="configured" on={email.configured} />}
+      </div>
+      {email && !email.configured && <p className="err" style={{ fontSize: 'var(--text-xs)' }}>{email.reason}</p>}
       <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
         مفتاح Resend يُضبط عبر Cloudflare Secrets (<code>EMAIL_PROVIDER_API_KEY</code>) ولا يُدار من هنا.
       </p>

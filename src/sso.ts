@@ -144,6 +144,11 @@ export async function linkOrCreateUser(
     env.DB.prepare('UPDATE users SET id = ? WHERE id = ?').bind(claims.sub, existing.id),
     // الجلسات القديمة تُطرح لا تُرحَّل: الجلسة صارت في KV،
     // وترحيلها يبقي بابًا مفتوحاً بمصادقة النظام القديم.
+    //
+    // وهذا آخر ما بقي لجدول `sessions`: لا يُدرج فيه شيء ولا يُقرأ منه
+    // شيء في المستودع كلّه، وهذه العبارة تستنزف ما خلّفه الدخول المحلي
+    // عضواً عضواً عند أول دخولٍ له من المركز. ويبقى الجدول لأن الهجرات
+    // للأمام فقط، ولأن إسقاطه يمحو ما لم يُستنزف بعد.
     env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(existing.id),
     ...USER_REFERENCES.map(([table, column]) =>
       env.DB.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).bind(

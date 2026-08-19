@@ -38,6 +38,25 @@ export async function transition(
   const allowed = await hasPermission(env, user.role_name, rule.permission);
   if (!allowed) return { ok: false, status: 403, error: 'ليست لديك صلاحية لهذه العملية' };
 
+  /* ═══ لا يعتمد المحتوى كاتبُه ═══
+
+     كان `post.author_id` يُمرَّر إلى هنا عبر ثلاث طبقات ولا يُقرأ —
+     حقلٌ يوحي بقاعدةٍ لم تُكتب. فمدير التسويق كان يعتمد ما كتبه بنفسه،
+     والمراجعةُ حينئذٍ توقيعٌ على الذات لا مراجعة.
+
+     والمدير العام مستثنى بحكم موقعه: لا معتمِد فوقه، فمنعُه يوقف محتواه
+     عند بابٍ لا يفتحه أحد. والرفضُ والأرشفة خارج القاعدة — من حقّ
+     المرء أن يسحب عمله أو يؤرشفه.
+
+     والأثر مسجَّل في `approvals` كما هو، فيقرأ المدقّق من اعتمد ومتى. */
+  if (action === 'approve' && user.id === post.author_id && user.role_name !== 'general_manager') {
+    return {
+      ok: false,
+      status: 403,
+      error: 'لا يعتمد المحتوى كاتبُه. يعتمده غيرك ممّن يملك الصلاحية.',
+    };
+  }
+
   if (action === 'reject' && (!note || !note.trim())) {
     return { ok: false, status: 400, error: 'سبب الرفض إلزامي' };
   }

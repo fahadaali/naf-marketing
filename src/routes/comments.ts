@@ -3,8 +3,6 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { syncComments, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply } from '../services/commentsSync';
 import type { ModerateAction } from '../adapters/provider';
-import { providerKey } from '../adapters';
-import { debugSocialApi } from '../adapters/socialapi';
 import { suggestReplies } from '../services/claude';
 import { htmlToText } from '../util';
 
@@ -60,15 +58,10 @@ commentRoutes.post('/refresh', async (c) => {
 });
 
 // تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية
-commentRoutes.get('/debug', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
-  try {
-    return c.json(await debugSocialApi(token));
-  } catch (e: any) {
-    return c.json({ error: String(e?.message || e) }, 502);
-  }
-});
+/* حُذف `‎/debug`: مسبارُ تطويرٍ يكشف ردّ المزوّد خاماً، بلا قارئ في
+   الواجهة. وصحّة التكامل تُقرأ من `‎/api/socialapi/health` وهي المسجَّلة
+   في الشاشة. ودالة `debugSocialApi` باقيةٌ في
+   `adapters/socialapi.ts` لمن يحتاجها. */
 
 // اقتراحات ذكاء اصطناعي للرد (٣ مقترحات متنوّعة قصيرة)
 commentRoutes.post('/:id/suggest', async (c) => {

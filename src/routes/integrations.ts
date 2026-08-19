@@ -4,7 +4,7 @@ import { requireAuth, requirePermission } from '../middleware';
 import { SOURCES, SOURCE_CONTRACT } from '../adapters/sources';
 import { syncSource } from '../services/metricSync';
 import { applyCrmSnapshot, syncCrm } from '../services/crmSync';
-import { parseCrmExport, crmKey } from '../adapters/crm';
+import { parseCrmExport } from '../adapters/crm';
 import { periodOf, parsePeriod, isPeriodKind } from '../services/period';
 import { computeAuto } from '../services/metrics';
 import { logAudit } from '../services/audit';
@@ -151,18 +151,7 @@ integrationRoutes.post('/crm/import', requirePermission('metrics.manage'), async
   }
 });
 
-/** فحص جاهزية منصة إدارة الشركة — قبل تشغيل السحب الدوري عليها. */
-integrationRoutes.get('/crm/check', requirePermission('integrations.manage'), async (c) => {
-  const row = await c.env.DB.prepare("SELECT config_json FROM integrations WHERE key = 'crm'").first<{ config_json: string }>();
-  let cfg: Record<string, unknown> = {};
-  try {
-    cfg = JSON.parse(row?.config_json || '{}');
-  } catch {
-    cfg = {};
-  }
-  return c.json({
-    base_url: String(cfg.base_url ?? ''),
-    mode: cfg.mode === 'import' ? 'import' : 'bearer',
-    secret_ready: crmKey(c.env) !== '',
-  });
-});
+/* حُذف `‎/crm/check`: ثلاثتُه — `base_url` و`mode` و`secret_ready` — في
+   ردّ `GET /api/integrations` أعلاه لكل مصدر، وهو ما تقرؤه شاشة مصادر
+   المؤشرات فعلاً. ومسارٌ ثانٍ لجوابٍ واحد يفترق عنه أوّل ما يُعدَّل. */
+

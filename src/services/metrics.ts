@@ -979,6 +979,43 @@ export async function readSeries(
   return results.reverse();
 }
 
+/**
+ * سلاسل عدّة مؤشرات في استعلام واحد — لخطّ الاتجاه في بطاقة المؤشر.
+ *
+ * ولا نداءٌ لكل بطاقة: اللوحة عشر بطاقات والطبقة تبلغ أربعاً وعشرين،
+ * فعشرون رحلةً إلى الخادم لرسم عشرين خطّاً صغيراً كلفةٌ لا يبرّرها ما
+ * تُظهره. والحدّ على المفاتيح لا على الصفوف: `LIMIT` واحدٌ على استعلامٍ
+ * يجمع المفاتيح كلَّها يقصّ سلاسل بعضها ويترك بعضها، فيُقصّ لكلٍّ حدُّه
+ * في الشيفرة بعد الترتيب.
+ */
+export async function readSeriesBulk(
+  env: Env,
+  metricKeys: string[],
+  kind: Period['kind'],
+  limit = 12,
+): Promise<Record<string, { period_start: string; value: number }[]>> {
+  const keys = [...new Set(metricKeys)].filter(Boolean).slice(0, 200);
+  if (!keys.length) return {};
+
+  const { results } = await env.DB.prepare(
+    `SELECT metric_key, period_start, value FROM metric_values
+     WHERE period = ? AND dim_key = '' AND dim_value = ''
+       AND metric_key IN (${keys.map(() => '?').join(',')})
+     ORDER BY metric_key ASC, period_start DESC`,
+  )
+    .bind(kind, ...keys)
+    .all<{ metric_key: string; period_start: string; value: number }>();
+
+  const out: Record<string, { period_start: string; value: number }[]> = {};
+  for (const r of results) {
+    const bucket = (out[r.metric_key] ||= []);
+    if (bucket.length < limit) bucket.push({ period_start: r.period_start, value: r.value });
+  }
+  // القراءة نزولاً والعرض صعوداً — أقدمها أوّلاً كما يُقرأ الخطّ
+  for (const k of Object.keys(out)) out[k].reverse();
+  return out;
+}
+
 /** يسجّل قيمةً باليد — تحمل اسم من أدخلها ووقته، فتُدقَّق كما يُدقَّق المسحوب. */
 export async function recordManual(
   env: Env,

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { getEmailProvider } from '../services/email';
+import { getEmailProvider, emailReadiness } from '../services/email';
 import { newId, nowIso } from '../util';
 import {
   parseBlocks, renderBlocks, blocksToText, slugify, publicSettings, articleUrl,
@@ -133,6 +133,13 @@ newsletterRoutes.get('/:id/stats', async (c) => {
 // بدء الإرسال — يُدرج صفاً لكل مشترك نشط، ثم يرسل الدفعات عبر Cron
 newsletterRoutes.post('/:id/send', async (c) => {
   try {
+    /* الجاهزية قبل الطابور: بلا مفتاحٍ يرمي `getEmailProvider` داخل
+       الدفعة — وهي تجري في `waitUntil` بلا مستمع، فتبقى النشرة «قيد
+       الإرسال» وصفوفُها «في الطابور» بلا سببٍ ظاهر للمستخدم. فيُقال له
+       هنا، قبل أن يُنشأ صفٌّ واحد. */
+    const email = await emailReadiness(c.env);
+    if (!email.configured) return c.json({ error: email.reason }, 400);
+
     const queued = await queueNewsletter(c.env, c.req.param('id'));
     // نبدأ الدفعة الأولى فوراً كي يرى المستخدم تقدّماً مباشرة
     c.executionCtx.waitUntil(sendQueuedBatch(c.env, c.req.url).catch(() => {}));
@@ -148,6 +155,10 @@ newsletterRoutes.post('/:id/send', async (c) => {
    والربط غير متاح على كل خطة، فالواجهة تسأل عنه أولاً عبر
    ‎/meta/export-capabilities ولا تعرض زرّاً يفشل عند الضغط. */
 newsletterRoutes.get('/meta/export-capabilities', (c) => c.json({ pdf: !!c.env.BROWSER }));
+
+/* جاهزية البريد — تسألها الإعدادات كما تسأل بيسكامب وBuffer عن حالتهما.
+   وكان البريد وحده بلا فحصٍ، وهو الوحيد الذي كان يبتلع الإرسال صامتاً. */
+newsletterRoutes.get('/meta/email-status', async (c) => c.json(await emailReadiness(c.env)));
 
 newsletterRoutes.get('/:id/export.pdf', async (c) => {
   const row = await c.env.DB.prepare('SELECT title, slug, blocks_json, theme_json FROM newsletters WHERE id = ?')
