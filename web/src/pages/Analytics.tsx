@@ -68,7 +68,7 @@ export default function Analytics() {
     if (start) q.set('start', start);
     if (!isBoard && !isCatalogue) q.set('layer', tab);
     // والدليل يقرأ اللوحة لا الطبقات: لا يعرض أرقاماً وإنما يلزمه حدّ الفترة،
-    // واللوحة عشرة أرقام و«الطبقات كلها» مئةٌ وستّة عشر.
+    // واللوحة عشرة أرقام و«الطبقات كلها» مئةٌ واثنان وعشرون.
     const path = isBoard || isCatalogue ? '/metrics/board' : '/metrics/layer';
     api.get(`${path}?${q}`)
       .then((d) => {

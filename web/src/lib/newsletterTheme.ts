@@ -29,6 +29,10 @@ export const EMAIL = {
   warningSoft: '#F3EADD',
   radius: '12px',
   fontStack: "system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif",
+  // كتلة الكود وحدها. تُصيَّر في الخادم فتصل الخطُّ ضمن HTML المعاينة،
+  // لكن المرآة تُنسخ كاملةً لا مقتطعةً: نقصُ مفتاحٍ اليوم لا أثر له،
+  // وغداً يقرؤه من يبني معاينةً محليةً فلا يجده.
+  monoStack: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
 } as const;
 
 export type Align = 'start' | 'center' | 'end';
