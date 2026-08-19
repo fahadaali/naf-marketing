@@ -46,4 +46,9 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'comments.manage': 'إدارة التعليقات والرسائل المباشرة',
   'newsletter.manage': 'إدارة النشرات البريدية والمشتركين',
   'audit.view': 'عرض سجل التدقيق',
+  // كانتا بلا تسمية، فتعرضهما مصفوفة الصلاحيات بمفتاحهما الإنجليزي
+  // الخام — `labels[key] || key` في `Settings.tsx`. ويحرس اكتمالَ
+  // الجدول اليومَ اختبارٌ يقارنه بما تزرعه الهجرات.
+  'integrations.manage': 'ربط المصادر والتكاملات',
+  'metrics.manage': 'تسجيل المؤشرات ومستهدفاتها',
 };
