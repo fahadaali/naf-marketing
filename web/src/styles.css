@@ -474,6 +474,10 @@ h3, h4 { letter-spacing: -0.01em; }
 .table-card { padding: 0; overflow: auto; }
 .table-empty { text-align: center; padding: var(--space-6); }
 .col-check { width: 36px; }
+/* عمود الاسم لا يُضغط حتى ينكسر رقمُ قضيةٍ على أسطر عند شرطاته المائلة —
+   المتصفّح يكسر بعد «/» فيصير «2291/» سطراً و«ت/1447» آخر. والجدول
+   يُمرَّر أفقياً داخل بطاقته أصلاً، فالعرض الأدنى لا يُخرج الصفحة. */
+.col-name { min-width: 180px; }
 .sort-head { gap: var(--space-1); display: inline-flex; cursor: pointer; }
 .sort-off { opacity: .35; }
 .sort-on { opacity: 1; }

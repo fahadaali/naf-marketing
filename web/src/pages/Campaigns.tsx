@@ -402,7 +402,7 @@ function TableView({
               <td onClick={(e) => e.stopPropagation()}>
                 <input type="checkbox" className="chk" checked={sel.has(c.id)} onChange={() => toggleSel(c.id)} aria-label={c.name} />
               </td>
-              <td>
+              <td className="col-name">
                 <button type="button" className="row-link" onClick={() => onOpen(c.id)}>{c.name}</button>
               </td>
               <td><CampaignBadge state={c.status} /></td>

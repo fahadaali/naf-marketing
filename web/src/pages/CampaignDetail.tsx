@@ -161,8 +161,10 @@ export default function CampaignDetail() {
             <button className="btn ghost sm" onClick={duplicate}>
               <CopyPlus size={20} /> إنشاء نسخة
             </button>
+            {/* الانتقالات ghost و«إضافة محتوى» وحدها بارزة: §٦ تجعل الإبراز
+                واحداً في المشهد، والفعل المتكرّر أولى به من فعلٍ يقع مرّة. */}
             {transitions.filter((t) => t !== 'archived').map((t) => (
-              <button key={t} className="btn sm" onClick={() => changeStatus(t)}>
+              <button key={t} className="btn ghost sm" onClick={() => changeStatus(t)}>
                 {TRANSITION_LABEL[t] || CAMPAIGN_STATUS_LABELS[t]}
               </button>
             ))}
