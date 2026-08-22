@@ -60,9 +60,13 @@ export default function CampaignDetail() {
     if (!id) return;
     api.get(`/campaigns/${id}`)
       .then((d) => {
+        /* ردٌّ ناقصٌ يُعامَل كغيابٍ لا كحملةٍ نصفِ محمّلة: بدون هذا الحارس
+           يسقط التصيير على `posts.filter` بشاشةٍ بيضاء بلا رسالة، أو تبقى
+           «جارٍ التحميل…» إلى الأبد على ردٍّ وصل ولم يحمل حملة. */
+        if (!d || !d.campaign) { setNotFound(true); return; }
         setCampaign(d.campaign);
-        setPosts(d.posts);
-        setTransitions(d.allowed_transitions || []);
+        setPosts(Array.isArray(d.posts) ? d.posts : []);
+        setTransitions(Array.isArray(d.allowed_transitions) ? d.allowed_transitions : []);
       })
       .catch((e) => { setNotFound(true); setErr(e.message); });
     if (canSeeNumbers) {

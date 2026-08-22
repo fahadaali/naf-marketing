@@ -63,7 +63,9 @@ export default function Campaigns() {
 
   function load() {
     // بلا معالجةٍ للخطأ يُقرأ الفشل «لا حملات» — وهما حالتان مختلفتان تماماً.
-    api.get('/campaigns').then((d) => setCampaigns(d.campaigns)).catch((e) => setErr(e.message));
+    api.get('/campaigns')
+      .then((d) => setCampaigns(Array.isArray(d.campaigns) ? d.campaigns : []))
+      .catch((e) => setErr(e.message));
     api.get('/settings').then((d) => setPlatforms(d.settings?.enabled_platforms || [])).catch(() => {});
   }
   useEffect(load, []);
