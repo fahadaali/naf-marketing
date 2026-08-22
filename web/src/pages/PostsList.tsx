@@ -1,4 +1,5 @@
 import { isolate, formatDate } from '../lib/format';
+import { download } from '../lib/download';
 
 // إزاحة الرياض الثابتة (+3 بلا توقيت صيفي) — كما في api.ts
 const RIYADH_OFFSET = 3 * 60 * 60 * 1000;
@@ -6,10 +7,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, FileOutput,
-  FolderInput, ArrowUpDown, ChevronDown, CheckSquare, Lightbulb,
+  FolderInput, ArrowUpDown, ChevronDown, CheckSquare,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, formatRiyadh, displayStatus } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, TYPE_LABELS, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
+import PostKanban, { moveAction } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import { DateRangePicker } from '../components/DatePicker';
@@ -24,8 +26,6 @@ function riyadhYMD(iso: string): string {
   }
 }
 
-const SOURCE: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
-const TYPE: Record<string, string> = { text: 'نص', image: 'صورة', video: 'فيديو' };
 // لون شريط مخطّط جانت — رمز كامل لا مكوّنات hsl.
 const BADGE_COLOR: Record<string, string> = {
   gray: 'var(--muted-foreground)', blue: 'var(--info)', amber: 'var(--warning)',
@@ -35,13 +35,6 @@ const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--mute
 
 function stripHtml(s: string) {
   return (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-}
-function download(name: string, content: string, mime: string) {
-  const blob = new Blob(['﻿' + content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-  URL.revokeObjectURL(url);
 }
 
 export default function ContentManagement() {
@@ -141,16 +134,6 @@ export default function ContentManagement() {
     setShowAssign(false); setSel(new Set()); setMsg(`تم تحديث حملة ${isolate(ok)} عنصراً`); load();
   }
 
-  // السحب والإفلات في كانبان: يحدّد الإجراء المسموح حسب الانتقال، ويحترم التسلسل والصلاحيات (الخادم يتحقق).
-  function moveAction(from: string, toCol: string): 'submit' | 'approve' | 'reject' | 'archive' | null {
-    if (toCol === 'pending_marketing' && ['draft', 'rejected'].includes(from)) return 'submit';
-    if (toCol === 'pending_gm' && from === 'pending_marketing') return 'approve';
-    if (toCol === 'approved' && from === 'pending_gm') return 'approve';
-    if (toCol === 'rejected' && ['pending_marketing', 'pending_gm'].includes(from)) return 'reject';
-    if (toCol === 'archived' && from === 'published') return 'archive';
-    return null;
-  }
-
   async function onMove(post: any, toCol: string) {
     setErr(''); setMsg('');
     const action = moveAction(post.status, toCol);
@@ -194,7 +177,7 @@ export default function ContentManagement() {
     } else {
       let md = `# تصدير المحتوى — ${stamp}\n\n`;
       for (const p of rows) {
-        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n\n${stripHtml(p.body)}\n\n---\n\n`;
+        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n\n${stripHtml(p.body)}\n\n---\n\n`;
       }
       download(`content-${stamp}.md`, md, 'text/markdown;charset=utf-8');
     }
@@ -239,11 +222,11 @@ export default function ContentManagement() {
           </div>
           <select className="select" style={{ width: 150 }} value={fSource} onChange={(e) => setFSource(e.target.value)}>
             <option value="">كل المصادر</option>
-            {Object.entries(SOURCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <select className="select" style={{ width: 130 }} value={fType} onChange={(e) => setFType(e.target.value)}>
             <option value="">كل الأنواع</option>
-            {Object.entries(TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <select className="select" style={{ width: 160 }} value={fCampaign} onChange={(e) => setFCampaign(e.target.value)}>
             <option value="">كل الحملات</option>
@@ -302,7 +285,7 @@ export default function ContentManagement() {
           onDelete={async (id: string) => { if (confirm('حذف هذا المحتوى نهائياً؟')) { try { await api.del(`/posts/${id}`); load(); } catch (e: any) { setErr(e.message); } } }}
         />
       )}
-      {view === 'kanban' && <KanbanView rows={filtered} navigate={navigate} onMove={onMove} />}
+      {view === 'kanban' && <PostKanban rows={filtered} onOpen={(p) => navigate(`/editor/${p.id}`)} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
@@ -359,8 +342,8 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
                 <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
               </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
-              <td className="muted"><bdi>{SOURCE[p.source] || p.source}</bdi></td>
-              <td className="muted">{TYPE[p.content_type] || p.content_type}</td>
+              <td className="muted"><bdi>{SOURCE_LABELS[p.source] || p.source}</bdi></td>
+              <td className="muted">{TYPE_LABELS[p.content_type] || p.content_type}</td>
               <td className="muted">{p.campaign_name || '—'}</td>
               <td className="muted">{p.author_name}</td>
               <td className="muted">{formatRiyadh(p.updated_at)}</td>
@@ -372,75 +355,6 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
           {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/* ===== عرض كانبان ===== */
-const KANBAN_COLS: { key: string; statuses: string[] }[] = [
-  { key: 'draft', statuses: ['draft'] },
-  { key: 'rejected', statuses: ['rejected'] },
-  { key: 'pending_marketing', statuses: ['pending_marketing'] },
-  { key: 'pending_gm', statuses: ['pending_gm'] },
-  { key: 'approved', statuses: ['approved'] },
-  { key: 'scheduled', statuses: ['scheduled', 'late'] },
-  { key: 'published', statuses: ['published'] },
-  { key: 'archived', statuses: ['archived'] },
-];
-function KanbanView({ rows, navigate, onMove }: any) {
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [overCol, setOverCol] = useState<string | null>(null);
-  const cols = KANBAN_COLS.map((col) => ({
-    ...col,
-    items: rows.filter((p: any) => col.statuses.includes(displayStatus(p))),
-  })).filter((c) => c.items.length > 0 || ['draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published'].includes(c.key));
-
-  function handleDrop(colKey: string) {
-    const post = rows.find((p: any) => p.id === dragId);
-    setDragId(null);
-    setOverCol(null);
-    if (post) onMove(post, colKey);
-  }
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> اسحب البطاقة إلى العمود التالي لتحريك مرحلتها (ضمن التسلسل المسموح).</p>
-      <div style={{ display: 'flex', gap: 12, minWidth: 'min-content' }}>
-        {cols.map((col) => (
-          <div
-            key={col.key}
-            className={`kanban-col ${overCol === col.key && dragId ? 'dragover' : ''}`}
-            style={{ width: 260, flexShrink: 0 }}
-            onDragOver={(e) => { e.preventDefault(); setOverCol(col.key); }}
-            onDragLeave={() => setOverCol((c) => (c === col.key ? null : c))}
-            onDrop={(e) => { e.preventDefault(); handleDrop(col.key); }}
-          >
-            <h4 className="row">
-              <StatusBadge status={col.key} />
-              <div className="spacer" /><span className="muted">{col.items.length}</span>
-            </h4>
-            {col.items.map((p: any) => (
-              <div
-                key={p.id}
-                className={`kanban-card ${dragId === p.id ? 'dragging' : ''}`}
-                draggable
-                onDragStart={() => setDragId(p.id)}
-                onDragEnd={() => { setDragId(null); setOverCol(null); }}
-                onClick={() => navigate(`/editor/${p.id}`)}
-              >
-                <div style={{ fontWeight: 500, marginBottom: 6 }}>{p.title}</div>
-                <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
-                  <span className="muted">{SOURCE[p.source] || p.source}</span>
-                  {p.campaign_name && <span className="badge gray">{p.campaign_name}</span>}
-                  <div className="spacer" />
-                  <span className="muted">{p.author_name}</span>
-                </div>
-              </div>
-            ))}
-            {col.items.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)', textAlign: 'center', padding: 8 }}>—</p>}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

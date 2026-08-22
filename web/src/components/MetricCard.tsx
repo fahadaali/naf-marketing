@@ -1,11 +1,12 @@
-import { CalendarSync, Compass, Gauge, Megaphone, TrendingUp, TrendingDown, Equal, CircleCheck, CircleAlert, CircleHelp, TriangleAlert } from 'lucide-react';
+import { CalendarSync, Compass, Gauge, Megaphone, TrendingUp, TrendingDown, Equal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { formatNumber } from '../lib/format';
 import { Money } from './Money';
+import TargetBadge from './TargetBadge';
 import {
-  CLASS_LABELS, REFERENCE_LABELS, SOURCE_LABELS, TARGET_STATUS_BADGE, TARGET_STATUS_LABELS,
+  CLASS_LABELS, REFERENCE_LABELS, SOURCE_LABELS,
   TREND_LABELS, UNIT_SUFFIX, dimensionLabel, targetStatus, trendIsGood, trendOf, trendPercent,
-  type MetricClass, type MetricUnit, type TargetDirection, type TargetStatus, type Trend, type ValueSource,
+  type MetricClass, type MetricUnit, type TargetDirection, type Trend, type ValueSource,
 } from '../metrics';
 
 /* بطاقة مؤشر — الرقم وفئته وحالته أمام مستهدفه واتجاهه معاً.
@@ -51,13 +52,6 @@ const CLASS_ICON: Record<MetricClass, LucideIcon> = {
   vanity: Megaphone,
 };
 
-const TARGET_ICON: Record<TargetStatus, LucideIcon> = {
-  on_target: CircleCheck,
-  near_target: TriangleAlert,
-  off_target: CircleAlert,
-  no_target: CircleHelp,
-};
-
 const TREND_ICON: Record<Trend, LucideIcon | null> = {
   up: TrendingUp,
   down: TrendingDown,
@@ -79,13 +73,11 @@ export function MetricValue({ value, unit }: { value: number; unit: MetricUnit }
 }
 
 function TargetChip({ m }: { m: MetricReading }) {
-  const status = targetStatus(m.value, m.target_value, m.target_direction, m.target_min, m.target_max);
-  const Icon = TARGET_ICON[status];
   return (
-    <span className={`badge ${TARGET_STATUS_BADGE[status]}`}>
-      <Icon size={13} />
-      {TARGET_STATUS_LABELS[status]}
-    </span>
+    <TargetBadge
+      status={targetStatus(m.value, m.target_value, m.target_direction, m.target_min, m.target_max)}
+      size={13}
+    />
   );
 }
 

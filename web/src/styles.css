@@ -366,6 +366,20 @@ h3, h4 { letter-spacing: -0.01em; }
 .kanban-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-2); font-size: var(--text-xs); cursor: pointer; transition: border-color .1s; }
 .kanban-card:hover { border-color: var(--primary); }
 
+/* لوحة المحتوى المشتركة (components/PostKanban.tsx). العرض والفجوات هنا
+   لا في JSX: قيمةٌ خام في نمطٍ سطريّ تخالف §١، وعرضُ العمود بُعدُ تخطيطٍ
+   يخصّ الورقة لا المكوّن. */
+.kanban-scroll { overflow-x: auto; }
+.kanban-hint {
+  font-size: var(--text-xs); margin-top: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.kanban-board { display: flex; gap: var(--space-3); min-width: min-content; }
+.kanban-col.board-col { width: 260px; flex-shrink: 0; }
+.kanban-card-title { font-weight: 500; margin-bottom: var(--space-2); }
+.kanban-card-meta { font-size: var(--text-xs); }
+.kanban-empty { font-size: var(--text-xs); text-align: center; padding: var(--space-2); }
+
 /* ===== المودال / الحوار ===== */
 .modal-overlay {
   position: fixed; inset: 0; background: color-mix(in oklab, var(--foreground) 40%, transparent); backdrop-filter: blur(3px);

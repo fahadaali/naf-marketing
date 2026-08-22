@@ -1,7 +1,10 @@
 import {
   Archive,
+  CalendarCheck,
   CalendarClock,
+  CalendarRange,
   CircleCheck,
+  CirclePlay,
   CircleSlash,
   CircleX,
   Clock,
@@ -18,7 +21,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 /* شارات الحالات المسجّلة في naf-icons.md#v1.4.0 — لون وأيقونة ونص معاً.
-   ثلاث مجموعات: الاشتراك البريدي، والإرسال البريدي، والربط والتفعيل. */
+   أربع مجموعات: الاشتراك البريدي، والإرسال البريدي، والربط والتفعيل،
+   وحالات الحملة. */
 
 type State = { label: string; badge: string; icon: LucideIcon };
 
@@ -39,6 +43,18 @@ const DELIVERY: Record<string, State> = {
   sent: { label: 'أُرسلت', badge: 'green', icon: MailCheck },
   archived: { label: 'مؤرشف', badge: 'gray', icon: Archive },
   failed: { label: 'فاشل', badge: 'red', icon: CircleX },
+};
+
+/* حالات الحملة. طرفاها تقويمان: مدّةٌ حُدّدت ولم تبدأ، ومدّةٌ انقضت.
+   ولا CircleCheck لـ«نشطة» وإن حملتها SUBSCRIPTION أعلاه لـ«نشط»:
+   صفحة الحملة تعرض شارتها وشارةَ المستهدف وبطاقةَ منشورٍ معتمد معاً،
+   فثلاثُ علاماتٍ خضراء متطابقة تُلغي الفرق الذي وُجدت الأيقونة لتقوله.
+   و«مكتملة» blue لا green — الاكتمال انقضاءُ مدّةٍ لا حكمٌ بالنجاح. */
+const CAMPAIGN: Record<string, State> = {
+  planned: { label: 'مخطّطة', badge: 'gray', icon: CalendarRange },
+  active: { label: 'نشطة', badge: 'green', icon: CirclePlay },
+  completed: { label: 'مكتملة', badge: 'blue', icon: CalendarCheck },
+  archived: { label: 'مؤرشفة', badge: 'gray', icon: Archive },
 };
 
 /** ثنائيات الربط والتفعيل — النوع يحدّد المصطلح، والقيمة تحدّد الجهة. */
@@ -90,4 +106,10 @@ export function ConnectionBadge({
 }) {
   const [yes, no] = CONNECTION[kind];
   return render(on ? yes : no, '—', size);
+}
+
+/* حالة حملة. والمقاس ١٦ — أدنى المقاسات الثلاثة المسجّلة، وهو ما
+   يخصّ النصوص والشارات. وما فوقُه في هذا الملفّ ١٣ من قبل التسجيل. */
+export function CampaignBadge({ state, size = 16 }: { state: string; size?: number }) {
+  return render(CAMPAIGN[state], state, size);
 }

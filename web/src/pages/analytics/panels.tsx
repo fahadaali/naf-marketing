@@ -4,6 +4,7 @@ import { ExternalLink, FileOutput, RefreshCw, TriangleAlert } from 'lucide-react
 import { api } from '../../api';
 import { formatNumber, isolate } from '../../lib/format';
 import StatusBadge from '../../components/StatusBadge';
+import Bar from '../../components/Bar';
 import { RatingValue } from '../../components/Rating';
 import { PlatformIcon, platformLabel } from '../../platforms';
 
@@ -22,14 +23,6 @@ export type DashboardData = {
   pipeline?: { status: string; count: number }[];
   campaigns?: { id: string; name: string; impressions: number; engagement: number }[];
 };
-
-function Bar({ value, max }: { value: number; max: number }) {
-  return (
-    <div className="bar-track">
-      <div className="bar-fill" style={{ width: `${(value / Math.max(max, 1)) * 100}%` }} />
-    </div>
-  );
-}
 
 export function PlatformBreakdown({ data }: { data: DashboardData | null }) {
   const rows = data?.byPlatform || [];
