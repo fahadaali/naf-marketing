@@ -22,13 +22,36 @@ export default function Dashboard() {
   const [posts, setPosts] = useState<any[]>([]);
   const [board, setBoard] = useState<MetricReading[]>([]);
   const [loadingBoard, setLoadingBoard] = useState(true);
+  /* الفشل يُقال ولا يُبتلع: مسارُ الإنتاج يُرسم بأصفارٍ في كل مرحلة حين
+     لا تصل القائمة — وهو شكلُ «لا محتوى بعد» نفسه بالضبط. */
+  const [postsErr, setPostsErr] = useState('');
+  // واللوحة كذلك: «لا قيمة مسجّلة» دعوةٌ إلى الربط، وقولُها على انقطاعٍ
+  // يرسل القارئ إلى شاشة التكاملات يبحث عن عطلٍ ليس فيها.
+  const [boardErr, setBoardErr] = useState('');
+  // سلاسل خطّ الاتجاه — نداءٌ واحد بعد وصول اللوحة، ويسقط صامتاً:
+  // الخطّ زيادةٌ على الرقم لا شرطٌ لقراءته.
+  const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
+
+  function loadPosts() {
+    setPostsErr('');
+    api.get('/posts').then((d) => setPosts(d.posts)).catch((e: any) => setPostsErr(e.message));
+  }
 
   useEffect(() => {
-    api.get('/posts').then((d) => setPosts(d.posts)).catch(() => {});
+    loadPosts();
     if (can('analytics.view')) {
       api.get('/metrics/board?period=weekly')
-        .then((d) => setBoard(d.metrics || []))
-        .catch(() => {})
+        .then((d) => {
+          const rows: MetricReading[] = d.metrics || [];
+          setBoard(rows);
+          if (!rows.length) return;
+          const keys = rows.map((r) => r.key).join(',');
+          // الصمت قرار: خطّ الاتجاه زيادةٌ على الرقم لا شرطٌ لقراءته
+          api.get(`/metrics/series?period=weekly&keys=${encodeURIComponent(keys)}`)
+            .then((sd) => setSeries(sd.series || {}))
+            .catch(() => {});
+        })
+        .catch((e: any) => setBoardErr(e.message))
         .finally(() => setLoadingBoard(false));
     } else {
       setLoadingBoard(false);
@@ -56,6 +79,10 @@ export default function Dashboard() {
 
           {loadingBoard ? (
             <p className="muted">جارٍ التحميل…</p>
+          ) : boardErr ? (
+            <div className="card">
+              <p className="err" style={{ margin: 0 }}>{boardErr}</p>
+            </div>
           ) : board.length === 0 ? (
             <div className="card">
               <p className="muted" style={{ margin: 0 }}>
@@ -65,7 +92,7 @@ export default function Dashboard() {
           ) : (
             <div className="grid cols-3">
               {board.map((m) => (
-                <MetricCard key={m.key} m={m} />
+                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
               ))}
             </div>
           )}
@@ -74,14 +101,23 @@ export default function Dashboard() {
 
       <section style={{ marginBottom: 24 }}>
         <h3 style={{ marginTop: 0, marginBottom: 12 }}>خط إنتاج المحتوى</h3>
-        <div className="grid cols-4">
-          {pipeline.map((p) => (
-            <div className="card stat" key={p.status}>
-              <div className="num"><bdi>{formatNumber(p.count)}</bdi></div>
-              <div className="label"><StatusBadge status={p.status} /></div>
-            </div>
-          ))}
-        </div>
+        {postsErr ? (
+          /* لا أصفارٌ حين لا تصل القائمة: صفرٌ في كل مرحلة رقمٌ يُقرأ
+             حقيقةً، وهو هنا غيابُ خبرٍ لا خبرُ غياب. */
+          <div className="card">
+            <p className="err" style={{ margin: 0 }}>{postsErr}</p>
+            <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={loadPosts}>إعادة المحاولة</button>
+          </div>
+        ) : (
+          <div className="grid cols-4">
+            {pipeline.map((p) => (
+              <div className="card stat" key={p.status}>
+                <div className="num"><bdi>{formatNumber(p.count)}</bdi></div>
+                <div className="label"><StatusBadge status={p.status} /></div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="card">

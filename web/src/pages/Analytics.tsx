@@ -45,6 +45,8 @@ export default function Analytics() {
   const [period, setPeriod] = useState<PeriodKind>('monthly');
   const [start, setStart] = useState<string>('');
   const [metrics, setMetrics] = useState<MetricReading[]>([]);
+  // مفتاح المؤشر ← قيمُه عبر الفترات، أقدمُها أوّلاً
+  const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
 
@@ -66,16 +68,28 @@ export default function Analytics() {
     if (start) q.set('start', start);
     if (!isBoard && !isCatalogue) q.set('layer', tab);
     // والدليل يقرأ اللوحة لا الطبقات: لا يعرض أرقاماً وإنما يلزمه حدّ الفترة،
-    // واللوحة عشرة أرقام و«الطبقات كلها» مئةٌ وستّة عشر.
+    // واللوحة عشرة أرقام و«الطبقات كلها» مئةٌ واثنان وعشرون.
     const path = isBoard || isCatalogue ? '/metrics/board' : '/metrics/layer';
     api.get(`${path}?${q}`)
       .then((d) => {
-        setMetrics(d.metrics || []);
+        const rows = d.metrics || [];
+        setMetrics(rows);
         // الخادم يردّ حدود الفترة الفعلية — أيُّ يومٍ أُرسل يُردّ إلى بدايتها
         if (d.period?.start) setStart(d.period.start);
+        loadSeries(rows.map((r: MetricReading) => r.key));
       })
       .catch((e) => setMsg(e.message))
       .finally(() => setLoading(false));
+  }
+
+  /* سلاسل خطّ الاتجاه — نداءٌ واحد لكل البطاقات لا واحدٌ لكلٍّ منها.
+     ويسقط صامتاً: الخطّ زيادةٌ على الرقم لا شرطٌ لقراءته، فتعذّرُه لا
+     يمنع اللوحة من الظهور. */
+  function loadSeries(keys: string[]) {
+    if (!keys.length) { setSeries({}); return; }
+    api.get(`/metrics/series?period=${period}&keys=${encodeURIComponent(keys.join(','))}`)
+      .then((d) => setSeries(d.series || {}))
+      .catch(() => setSeries({}));
   }
 
   function loadDashboard() {
@@ -85,10 +99,13 @@ export default function Analytics() {
     // حدود اليوم بتوقيت الرياض (UTC+3)
     if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
     if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
+    // الصمت قرار: لوحات المنصات تُخفي نفسها بلا لقطات، وشريطُ الرسائل
+    // أعلى الشاشة يحمل خبر «سحب الآن» — ورسالتان متزاحمتان لا تُقرآن
     api.get('/analytics/dashboard?' + q).then(setDash).catch(() => {});
   }
 
   useEffect(() => {
+    // قائمتا المرشّحات: غيابُهما يُسقط خياراً لا شاشة
     api.get('/settings').then((d) => setPlatforms(d.settings?.enabled_platforms || [])).catch(() => {});
     api.get('/campaigns').then((d) => setCampaigns(d.campaigns || [])).catch(() => {});
   }, []);
@@ -111,6 +128,15 @@ export default function Analytics() {
     try {
       const d = await api.post(`/metrics/sync?period=${period}${start ? `&start=${start}` : ''}`);
       const failed = (d.sources || []).filter((s: any) => !s.ok);
+
+      /* لوحات المنصات تقرأ لقطات النشر لا المؤشرات، ومصدرُها سحبٌ آخر
+         يجريه الكرون كل ساعة. فـ«سحب الآن» يسحبهما معاً وإلا بقيت
+         الأرقام المعروضة تحت الزرّ على حالها ويُقرأ الزرّ عاطلاً. */
+      if (PANEL_LAYERS.has(tab)) {
+        // الصمت قرار: سحبٌ ثانويّ داخل «سحب الآن»، وخبرُ الأوّل يُقال أدناه
+        await api.post('/analytics/refresh').catch(() => {});
+      }
+
       setMsg(
         failed.length
           ? `تم السحب، وتعذّر السحب من ${isolate(failed.length)} مصدراً. راجع التكاملات.`
@@ -194,7 +220,7 @@ export default function Analytics() {
           ) : (
             <div className="grid cols-3">
               {metrics.map((m) => (
-                <MetricCard key={m.key} m={m} />
+                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
               ))}
             </div>
           )}

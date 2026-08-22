@@ -746,6 +746,12 @@ button.metric-card:focus-visible { outline: 2px solid var(--ring); outline-offse
 .metric-trend.is-good { color: var(--success-strong); }
 .metric-trend.is-bad { color: var(--destructive-strong); }
 
+/* خطّ الاتجاه — يرث لون الأب، فلا لون ثالث في البطاقة. والشفافية تجعله
+   خلفيةً للرقم لا منافساً له: العين تقع على الرقم أولاً ثم على مساره. */
+.metric-spark { display: block; opacity: 0.55; overflow: visible; }
+.metric-trend:hover .metric-spark,
+button.metric-card:hover .metric-spark { opacity: 1; }
+
 .metric-breakdown { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
 .metric-breakdown li {
   display: flex; align-items: center; gap: var(--space-2);

@@ -10,7 +10,12 @@
     "noEmit": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+
+    // مضبوطة في `web/tsconfig.json` منذ البداية وكانت غائبة هنا، فبقيت
+    // استيراداتٌ معلَّقة بعد حذف مسارها ولم يقُل الفاحصُ شيئاً.
+    "noUnusedLocals": true,
+    "noUnusedParameters": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "web"]

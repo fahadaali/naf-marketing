@@ -8,13 +8,9 @@ export const socialApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>
 
 socialApiRoutes.use('*', requireAuth);
 
-socialApiRoutes.get('/status', requirePermission('settings.manage'), async (c) => {
-  const configured = !!providerKey(c.env, 'socialapi');
-  const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
-  let mapped = 0;
-  try { mapped = Object.values(row?.value ? JSON.parse(row.value) : {}).filter(Boolean).length; } catch { /* */ }
-  return c.json({ configured, mapped });
-});
+/* حُذف `‎/status`: كان يردّ `configured` و`mapped` وحدهما، وهما داخل ردّ
+   `‎/health` أدناه وأوسع منه — والواجهة تنادي `‎/health` لا سواه. مساران
+   لسؤالٍ واحد يفترقان أوّل ما يُعدَّل أحدهما. */
 
 // صحّة التكامل: الحسابات وحالتها، استهلاك الحصة، الويب هوكس، وآخر مزامنة ناجحة.
 // كل جزء مستقل — فشل أحدها لا يُسقط البقية (نُعيد خطأه في حقله).

@@ -7,12 +7,24 @@ export const settingsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>(
 
 settingsRoutes.use('*', requireAuth);
 
-// قراءة الإعدادات غير السرية (متاحة لأي مستخدم مسجّل — لا أسرار هنا)
+/* ═══ البادئة المحجوزة ═══
+
+   `secret:` لا يخرج من هنا ولا يدخل من `PUT` أدناه. والحاجة إليها ثبتت
+   بعطلٍ وقع: مسار تسجيل خطّاف SocialAPI صار يكتب سرّ توقيع HMAC في هذا
+   الجدول، وهذه القراءة تردّ الجدول كلَّه لأي عضوٍ مسجَّل — والدور
+   الافتراضي لأول داخلٍ من المركز `writer`. فقرأ السرَّ من لا يملك شيئاً.
+
+   والحارس أدناه كان قائماً ولم يلتقطه: `SECRET_KEYS` تفحص `auth_secret`
+   لا `webhook_secret`. وقائمةُ أسماء تُنسى، والبادئة لا تُنسى. */
+const SECRET_PREFIX = 'secret:';
+
+// قراءة الإعدادات غير السرية (متاحة لأي مستخدم مسجّل)
 settingsRoutes.get('/', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT key, value FROM settings').all<{
-    key: string;
-    value: string;
-  }>();
+  const { results } = await c.env.DB.prepare(
+    'SELECT key, value FROM settings WHERE key NOT LIKE ?',
+  )
+    .bind(`${SECRET_PREFIX}%`)
+    .all<{ key: string; value: string }>();
   const map: Record<string, unknown> = {};
   for (const r of results) {
     try {
@@ -27,9 +39,12 @@ settingsRoutes.get('/', async (c) => {
 // تحديث إعداد (المدير العام فقط) — لا تُقبل أي مفاتيح سرية هنا إطلاقاً
 settingsRoutes.put('/', requirePermission('settings.manage'), async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
-  const SECRET_KEYS = ['claude_api_key', 'provider_api_key', 'auth_secret', 'password'];
+  // `secret` و`token` مجرَّدين لا `auth_secret` وحدها: الاسم المركَّب
+  // يمرّ من مصفاة تفحص مركَّباً آخر — وهو ما مرّ به `socialapi_webhook_secret`.
+  const SECRET_KEYS = ['secret', 'token', 'api_key', 'password'];
   for (const [key, value] of Object.entries(body)) {
-    if (SECRET_KEYS.some((s) => key.toLowerCase().includes(s))) {
+    const k = key.toLowerCase();
+    if (k.startsWith(SECRET_PREFIX) || SECRET_KEYS.some((s) => k.includes(s))) {
       return c.json({ error: 'المفاتيح السرية تُدار عبر Cloudflare Secrets فقط' }, 400);
     }
     const stored = typeof value === 'string' ? value : JSON.stringify(value);

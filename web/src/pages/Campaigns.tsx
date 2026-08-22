@@ -7,7 +7,7 @@ import {
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { formatDate, formatNumber, isolate } from '../lib/format';
-import { download } from '../lib/download';
+import { saveText } from '../lib/download';
 import { CampaignBadge } from '../components/StateBadge';
 import { PlatformIcon, platformLabel } from '../platforms';
 import ConfirmModal from '../components/ConfirmModal';
@@ -24,6 +24,9 @@ import {
    كانت شبكةَ بطاقاتٍ بلا بحثٍ ولا تصفيةٍ ولا فرز، وتفتح نافذةً لا مساراً.
    والمؤرشفة تخرج من العرض الافتراضي وتبقى خلف فلتر الحالة — وهذا ما يجعل
    الأرشفة بديلاً حقيقياً عن الحذف لا مجرّد وسمٍ لا أثر له. */
+
+/** علامةُ ترتيب البايتات — لـCSV وحده: في JSON تكسر JSON.parse. */
+const BOM = '\uFEFF';
 
 type Campaign = {
   id: string; name: string; objective: string | null;
@@ -150,7 +153,7 @@ export default function Campaigns() {
     const rows = sel.size ? selected() : filtered;
     const stamp = formatDate(new Date()).replace(/\//g, '-');
     if (fmt === 'json') {
-      download(`campaigns-${stamp}.json`, JSON.stringify(rows, null, 2), 'application/json');
+      saveText(JSON.stringify(rows, null, 2), `campaigns-${stamp}.json`, 'application/json');
       return;
     }
     if (fmt === 'csv') {
@@ -163,7 +166,7 @@ export default function Campaigns() {
           c.start_date, c.end_date, c.posts_count, c.published_count, c.impressions, c.engagement,
         ].map(esc).join(','));
       }
-      download(`campaigns-${stamp}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
+      saveText(BOM + lines.join('\n'), `campaigns-${stamp}.csv`, 'text/csv;charset=utf-8');
       return;
     }
     let md = `# تصدير الحملات — ${stamp}\n\n`;
@@ -173,7 +176,7 @@ export default function Campaigns() {
         + `- مدّة الحملة: ${c.start_date ? formatDate(c.start_date) : '—'} إلى ${c.end_date ? formatDate(c.end_date) : '—'}\n`
         + `- التقدّم: ${formatNumber(c.published_count)} من ${formatNumber(c.posts_count)}\n\n`;
     }
-    download(`campaigns-${stamp}.md`, md, 'text/markdown;charset=utf-8');
+    saveText(md, `campaigns-${stamp}.md`, 'text/markdown;charset=utf-8');
   }
 
   return (

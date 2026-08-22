@@ -55,12 +55,26 @@ function emailShell(opts: {
 </body></html>`;
 }
 
-// يعيد كتابة الروابط لتمرّ بمسار التتبّع (نتجاهل إلغاء الاشتراك والتتبّع نفسه)
+/* يعيد كتابة روابط **متن الرسالة** لتمرّ بمسار التتبّع.
+ *
+ * والمتن وحده لا الغلاف: يُنادى على `contentHtml` ثم يضيف `emailShell`
+ * بعده رابطَ إلغاء الاشتراك ورابطَ «اقرأ على الموقع» وبكسلَ الفتح —
+ * فلا يمرّ ثلاثتُها من هنا أصلاً.
+ *
+ * وكان هنا حارسان يتخطّيان `‎/e/u/` و`‎/e/o/`، وكلاهما لا يمكن أن يعمل:
+ * الأول مسارٌ لا وجود له في المستودع (إلغاء الاشتراك على
+ * `‎/articles/unsubscribe/:token`)، والثاني لا يبلغ هذه الدالة لأنه
+ * يُضاف بعدها. فكان التعليق يَعِد بحمايةٍ غير قائمة — ومن ينقل النداء
+ * غداً إلى الرسالة كاملةً سيصدّقه.
+ *
+ * فإن نُقل يوماً إلى الغلاف، فالحارس اللازم على `‎/articles/unsubscribe/`
+ * و`‎/e/` معاً — لا على مسارٍ متخيَّل.
+ */
 function trackLinks(html: string, base: string, sendId: string): string {
-  return html.replace(/href="(https?:\/\/[^"]+)"/g, (m, url) => {
-    if (url.includes('/e/u/') || url.includes('/e/o/')) return m;
-    return `href="${base}/e/c/${sendId}?u=${encodeURIComponent(url)}"`;
-  });
+  return html.replace(
+    /href="(https?:\/\/[^"]+)"/g,
+    (_m, url) => `href="${base}/e/c/${sendId}?u=${encodeURIComponent(url)}"`,
+  );
 }
 
 async function siteName(env: Env): Promise<string> {

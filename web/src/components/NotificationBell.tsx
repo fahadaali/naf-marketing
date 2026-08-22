@@ -11,6 +11,8 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
 
   function load() {
+    /* الصمت قرار: الجرس زينةُ ترويسة لا شاشة، ورسالةُ خطأ فيه تلاحق
+       المستخدم في كل شاشة. وما يفوته إشعارٌ يصله في الطلب التالي. */
     api.get('/notifications').then((d) => { setItems(d.notifications); setUnread(d.unread); }).catch(() => {});
   }
 

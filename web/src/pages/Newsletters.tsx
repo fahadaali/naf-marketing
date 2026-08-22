@@ -195,12 +195,17 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
   const draftKey = `naf.newsletter.draft.${id}`;
 
   function loadStats() {
+    /* الصمت قرار: الإحصاءات والاختبار زيادةٌ على المحرر — تُقرآن بعد
+       الإرسال ولا يتوقّف عليهما تحريرٌ ولا حفظ. والشاشة تُبلّغ عن كل
+       فعلٍ يقوم به المستخدم في `setMsg`. */
     api.get(`/newsletters/${id}/stats`).then((d) => setStats(d.stats)).catch(() => {});
     api.get(`/newsletters/${id}/ab`).then(setAb).catch(() => {});
   }
 
   useEffect(() => {
     loadStats();
+    // الوسوم قائمةُ اقتراح، والقدرات تُخفي زرّاً يفشل عند الضغط —
+    // وكلاهما يُسقط خياراً لا شاشة
     api.get('/newsletters/meta/tags').then((d) => setTags(d.tags || [])).catch(() => {});
     api.get('/newsletters/meta/export-capabilities').then(setCaps).catch(() => {});
     api.get(`/newsletters/${id}`).then((d) => {

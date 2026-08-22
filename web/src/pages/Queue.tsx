@@ -7,15 +7,29 @@ import StatusBadge from '../components/StatusBadge';
 export default function Queue() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<any[]>([]);
+  /* الفشل يُقال ولا يُبتلع: طابورٌ لم يصل يبدو طابوراً فارغاً بالضبط،
+     فيقرأ المراجع «لا شيء بانتظاري» وعنده ما ينتظره. */
+  const [err, setErr] = useState('');
 
-  useEffect(() => {
-    api.get('/posts/queue').then((d) => setPosts(d.posts)).catch(() => {});
-  }, []);
+  function load() {
+    setErr('');
+    api.get('/posts/queue')
+      .then((d) => setPosts(d.posts))
+      .catch((e: any) => setErr(e.message));
+  }
+  useEffect(load, []);
 
   return (
     <div>
       <h1 className="page-title">طابور الاعتماد</h1>
       <p className="page-sub">المحتوى المنتظر للمراجعة أو الاعتماد النهائي</p>
+
+      {err && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <p className="err" style={{ margin: 0 }}>{err}</p>
+          <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={load}>إعادة المحاولة</button>
+        </div>
+      )}
 
       <div className="card">
         <table className="table">
@@ -38,7 +52,7 @@ export default function Queue() {
                 <td><button className="btn sm" onClick={() => navigate(`/editor/${p.id}`)}>مراجعة</button></td>
               </tr>
             ))}
-            {posts.length === 0 && (
+            {posts.length === 0 && !err && (
               <tr><td colSpan={5} className="muted" style={{ textAlign: 'center' }}>لا محتوى بانتظار الاعتماد. الطابور فارغ.</td></tr>
             )}
           </tbody>

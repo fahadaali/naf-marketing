@@ -1,24 +1,36 @@
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { useAuth } from './auth';
 import Layout from './components/Layout';
+
+/* ═══ الشاشات تُجلب عند الحاجة لا مع أول فتحة ═══
+
+   كانت الستّ عشرة كلُّها في حزمةٍ واحدة — ٥٠٣ ك.ب تتجاوز حدّ التحذير —
+   فمن يفتح لوحة التحكم يحمّل معها محرّر النشرة ومحرّر المحتوى وشاشة
+   التحليلات، وهي الأثقل ولا يفتحها في تلك الجلسة.
+
+   والثلاث الأولى مباشرةٌ لا مؤجَّلة: `Login` و`Denied` بابان يُبلغان قبل
+   أن تُقلع اللوحة، و`Dashboard` أول ما يُفتح — وتأجيلُ ما يُطلب فوراً
+   يزيد رحلةً ولا يوفّر شيئاً. */
 import Login from './pages/Login';
 import Denied from './pages/Denied';
 import Dashboard from './pages/Dashboard';
-import PostsList from './pages/PostsList';
-import Editor from './pages/Editor';
-import Calendar from './pages/Calendar';
-import Campaigns from './pages/Campaigns';
-import CampaignDetail from './pages/CampaignDetail';
-import Queue from './pages/Queue';
-import News from './pages/News';
-import Analytics from './pages/Analytics';
-import Settings from './pages/Settings';
-import Comments from './pages/Comments';
-import Newsletters from './pages/Newsletters';
-import Subscribers from './pages/Subscribers';
-import Search from './pages/Search';
-import Audit from './pages/Audit';
+
+const PostsList = lazy(() => import('./pages/PostsList'));
+const Editor = lazy(() => import('./pages/Editor'));
+const Calendar = lazy(() => import('./pages/Calendar'));
+const Campaigns = lazy(() => import('./pages/Campaigns'));
+const CampaignDetail = lazy(() => import('./pages/CampaignDetail'));
+const Queue = lazy(() => import('./pages/Queue'));
+const News = lazy(() => import('./pages/News'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Comments = lazy(() => import('./pages/Comments'));
+const Newsletters = lazy(() => import('./pages/Newsletters'));
+const Subscribers = lazy(() => import('./pages/Subscribers'));
+const Search = lazy(() => import('./pages/Search'));
+const Audit = lazy(() => import('./pages/Audit'));
 
 /* شاشة «لا صلاحية» — naf-terms.md §٧ · الأخطاء · «لا صلاحية».
 
@@ -73,7 +85,16 @@ function Protected({
       </Layout>
     );
   }
-  return <Layout>{children}</Layout>;
+  /* الانتظار داخل الهيكل لا فوقه: القائمة الجانبية والترويسة تبقيان،
+     ولا تومض الشاشة بيضاء بين نقرةٍ وأخرى. والنصّ من naf-terms §٤ —
+     التحميل والانتظار. */
+  return (
+    <Layout>
+      <Suspense fallback={<p className="muted" style={{ padding: 40, textAlign: 'center' }}>جارٍ التحميل…</p>}>
+        {children}
+      </Suspense>
+    </Layout>
+  );
 }
 
 export default function App() {

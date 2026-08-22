@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Plus, Upload, Trash2, UserMinus, RotateCcw, Search } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { SubscriptionBadge } from '../components/StateBadge';
+import Modal from '../components/Modal';
+import ConfirmModal from '../components/ConfirmModal';
 
 const SOURCE_AR: Record<string, string> = {
   article_page: 'صفحة مقالة', manual: 'إضافة يدوية', import: 'استيراد',
@@ -17,6 +19,13 @@ export default function Subscribers() {
   const [msg, setMsg] = useState('');
   const [importing, setImporting] = useState(false);
   const [importText, setImportText] = useState('');
+  /* نوافذ المنصة بدل مربّعات المتصفح — العلّة مشروحة في `ConfirmModal`:
+     `prompt` بلا تحقّقٍ ولا رسالة خطأ، و`confirm` بخطّ النظام وأزراره
+     بلغة المتصفح، وكلاهما لا يتبع الاتجاه ولا الوضعين. */
+  const [adding, setAdding] = useState(false);
+  const [addForm, setAddForm] = useState({ email: '', name: '' });
+  const [addErr, setAddErr] = useState('');
+  const [removing, setRemoving] = useState<string | null>(null);
 
   function load() {
     const p = new URLSearchParams();
@@ -27,12 +36,21 @@ export default function Subscribers() {
   }
   useEffect(load, [status]);
 
+  function openAdd() { setAddForm({ email: '', name: '' }); setAddErr(''); setAdding(true); }
+
   async function addOne() {
-    const email = prompt('البريد الإلكتروني:');
-    if (!email?.trim()) return;
-    const name = prompt('الاسم (اختياري):') || '';
-    try { await api.post('/subscribers', { email: email.trim(), name }); load(); }
-    catch (e: any) { setMsg(e.message); }
+    const email = addForm.email.trim();
+    // التحقّق هنا لا في المتصفّح: فقاعة `required` المدمجة تظهر بلغة
+    // المتصفّح لا بلغة المستخدم، وهي علّة `prompt` نفسها.
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setAddErr('البريد الإلكتروني غير صالح');
+      return;
+    }
+    try {
+      await api.post('/subscribers', { email, name: addForm.name.trim() });
+      setAdding(false);
+      load();
+    } catch (e: any) { setAddErr(e.message); }
   }
 
   async function doImport() {
@@ -50,7 +68,7 @@ export default function Subscribers() {
   }
 
   async function remove(id: string) {
-    if (!confirm('حذف هذا المشترك نهائياً؟')) return;
+    setRemoving(null);
     try { await api.del(`/subscribers/${id}`); load(); }
     catch (e: any) { setMsg(e.message); }
   }
@@ -65,7 +83,7 @@ export default function Subscribers() {
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
         <button className="btn ghost" onClick={() => setImporting((v) => !v)}><Upload size={20} /> استيراد</button>
-        <button className="btn" onClick={addOne}><Plus size={20} /> إضافة</button>
+        <button className="btn" onClick={openAdd}><Plus size={20} /> إضافة</button>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
@@ -121,7 +139,7 @@ export default function Subscribers() {
                   {s.status === 'active'
                     ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={20} /></button>
                     : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={20} /></button>}
-                  <button className="btn sm ghost" title="حذف" onClick={() => remove(s.id)}><Trash2 size={20} /></button>
+                  <button className="btn sm ghost" title="حذف" onClick={() => setRemoving(s.id)}><Trash2 size={20} /></button>
                 </td>
               </tr>
             ))}
@@ -129,6 +147,54 @@ export default function Subscribers() {
           </tbody>
         </table>
       </div>
+
+      {adding && (
+        <Modal title="مشترك جديد" onClose={() => setAdding(false)}>
+          <form
+            noValidate
+            onSubmit={(e) => { e.preventDefault(); addOne(); }}
+          >
+            <div className="field">
+              <label htmlFor="sub-email">البريد الإلكتروني</label>
+              <input
+                id="sub-email"
+                className="input"
+                type="email"
+                autoFocus
+                value={addForm.email}
+                onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+                placeholder="name@example.com"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="sub-name">الاسم (اختياري)</label>
+              <input
+                id="sub-name"
+                className="input"
+                value={addForm.name}
+                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+              />
+            </div>
+            {addErr && <p className="err" style={{ fontSize: 'var(--text-xs)' }}>{addErr}</p>}
+            <div className="row" style={{ gap: 'var(--space-2)' }}>
+              <div className="spacer" />
+              <button type="button" className="btn ghost" onClick={() => setAdding(false)}>إلغاء</button>
+              <button type="submit" className="btn">إضافة</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {removing && (
+        <ConfirmModal
+          title="حذف المشترك"
+          message="يُحذف المشترك وسجلّ موافقته وكل ما سُجّل من إرسالٍ إليه. لا يمكن التراجع عن هذا."
+          actionLabel="حذف"
+          danger
+          onConfirm={() => remove(removing)}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </div>
   );
 }
