@@ -366,6 +366,20 @@ h3, h4 { letter-spacing: -0.01em; }
 .kanban-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-2); font-size: var(--text-xs); cursor: pointer; transition: border-color .1s; }
 .kanban-card:hover { border-color: var(--primary); }
 
+/* لوحة المحتوى المشتركة (components/PostKanban.tsx). العرض والفجوات هنا
+   لا في JSX: قيمةٌ خام في نمطٍ سطريّ تخالف §١، وعرضُ العمود بُعدُ تخطيطٍ
+   يخصّ الورقة لا المكوّن. */
+.kanban-scroll { overflow-x: auto; }
+.kanban-hint {
+  font-size: var(--text-xs); margin-top: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.kanban-board { display: flex; gap: var(--space-3); min-width: min-content; }
+.kanban-col.board-col { width: 260px; flex-shrink: 0; }
+.kanban-card-title { font-weight: 500; margin-bottom: var(--space-2); }
+.kanban-card-meta { font-size: var(--text-xs); }
+.kanban-empty { font-size: var(--text-xs); text-align: center; padding: var(--space-2); }
+
 /* ===== المودال / الحوار ===== */
 .modal-overlay {
   position: fixed; inset: 0; background: color-mix(in oklab, var(--foreground) 40%, transparent); backdrop-filter: blur(3px);
@@ -436,6 +450,56 @@ h3, h4 { letter-spacing: -0.01em; }
 .chip-stat:hover { border-color: var(--primary); }
 .chip-stat.on { background: var(--primary-soft); border-color: var(--primary); }
 .chip-stat b { font-size: var(--text-sm); }
+
+/* حقل بحثٍ داخل شريط أدوات — الأيقونة داخل الحقل، بلا إزاحةٍ خام. */
+.search-inline { position: relative; flex: 1; min-width: 200px; }
+.search-inline > svg {
+  position: absolute; inset-inline-start: var(--space-3); top: 50%;
+  transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none;
+}
+.search-inline .input { padding-inline-start: var(--space-9); }
+
+/* شريط أدوات الصفحة، وقياسات تتكرّر في صفحات الحملة. */
+.toolbar { margin-bottom: var(--space-4); padding: var(--space-4); }
+.toolbar-row { margin-top: var(--space-3); }
+.filter-sm { width: 150px; }
+.stack-sm > * + * { margin-top: var(--space-3); }
+.page-back { margin-bottom: var(--space-3); }
+.section-gap { margin-top: var(--space-6); }
+.meta-row { font-size: var(--text-xs); }
+.target-line { margin-top: var(--space-2); }
+
+/* جدولٌ داخل بطاقة، ورؤوسٌ تُفرز. الترتيب يُقلب بالدوران لا بأيقونةٍ
+   ثانية — والدوران هنا رأسيّ فلا يتأثر بالاتجاه. */
+.table-card { padding: 0; overflow: auto; }
+.table-empty { text-align: center; padding: var(--space-6); }
+.col-check { width: 36px; }
+/* عمود الاسم لا يُضغط حتى ينكسر رقمُ قضيةٍ على أسطر عند شرطاته المائلة —
+   المتصفّح يكسر بعد «/» فيصير «2291/» سطراً و«ت/1447» آخر. والجدول
+   يُمرَّر أفقياً داخل بطاقته أصلاً، فالعرض الأدنى لا يُخرج الصفحة. */
+.col-name { min-width: 180px; }
+.sort-head { gap: var(--space-1); display: inline-flex; cursor: pointer; }
+.sort-off { opacity: .35; }
+.sort-on { opacity: 1; }
+.sort-on.asc { transform: rotate(180deg); }
+.platform-row { gap: var(--space-1); }
+
+/* الخطّ الزمني للحملة: نقطةٌ لكل منشور على مدّة الحملة، لا شريطُ مدّة —
+   المنشور لحظةُ نشرٍ لا فترةٌ ممتدّة. */
+.gantt-head-track { height: 26px; }
+.gantt-point {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-size: var(--text-xs);
+}
+
+/* قائمة اختيارٍ داخل نافذة — لإضافة محتوى إلى حملة. */
+.pick-list { max-height: 320px; overflow-y: auto; margin-bottom: var(--space-4); }
+.pick-item {
+  padding: var(--space-2) var(--space-1); border-bottom: 1px solid var(--border);
+  cursor: pointer; font-size: var(--text-sm);
+}
+.pick-item:last-child { border-bottom: none; }
+.pick-item:hover { background: var(--accent); }
 
 /* ===== مخطط جانت ===== */
 .gantt { border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; }

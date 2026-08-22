@@ -89,6 +89,7 @@ const USER_REFERENCES: Array<[table: string, column: string]> = [
   ['content_templates', 'created_by'],
   ['audit_log', 'actor_id'],
   ['newsletters', 'author_id'],
+  ['campaigns', 'owner_id'],
 ];
 
 /**

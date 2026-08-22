@@ -21,6 +21,7 @@ const PostsList = lazy(() => import('./pages/PostsList'));
 const Editor = lazy(() => import('./pages/Editor'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const Campaigns = lazy(() => import('./pages/Campaigns'));
+const CampaignDetail = lazy(() => import('./pages/CampaignDetail'));
 const Queue = lazy(() => import('./pages/Queue'));
 const News = lazy(() => import('./pages/News'));
 const Analytics = lazy(() => import('./pages/Analytics'));
@@ -112,6 +113,7 @@ export default function App() {
       <Route path="/editor/:id" element={<Protected permission="draft.edit"><Editor /></Protected>} />
       <Route path="/calendar" element={<Protected><Calendar /></Protected>} />
       <Route path="/campaigns" element={<Protected><Campaigns /></Protected>} />
+      <Route path="/campaigns/:id" element={<Protected><CampaignDetail /></Protected>} />
       <Route path="/queue" element={<Protected permission="content.review"><Queue /></Protected>} />
       <Route path="/news" element={<Protected><News /></Protected>} />
       <Route path="/analytics" element={<Protected permission="analytics.view"><Analytics /></Protected>} />

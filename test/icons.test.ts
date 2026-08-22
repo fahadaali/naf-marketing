@@ -64,10 +64,13 @@ describe('naf-icons.md', () => {
     /* أسماءٌ تُذكر في الخريطة وصفاً لا استعمالاً:
        — `AlignLeft`/`AlignRight` كنيتان مهجورتان نُصّ على تركهما.
        — وشعارات العلامات حذفتها Lucide 1.x بلا بديل، وذكرُها في قسم
-         «شعارات المنصات» هو بيانُ حذفها نفسه وسببُ وجود `naf-brand-marks`. */
+         «شعارات المنصات» هو بيانُ حذفها نفسه وسببُ وجود `naf-brand-marks`.
+       — و`Money` مكوّن `naf-currency` لا أيقونة: يُذكر في «حالات الحملة»
+         تعليلاً لعدم تسجيل أيقونةٍ للميزانية — المبلغ يقوله رمزُه. */
     const documented = new Set([
       'AlignLeft', 'AlignRight',
       'Facebook', 'Instagram', 'Youtube', 'Linkedin',
+      'Money',
     ]);
     const unknown = [...known].filter((n) => !documented.has(n) && !(n in mod));
     expect(unknown, 'اسمٌ مسجَّل لا تعرفه lucide-react المثبّتة').toEqual([]);

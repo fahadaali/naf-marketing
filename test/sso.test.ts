@@ -111,8 +111,8 @@ describe('الترحيل الكسول', () => {
   });
 
   it('خريطة الأعمدة تطابق المخطّط الحيّ', () => {
-    // أحد عشر عموداً — والثاني عشر (sessions.user_id) يُطرح لا يُرحَّل.
-    expect(USER_REFERENCES).toHaveLength(11);
+    // اثنا عشر عموداً — وsessions.user_id خارجها: يُطرح لا يُرحَّل.
+    expect(USER_REFERENCES).toHaveLength(12);
     // platform_comments لا platform_comments_new: أُعيد بناؤه في 0015.
     expect(USER_REFERENCES.map(([t]) => t)).toContain('platform_comments');
     expect(USER_REFERENCES.map(([t]) => t)).not.toContain('platform_comments_new');

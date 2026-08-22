@@ -94,6 +94,20 @@ export const STATUS_LABELS: Record<string, string> = {
   rejected: 'مرفوض',
 };
 
+/* مصدر المحتوى ونوعه — كانا خريطتين محلّيتين في PostsList، ولوحةُ
+   المحتوى المشتركة تحتاجهما فصارا هنا مع بقيّة مفردات المحتوى. */
+export const SOURCE_LABELS: Record<string, string> = {
+  manual: 'يدوي',
+  ai: 'ذكاء اصطناعي',
+  rss: 'خبر RSS',
+};
+
+export const TYPE_LABELS: Record<string, string> = {
+  text: 'نص',
+  image: 'صورة',
+  video: 'فيديو',
+};
+
 export const STATUS_BADGE: Record<string, string> = {
   draft: 'gray',
   pending_marketing: 'amber',
