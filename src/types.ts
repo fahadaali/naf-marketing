@@ -71,6 +71,45 @@ export type User = {
   created_at: string;
 };
 
+/* ═══ الحملة ═══
+   حالاتها الأربع هي قيد CHECK في 0001_init.sql، ومصطلحاتها وأيقوناتها
+   مسجّلة في naf-terms.md §٣ «حالات الحملة» وnaf-icons.md. */
+export type CampaignStatus = 'planned' | 'active' | 'completed' | 'archived';
+
+export type Campaign = {
+  id: string;
+  name: string;
+  objective: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  /** JSON: ["linkedin","x",...] — يُقرأ بحارس، لا بـ JSON.parse مباشرة. */
+  target_platforms: string | null;
+  status: CampaignStatus;
+  created_at: string;
+  updated_at: string | null;
+  owner_id: string | null;
+  /** الميزانية المخطّطة بالريال — لا المنفَق. */
+  budget: number | null;
+  target_impressions: number | null;
+  target_engagement: number | null;
+  target_leads: number | null;
+};
+
+/**
+ * انتقالات حالة الحملة المسموحة. الخادم هو الحكم، ويُرجعها للواجهة في
+ * `GET /campaigns/:id` كي لا يوجد جدولان يفترقان — وهو بعينه ما جعل
+ * لوحة كانبان القديمة تُسقط ثلاث حالاتٍ صامتةً.
+ *
+ * والأرشفة متاحةٌ من كل حالة، والاستعادة تُعيد إلى «مكتملة» لا إلى
+ * «نشطة»: حملةٌ أُرشفت ثم عادت لا تستأنف نشاطها من تلقاء نفسها.
+ */
+export const CAMPAIGN_TRANSITIONS: Record<CampaignStatus, CampaignStatus[]> = {
+  planned: ['active', 'archived'],
+  active: ['completed', 'archived'],
+  completed: ['archived'],
+  archived: ['completed'],
+};
+
 export type Variables = {
   user: User;
   /**

@@ -13,6 +13,13 @@ const ACTION_LABELS: Record<string, string> = {
   post_delete: 'حذف محتوى',
   basecamp_resync: 'إعادة مزامنة بيسكامب',
   report_run: 'توليد تقرير',
+  campaign_create: 'إنشاء حملة',
+  campaign_update: 'تعديل حملة',
+  campaign_status: 'تغيير حالة حملة',
+  campaign_archive: 'أرشفة حملة',
+  campaign_duplicate: 'إنشاء نسخة من حملة',
+  campaign_posts_link: 'ربط محتوى بحملة',
+  campaign_posts_unlink: 'فصل محتوى عن حملة',
 };
 
 // سجل التدقيق: من فعل ماذا ومتى — للمدير العام فقط
