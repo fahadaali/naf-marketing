@@ -9,6 +9,7 @@ import PostsList from './pages/PostsList';
 import Editor from './pages/Editor';
 import Calendar from './pages/Calendar';
 import Campaigns from './pages/Campaigns';
+import CampaignDetail from './pages/CampaignDetail';
 import Queue from './pages/Queue';
 import News from './pages/News';
 import Analytics from './pages/Analytics';
@@ -91,6 +92,7 @@ export default function App() {
       <Route path="/editor/:id" element={<Protected permission="draft.edit"><Editor /></Protected>} />
       <Route path="/calendar" element={<Protected><Calendar /></Protected>} />
       <Route path="/campaigns" element={<Protected><Campaigns /></Protected>} />
+      <Route path="/campaigns/:id" element={<Protected><CampaignDetail /></Protected>} />
       <Route path="/queue" element={<Protected permission="content.review"><Queue /></Protected>} />
       <Route path="/news" element={<Protected><News /></Protected>} />
       <Route path="/analytics" element={<Protected permission="analytics.view"><Analytics /></Protected>} />

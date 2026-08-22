@@ -40,7 +40,15 @@ campaignRoutes.get('/', async (c) => {
      LEFT JOIN users u ON u.id = cm.owner_id
      ORDER BY cm.created_at DESC`,
   ).all();
-  return c.json({ campaigns: results });
+  /* الانتقالات مع كل صفّ: لوحةُ الحملات تسحب بطاقةً من عمودٍ إلى عمود،
+     وبدونها تحتاج الواجهة جدولاً ثانياً يفترق عن جدول الخادم — وهو
+     بعينه ما جعل لوحةَ المحتوى تُسقط ثلاث حالاتٍ صامتة. */
+  return c.json({
+    campaigns: results.map((row: any) => ({
+      ...row,
+      allowed_transitions: CAMPAIGN_TRANSITIONS[row.status as CampaignStatus] ?? [],
+    })),
+  });
 });
 
 // ═══ قائمة من يصلح مسؤولاً ═══
