@@ -104,14 +104,15 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
   const byPlat = (await q('SELECT platform, SUM(reach) reach, SUM(impressions) impressions, SUM(engagement) engagement FROM analytics_snapshots GROUP BY platform ORDER BY impressions DESC')).results;
   const platforms: (string | number)[][] = [
     ['المنصة', 'الوصول', 'الانطباعات', 'التفاعل'],
-    ...byPlat.map((p: any) => [p.platform, p.reach || 0, p.impressions || 0, p.engagement || 0]),
+    // ما لم يُعلنه المزوّد «—» لا صفر: الخانة الصفرية تُقرأ قياساً
+    ...byPlat.map((p: any) => [p.platform, p.reach ?? '—', p.impressions ?? '—', p.engagement ?? '—']),
   ];
 
   // تحليلات المنشورات
   const byPost = (await q("SELECT COALESCE(title,'—') title, platform, reach, impressions, engagement, captured_at, via_platform FROM analytics_snapshots ORDER BY impressions DESC")).results;
   const postAnalytics: (string | number)[][] = [
     ['المنشور', 'المنصة', 'المصدر', 'الوصول', 'الانطباعات', 'التفاعل', 'وقت القياس'],
-    ...byPost.map((r: any) => [r.title || '', r.platform, r.via_platform ? 'عبر المنصة' : 'خارجي', r.reach || 0, r.impressions || 0, r.engagement || 0, riyadh(r.captured_at)]),
+    ...byPost.map((r: any) => [r.title || '', r.platform, r.via_platform ? 'عبر المنصة' : 'خارجي', r.reach ?? '—', r.impressions ?? '—', r.engagement ?? '—', riyadh(r.captured_at)]),
   ];
 
   /* ═══ المؤشرات ═══

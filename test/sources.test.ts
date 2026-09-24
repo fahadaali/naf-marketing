@@ -84,6 +84,34 @@ describe('مصدر مزوّد النشر', () => {
     expect(current.end >= riyadhToday()).toBe(true);
   });
 
+  it('يقرأ المتابعين من `metadata` حيث يضعها المزوّد', async () => {
+    stubFetch({
+      '/v1/accounts': { data: [{ id: 'a1', platform: 'instagram', metadata: { follower_count: 3400, avatar_url: 'https://x' } }] },
+      '/v1/inbox/reviews': { data: [] },
+    });
+
+    const points = await SOURCES.social.fetch(env, {}, { start: current.start, end: current.end });
+    expect(pull(points, 'followers_total').find((p) => p.dimValue === 'instagram')?.value).toBe(3400);
+  });
+
+  it('يحسب عدد المراجعات ومتوسطها من قائمتها حين لا يردّ المزوّد ملخّصاً', async () => {
+    stubFetch({
+      '/v1/accounts': { data: [] },
+      '/v1/inbox/reviews': {
+        data: [
+          { id: 'sapi_rev_1', account_id: 'g1', platform: 'google', rating: 5, text: 'ممتاز' },
+          { id: 'sapi_rev_2', account_id: 'g1', platform: 'google', rating: 4 },
+          { id: 'sapi_rev_3', account_id: 'g1', platform: 'google', rating: 3, text: 'مقبول' },
+        ],
+      },
+    });
+
+    const points = await SOURCES.social.fetch(env, {}, { start: current.start, end: current.end });
+    // التقييم بلا تعليق يدخل العدد والمتوسط — القائمة لا تُسقطه
+    expect(pull(points, 'gbp_reviews')[0].value).toBe(3);
+    expect(pull(points, 'gbp_rating')[0].value).toBe(4);
+  });
+
   it('يرفض السحب بلا مفتاح — ولا يكتب صفراً مكانه', async () => {
     stubFetch({ '/v1/accounts': { accounts: [] } });
     await expect(

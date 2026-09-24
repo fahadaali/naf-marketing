@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { pullAnalytics, ingestExportVideos } from '../services/analytics';
+import { pullAnalytics, ingestExportVideos, readAnalyticsReport, ANALYTICS_BUDGET } from '../services/analytics';
 import { listStaleContent } from '../services/alerts';
 import { providerKey } from '../adapters';
 import { createAnalyticsExport, listAnalyticsExports, getAnalyticsExport, listSocialApiAccounts } from '../adapters/socialapi';
@@ -256,13 +256,13 @@ analyticsRoutes.get('/alerts', async (c) => {
   return c.json({ stale });
 });
 
-// سحب فوري (إضافةً إلى Cron)
+// سحب فوري (إضافةً إلى Cron) — بحصّة الطلب اليدوي، ويعود بتقرير السحب
 analyticsRoutes.post('/refresh', async (c) => {
   try {
-    const captured = await pullAnalytics(c.env);
-    return c.json({ ok: true, captured });
+    const captured = await pullAnalytics(c.env, { budget: ANALYTICS_BUDGET.manual });
+    return c.json({ ok: true, captured, report: await readAnalyticsReport(c.env) });
   } catch (e: any) {
-    return c.json({ error: `فشل سحب التحليلات: ${String(e?.message || e)}` }, 502);
+    return c.json({ error: `تعذّر السحب. ${String(e?.message || e)}` }, 502);
   }
 });
 

@@ -11,10 +11,34 @@ describe('mapMetrics (SocialAPI)', () => {
 
   it('يتعمّق في الكائنات المتداخلة (extra.view_count)', () => {
     const m = mapMetrics({ likes: 0, comments: 0, extra: { view_count: 52 } });
-    const keys = m.raw.map((r) => r.type);
-    expect(keys).toContain('view_count');
+    // الاسم يُوحَّد (`views`) ويبقى أصلُه في `name` — كي يُجمع مع `views` من منصّةٍ أخرى
+    const views = m.raw.find((r) => r.type === 'views');
+    expect(views?.name).toBe('view_count');
+    expect(views?.value).toBe(52);
     // لا انطباعات صريحة → تُشتق من المشاهدات
     expect(m.impressions).toBe(52);
+  });
+
+  it('يردّ الأسماء ذات اللاحقة إلى أصلها — `like_count` إعجاب', () => {
+    const m = mapMetrics({ like_count: 7, comments_count: 3, shares_count: 1, saves_count: 2 });
+    expect(m.engagement).toBe(13);
+    expect(m.raw.find((r) => r.type === 'likes')?.value).toBe(7);
+  });
+
+  it('لا يعدّ الإعجاب مرّتين حين يتكرّر في `extra` باسم المنصّة', () => {
+    const m = mapMetrics({ likes: 10, comments: 2, extra: { like_count: 10, reach: 400 } });
+    expect(m.engagement).toBe(12);
+    expect(m.reach).toBe(400);
+  });
+
+  it('لا يجمع أنواع الظهور المتداخلة — يأخذ أكبرها لا مجموعها', () => {
+    const m = mapMetrics({ extra: { post_impressions: 900, post_impressions_unique: 600, post_impressions_paid: 100 } });
+    expect(m.impressions).toBe(900);
+  });
+
+  it('لا يعدّ مدّة المشاهدة مشاهدات', () => {
+    const m = mapMetrics({ extra: { averageViewDuration: 35 } });
+    expect(m.impressions).toBeNull();
   });
 
   it('يميّز الوصول والانطباعات', () => {
@@ -34,9 +58,26 @@ describe('mapMetrics (SocialAPI)', () => {
     expect(m.raw.find((r) => r.type === 'engagement_rate')?.unit).toBe('percentage');
   });
 
-  it('يتعامل مع الفارغ/غير الصالح بأمان', () => {
-    expect(mapMetrics({}).engagement).toBe(0);
+  /* كان الفارغ يعود أصفاراً، فدخلت منشوراتٌ لم تُزامَن أرقامها بعد المجاميعَ
+     أصفاراً وخفضت كل متوسط. والغياب الآن غياب: `null` و`present: false`. */
+  it('يتعامل مع الفارغ/غير الصالح بأمان — غيابٌ لا أصفار', () => {
+    expect(mapMetrics({}).engagement).toBeNull();
+    expect(mapMetrics({}).present).toBe(false);
     expect(mapMetrics(null).raw).toEqual([]);
+    expect(mapMetrics(null).present).toBe(false);
+  });
+
+  it('يعدّ الأصفار غياباً حين يعلن المزوّد أنه لم يُزامن الأرقام بعد', () => {
+    const m = mapMetrics({ likes: 0, comments: 0, shares: 0, saves: 0, metrics_synced_at: null });
+    expect(m.present).toBe(false);
+    expect(m.engagement).toBeNull();
+  });
+
+  it('يقبل الصفر المُعلَن صفراً حين زامن المزوّد الأرقام', () => {
+    const m = mapMetrics({ likes: 0, comments: 0, metrics_synced_at: '2026-09-01T10:00:00Z' });
+    expect(m.present).toBe(true);
+    expect(m.engagement).toBe(0);
+    expect(m.syncedAt).toBe('2026-09-01T10:00:00.000Z');
   });
 });
 
