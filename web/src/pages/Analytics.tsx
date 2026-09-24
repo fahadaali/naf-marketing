@@ -10,7 +10,7 @@ import { platformLabel } from '../platforms';
 import Catalogue from './analytics/Catalogue';
 import Spend from './analytics/Spend';
 import {
-  BestTimesCard, CampaignPerformance, HeatmapLink, PipelineStatus, PlatformBreakdown,
+  BestTimesCard, CampaignPerformance, DataSources, HeatmapLink, PipelineStatus, PlatformBreakdown,
   ReputationCard, StaleAlerts, TeamPerformance, TopPosts, VideoAnalyticsExport,
   type DashboardData,
 } from './analytics/panels';
@@ -49,6 +49,8 @@ export default function Analytics() {
   const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  // يُعاد به تحميل «مصادر الأرقام» بعد «سحب الآن»
+  const [sourcesKey, setSourcesKey] = useState(0);
 
   // ألواح المنصة — فلاترها الخاصة باقية كما كانت
   const [dash, setDash] = useState<DashboardData | null>(null);
@@ -126,16 +128,14 @@ export default function Analytics() {
   async function syncNow() {
     setMsg('جارٍ السحب…');
     try {
+      /* لقطات المنشورات أوّلاً، في كل تبويب، ثم المصادر والاحتساب. كانت
+         تُسحب بعد الاحتساب وفي تبويبات الألواح وحدها، فيُحتسب الوصول
+         والتفاعل من لقطاتٍ قديمة وتتقدّم الجداول على البطاقات إلى الغد.
+         والصمت قرار: عطلُ هذا السحب تقوله «مصادر الأرقام» بسببه. */
+      await api.post('/analytics/refresh').catch(() => {});
+
       const d = await api.post(`/metrics/sync?period=${period}${start ? `&start=${start}` : ''}`);
       const failed = (d.sources || []).filter((s: any) => !s.ok);
-
-      /* لوحات المنصات تقرأ لقطات النشر لا المؤشرات، ومصدرُها سحبٌ آخر
-         يجريه الكرون كل ساعة. فـ«سحب الآن» يسحبهما معاً وإلا بقيت
-         الأرقام المعروضة تحت الزرّ على حالها ويُقرأ الزرّ عاطلاً. */
-      if (PANEL_LAYERS.has(tab)) {
-        // الصمت قرار: سحبٌ ثانويّ داخل «سحب الآن»، وخبرُ الأوّل يُقال أدناه
-        await api.post('/analytics/refresh').catch(() => {});
-      }
 
       setMsg(
         failed.length
@@ -144,6 +144,7 @@ export default function Analytics() {
       );
       loadMetrics();
       if (PANEL_LAYERS.has(tab)) loadDashboard();
+      setSourcesKey((k) => k + 1);
     } catch (e: any) {
       setMsg(e.message);
     }
@@ -186,6 +187,9 @@ export default function Analytics() {
           )}
         </div>
       </div>
+
+      {/* من أين يأتي كل رقم — قبل التبويبات لأنها تخصّ كل رقمٍ فيها */}
+      {!isCatalogue && <DataSources period={period} start={start} refreshKey={sourcesKey} />}
 
       <nav className="metric-tabs" aria-label="طبقات التحليل">
         {LAYERS.map((l) => (

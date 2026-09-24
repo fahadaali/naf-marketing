@@ -1,6 +1,6 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -23,9 +23,39 @@ function kindMeta(kind: string) {
   }
 }
 
+/** تقرير آخر سحبٍ للصندوق كما يحفظه الخادم — ما يلزم الشاشة منه وحده. */
+type SyncReport = {
+  ok: boolean;
+  complete: boolean;
+  lastOkAt: string | null;
+  errors: string[];
+};
+
+/* سطر حالة الصندوق: متى نجح آخر سحب، وسببُ العطل إن وقع، وهل وقف السحب
+   دون آخره. وكان الصندوق يُسحب أو يسقط صامتاً، فلا يعرف من فتح الشاشة
+   أغاب التعليق لأنه لم يصل، أم لأن السحب لم يبلغه. */
+function SyncLine({ sync }: { sync: SyncReport | null }) {
+  if (!sync) return null;
+  return (
+    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 12, display: 'grid', gap: 4 }}>
+      <span>
+        {sync.lastOkAt ? <>آخر سحبٍ ناجح <bdi>{formatRiyadh(sync.lastOkAt)}</bdi></> : 'لم يُسحب بعد'}
+        {!sync.ok && sync.errors[0] && <> — {sync.errors[0]}</>}
+      </span>
+      {sync.ok && !sync.complete && (
+        <span className="row" style={{ gap: 6 }}>
+          <TriangleAlert size={16} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} aria-hidden="true" />
+          لم يكتمل السحب. يُستكمل الباقي في السحب التالي.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function Comments() {
   const [comments, setComments] = useState<any[]>([]);
   const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number }>({ all: 0, unreplied: 0, replied: 0 });
+  const [sync, setSync] = useState<SyncReport | null>(null);
   const [filter, setFilter] = useState<'' | '0' | '1'>('');
   const [msg, setMsg] = useState('');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
@@ -39,7 +69,11 @@ export default function Comments() {
 
   function load() {
     const q = filter ? `?replied=${filter}` : '';
-    api.get(`/comments${q}`).then((d) => { setComments(d.comments); if (d.counts) setCounts(d.counts); });
+    api.get(`/comments${q}`).then((d) => {
+      setComments(d.comments);
+      if (d.counts) setCounts(d.counts);
+      setSync(d.sync ?? null);
+    });
   }
   useEffect(load, [filter]);
 
@@ -121,6 +155,8 @@ export default function Comments() {
         <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> جلب الآن</button>
       </div>
 
+      <SyncLine sync={sync} />
+
       <div className="row" style={{ marginBottom: 16 }}>
         <div className="seg">
           {tab('', 'الكل', counts.all)}
@@ -135,7 +171,12 @@ export default function Comments() {
           const km = kindMeta(c.kind);
           const isComment = c.kind === 'comment';
           const canPrivate = !!caps.can_private_reply;
-          const canEditReply = isComment || c.kind === 'review'; // الرسائل/الإشارات لا تُعدَّل بعد الإرسال
+          const external = c.reply_source === 'external';
+          /* الرسائل/الإشارات لا تُعدَّل بعد الإرسال. وردٌّ على تعليقٍ كُتب في تطبيق
+             المنصّة لا يُعدَّل من هنا: تعديلُ التعليق إرسالُ ردٍّ جديد وحذفُ القديم،
+             وحذفُ ما لم يُكتب من هنا يُسقط ردّاً لا يعرف كاتبُه أنه سقط. والتقييم
+             يُعدَّل ردُّه في موضعه أيّاً كان كاتبه. */
+          const canEditReply = (isComment && !external) || c.kind === 'review';
           const sugg = suggestions[c.id] || [];
           return (
             <div className="card" key={c.id} style={c.is_hidden ? { opacity: 0.6 } : undefined}>
@@ -169,7 +210,10 @@ export default function Comments() {
               {c.reply_body && editing[c.id] === undefined ? (
                 <div className="card" style={{ background: 'var(--primary-soft)', padding: 10 }}>
                   <div className="row" style={{ marginBottom: 4 }}>
-                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                      {external ? 'ردّ من خارج المنصة' : <>ردّ {c.replier_name || ''}</>}
+                      {c.replied_at && <> — {formatRiyadh(c.replied_at)}</>}
+                    </div>
                     <div className="spacer" />
                     {/* التعديل/الحذف مدعومان للتعليقات والتقييمات فقط — الرسائل والإشارات لا تُعدَّل بعد الإرسال */}
                     {canEditReply && (
