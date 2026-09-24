@@ -447,3 +447,108 @@ describe('الخطة المدفوعة واحتياطها', () => {
     expect(report?.fallback).toBe(false);
   });
 });
+
+describe('سجلّ الصندوق القديم', () => {
+  const setting = (key: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+
+  it('يمضي في قائمة المنشورات إلى أقدمها ويقرأ ما لم يُقرأ قطّ، ثم يستريح', async () => {
+    // خمس صفحات بمنشورٍ في كلٍّ، وسحب السجلّ يقرأ ثلاثاً في كل مرّة
+    route('GET', '/inbox/comments', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [{ id: `post${n}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }], next_cursor: n < 5 ? String(n + 1) : null } };
+    });
+    route('GET', /^\/inbox\/comments\/post\d$/, (url) => ({ body: { data: [comment(Number(url.pathname.slice(-1)))] } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(rows()).toHaveLength(3);
+    expect(setting('inbox_history_cursor')).toBe('4');
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(rows()).toHaveLength(5);
+    expect(setting('inbox_history_done_at')).toBeTruthy();
+
+    calls.length = 0;
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(calls.some((c) => c.startsWith('GET /inbox/comments?'))).toBe(false);
+  });
+
+  it('لا يتقدّم مؤشّره قبل أن تُقرأ تعليقات منشورات صفحته كلُّها', async () => {
+    route('GET', '/inbox/comments', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [{ id: `post${n}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 7 }], next_cursor: n < 4 ? String(n + 1) : null } };
+    });
+    // المنشور الأول سبع صفحات من التعليقات — وسحب السجلّ يقرأ خمساً للمنشور في المرّة
+    route('GET', '/inbox/comments/post1', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [comment(n)], next_cursor: n < 7 ? String(n + 1) : null } };
+    });
+    route('GET', /^\/inbox\/comments\/post[234]$/, () => ({ body: { data: [] } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(setting('inbox_history_cursor') ?? '').toBe('');
+    expect(rows()).toHaveLength(5);
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(rows()).toHaveLength(7);
+    // اكتمل المنشور الأول فتقدّم المؤشّر إلى ما بعد الصفحات الثلاث
+    expect(setting('inbox_history_cursor')).toBe('4');
+  });
+
+  it('يعرف ردَّنا على تعليقٍ قديم لم يُفتح منشوره منذ شهور — بالمعرّف المحفوظ', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, provider_interaction_id)
+       VALUES ('cm_old', 'instagram', 'postOld|acc_ig|c77', 'comment', 'عميل', 'سؤال قديم', ?, 'sapi_cmt_77')`,
+    ).run(daysAgo(120));
+    // القائمة مقروءةٌ إلى آخرها — لا يبقى إلا الدوران على القديم
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', ?)").run(daysAgo(1));
+    route('GET', '/accounts/acc_ig/interactions/sapi_cmt_77/replies', () => ({
+      body: { data: [{ id: 'r77', author: { name: 'naf.law' }, text: 'أجبناك في الخاص', created_at: daysAgo(119) }] },
+    }));
+
+    const report = await syncComments(env, { mode: 'history', budget: 40 });
+    const [row] = rows();
+    expect(row.reply_body).toBe('أجبناك في الخاص');
+    expect(row.reply_source).toBe('external');
+    expect(report?.externalReplies).toBe(1);
+  });
+
+  it('يفحص التعليق القديم بلا رد مرّةً في الأسبوع لا في كل سحب', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at)
+       VALUES ('cm_old', 'instagram', 'postOld|acc_ig|c78', 'comment', 'عميل', 'سؤال قديم', ?)`,
+    ).run(daysAgo(90));
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', ?)").run(daysAgo(1));
+    route('GET', '/inbox/comments/postOld/c78/replies', () => ({ body: { data: [] } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(rows()[0].reply_checked_at).not.toBeNull();
+    expect(rows()[0].reply_body).toBeNull();
+
+    calls.length = 0;
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(calls.some((c) => c.includes('/replies'))).toBe(false);
+  });
+
+  it('يحفظ معرّف المزوّد مع التعليق، ويستكمله لصفٍّ كُتب قبل أن يُحفظ', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at)
+       VALUES ('cm_prev', 'instagram', 'post1|acc_ig|c2', 'comment', 'عميل 2', 'سؤال رقم 2؟', '2026-09-03T10:00:00Z')`,
+    ).run();
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 2 }] } }));
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1), comment(2)] } }));
+
+    await syncComments(env, { budget: 40 });
+    const byKey = Object.fromEntries(rows().map((r) => [r.provider_comment_id, r.provider_interaction_id]));
+    expect(byKey['post1|acc_ig|c1']).toBe('sapi_cmt_1');
+    expect(byKey['post1|acc_ig|c2']).toBe('sapi_cmt_2');
+  });
+
+  it('يكتب تقريره في موضعه — ولا يمسّ حالة الصندوق المعروضة', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    const regular = await syncComments(env, { budget: 40 });
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect(await readInboxReport(env)).toEqual(regular);
+    expect(JSON.parse(setting('inbox_history_report') ?? '{}').mode).toBe('history');
+  });
+});

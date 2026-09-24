@@ -10,6 +10,7 @@ import { queueDueNewsletters, sendQueuedBatch, syncNewsletterAnalytics } from '.
 import { syncAllSources } from './services/metricSync';
 import { syncCrm } from './services/crmSync';
 import { computeAuto } from './services/metrics';
+import { recomputePastPeriods } from './services/metricsHistory';
 import { periodOf, previousPeriod, type PeriodKind } from './services/period';
 
 /**
@@ -50,12 +51,21 @@ async function runMetricsFor(env: Env, kind: PeriodKind): Promise<void> {
    | :00 كل ساعة                  | الأخبار · تنبيهات التأخّر · تحليلات النشرة        |
    | :02 كل ساعة                  | لقطات المنشورات من مزوّد النشر                 |
    | :04 و:24 و:44                | صندوق التعليقات والرسائل                       |
+   | :18 كل ساعة                  | سجلّ الصندوق القديم وردودُنا على قديمه         |
+   | :38 كل ساعة                  | سجلّ المنشورات القديم وأرقامه                  |
+   | :58 كل ساعة                  | احتساب ثلاث فتراتٍ ماضية                       |
    | ٠١:٠٨                        | مرآة منصة إدارة الشركة                          |
    | ٠١:١٠ · ١٢ · ١٤ · ١٦           | المصادر والاحتساب: أسبوع · شهر · ربع · سنة      |
    | ١٨:٠٦ السبت / أول الشهر        | التقرير الأسبوعي / الشهري إلى بيسكامب            |
+
+   والسجلّ القديم في دقائقه الثلاث: خمس دقائق سقفُ كلٍّ منها (`limits.ts`)،
+   فينتهي قبل الدورة المعتادة التي تليه. ولا يقع أيٌّ منها على دقائق الساعة
+   الأولى المحجوزة — ‎:14 كانت مرشّحة، وفي ٠١:١٤ احتسابُ الربع.
 */
 
-type Job = 'feeds' | 'analytics' | 'inbox' | 'crm' | 'metrics' | 'reports' | null;
+type Job =
+  | 'feeds' | 'analytics' | 'inbox' | 'crm' | 'metrics' | 'reports'
+  | 'inbox-history' | 'analytics-history' | 'metrics-history' | null;
 
 const METRIC_SLOTS: Record<number, PeriodKind> = { 10: 'weekly', 12: 'monthly', 14: 'quarterly', 16: 'annual' };
 
@@ -66,6 +76,9 @@ export function jobAt(at: Date): { job: Job; kind?: PeriodKind } {
   if (minute === 0 || minute === 1) return { job: 'feeds' };
   if (minute === 2 || minute === 3) return { job: 'analytics' };
   if ([4, 5, 24, 25, 44, 45].includes(minute)) return { job: 'inbox' };
+  if (minute === 18 || minute === 19) return { job: 'inbox-history' };
+  if (minute === 38 || minute === 39) return { job: 'analytics-history' };
+  if (minute === 58 || minute === 59) return { job: 'metrics-history' };
   if (hour === 1 && (minute === 8 || minute === 9)) return { job: 'crm' };
   const even = minute - (minute % 2);
   if (hour === 1 && METRIC_SLOTS[even]) return { job: 'metrics', kind: METRIC_SLOTS[even] };
@@ -97,6 +110,15 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
       break;
     case 'inbox':
       await syncComments(env, { trigger: 'cron', skipIfRunningWithinMs: 90_000 }).catch(() => null);
+      break;
+    case 'inbox-history':
+      await syncComments(env, { mode: 'history', skipIfRunningWithinMs: 90_000 }).catch(() => null);
+      break;
+    case 'analytics-history':
+      await pullAnalytics(env, { mode: 'history' }).catch(() => 0);
+      break;
+    case 'metrics-history':
+      await recomputePastPeriods(env).catch(() => []);
       break;
     case 'crm':
       await syncCrm(env).catch(() => null);

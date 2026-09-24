@@ -18,15 +18,16 @@ import type { Env } from '../types';
       المجانية يوماً كاملاً ثم تُجرَّب المدفوعة من جديد. */
 
 export type Plan = 'free' | 'paid';
-export type Trigger = 'cron' | 'webhook' | 'manual';
+/** `history` سحبُ السجلّ القديم — مجدولٌ كذلك، وسقفُ وقته أقصر كي ينتهي قبل الدورة المعتادة التي تليه. */
+export type Trigger = 'cron' | 'webhook' | 'manual' | 'history';
 
 const CALLS: Record<Plan, Record<Trigger, number>> = {
-  free: { cron: 40, webhook: 30, manual: 45 },
-  paid: { cron: 150, webhook: 30, manual: 60 },
+  free: { cron: 40, webhook: 30, manual: 45, history: 40 },
+  paid: { cron: 150, webhook: 30, manual: 60, history: 150 },
 };
 
 /** سقف الوقت بالثواني — واحدٌ في الخطتين: الخطّاف والانتظار لا يتغيّران بالخطة. */
-const SECONDS: Record<Trigger, number> = { cron: 8 * 60, webhook: 20, manual: 45 };
+const SECONDS: Record<Trigger, number> = { cron: 8 * 60, webhook: 20, manual: 45, history: 5 * 60 };
 
 /** أقصى عمر دورةٍ مجدولة في كلاودفلير — بعده لا تكون جاريةً بل ساقطة. */
 const MAX_RUN_MS = 15 * 60_000;

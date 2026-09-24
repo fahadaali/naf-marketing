@@ -41,7 +41,13 @@ import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
    كذلك لا يجيبه أحد، وهذا أسوأ الخطأين.
    ============================================================ */
 
-export type SyncMode = 'incremental' | 'full';
+/**
+ * `incremental` الدورة المجدولة والخطّاف: الجديد وما تغيّر. `full` «جلب الآن»:
+ * صفحاتٌ أكثر وكل منشورٍ من أوّله. `history` سحبُ السجلّ: منشوراتٌ قديمة لم
+ * تُقرأ قطّ، وردودُنا على التعليقات القديمة، والمراجعات والرسائل والإشارات
+ * إلى آخرها مرّةً في اليوم — بتقريرٍ وقفلٍ غير تقرير الصندوق وقفله.
+ */
+export type SyncMode = 'incremental' | 'full' | 'history';
 export type InboxKind = 'comment' | 'dm' | 'review' | 'mention';
 
 export type InboxKindStatus = {
@@ -78,6 +84,13 @@ export type InboxSyncReport = {
 
 const REPORT_KEY = 'inbox_sync_report';
 const LOCK_KEY = 'inbox_sync_lock';
+const HISTORY_REPORT_KEY = 'inbox_history_report';
+const HISTORY_LOCK_KEY = 'inbox_history_lock';
+/** أين بلغت قراءة قائمة منشورات الصندوق نحو أقدمها، ومتى اكتملت. */
+const HISTORY_CURSOR_KEY = 'inbox_history_cursor';
+const HISTORY_DONE_KEY = 'inbox_history_done_at';
+/** آخر قراءةٍ للمراجعات والرسائل والإشارات إلى آخرها — مرّةً في اليوم. */
+const HISTORY_DEEP_KEY = 'inbox_history_deep_at';
 
 async function getSetting(env: Env, key: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
@@ -94,8 +107,8 @@ async function providerName(env: Env): Promise<string> {
   return ((await getSetting(env, 'provider_name')) || env.PROVIDER_NAME || 'mock').toLowerCase();
 }
 
-export async function readInboxReport(env: Env): Promise<InboxSyncReport | null> {
-  const raw = await getSetting(env, REPORT_KEY);
+async function readReport(env: Env, key: string): Promise<InboxSyncReport | null> {
+  const raw = await getSetting(env, key);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as InboxSyncReport;
@@ -104,7 +117,25 @@ export async function readInboxReport(env: Env): Promise<InboxSyncReport | null>
   }
 }
 
-function newReport(mode: SyncMode, provider: string, budget: number, prev: InboxSyncReport | null): InboxSyncReport {
+export async function readInboxReport(env: Env): Promise<InboxSyncReport | null> {
+  return readReport(env, REPORT_KEY);
+}
+
+export async function readInboxHistoryReport(env: Env): Promise<InboxSyncReport | null> {
+  return readReport(env, HISTORY_REPORT_KEY);
+}
+
+/**
+ * `hints` تقريرٌ تُؤخذ منه المسارات التي تعلّمتها الدورات — مسارُ ردود التعليقات
+ * ومسارُ الإشارات. وهو السابق نفسه، إلا في سحب السجلّ: يأخذها من الصندوق.
+ */
+function newReport(
+  mode: SyncMode,
+  provider: string,
+  budget: number,
+  prev: InboxSyncReport | null,
+  hints: InboxSyncReport | null = prev,
+): InboxSyncReport {
   const kind = (): InboxKindStatus => ({ ok: null, items: 0 });
   return {
     at: nowIso(),
@@ -119,8 +150,8 @@ function newReport(mode: SyncMode, provider: string, budget: number, prev: Inbox
     kinds: { comment: kind(), dm: kind(), review: kind(), mention: kind() },
     errors: [],
     lastOkAt: prev?.lastOkAt ?? null,
-    repliesPath: prev?.repliesPath ?? null,
-    mentionsPath: prev?.mentionsPath ?? null,
+    repliesPath: hints?.repliesPath ?? null,
+    mentionsPath: hints?.mentionsPath ?? null,
   };
 }
 
@@ -133,10 +164,10 @@ function errorText(err: unknown): string {
  * تُشغَّل مزامنتان معاً على الحصّة نفسها. يُعاد الإذن بعد انقضاء المدّة ولو
  * سقطت الدورة السابقة قبل أن تُنهي.
  */
-async function takeLock(env: Env, withinMs: number): Promise<boolean> {
-  const last = await getSetting(env, LOCK_KEY);
+async function takeLock(env: Env, key: string, withinMs: number): Promise<boolean> {
+  const last = await getSetting(env, key);
   if (last && Date.now() - Date.parse(last) < withinMs) return false;
-  await setSetting(env, LOCK_KEY, nowIso());
+  await setSetting(env, key, nowIso());
   return true;
 }
 
@@ -151,32 +182,36 @@ export async function syncComments(
   opts: { mode?: SyncMode; trigger?: Trigger; budget?: number; skipIfRunningWithinMs?: number } = {},
 ): Promise<InboxSyncReport | null> {
   const mode = opts.mode ?? 'incremental';
-  const prev = await readInboxReport(env);
+  const history = mode === 'history';
+  const reportKey = history ? HISTORY_REPORT_KEY : REPORT_KEY;
+  const lockKey = history ? HISTORY_LOCK_KEY : LOCK_KEY;
+  const prev = await readReport(env, reportKey);
   // قبل أن تكتب الدورة قفلها: هل سقطت التي قبلها؟
-  const lastLock = await getSetting(env, LOCK_KEY);
+  const lastLock = await getSetting(env, lockKey);
   if (opts.skipIfRunningWithinMs) {
-    if (!(await takeLock(env, opts.skipIfRunningWithinMs))) return null;
+    if (!(await takeLock(env, lockKey, opts.skipIfRunningWithinMs))) return null;
   } else {
-    await setSetting(env, LOCK_KEY, nowIso());
+    await setSetting(env, lockKey, nowIso());
   }
   await noteDeadRun(env, lastLock, prev?.at ?? null);
 
-  const limits = await runLimits(env, opts.trigger ?? (mode === 'full' ? 'manual' : 'cron'));
+  const limits = await runLimits(env, opts.trigger ?? (mode === 'full' ? 'manual' : history ? 'history' : 'cron'));
   const provider = await providerName(env);
-  const report = newReport(mode, provider, opts.budget ?? limits.calls, prev);
+  const report = newReport(mode, provider, opts.budget ?? limits.calls, prev, history ? await readInboxReport(env) : prev);
   report.plan = limits.plan;
   report.fallback = limits.fallback;
 
   try {
     if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
-    else await syncPerPost(env, report);
+    // المزوّدون الآخرون يُقرأ صندوقهم كلُّه في كل دورة — لا سجلّ له مستقلّ
+    else if (!history) await syncPerPost(env, report);
   } catch (err) {
     report.errors.push(errorText(err));
   }
 
   report.ok = report.errors.length === 0;
   if (report.ok) report.lastOkAt = report.at;
-  await setSetting(env, REPORT_KEY, JSON.stringify(report));
+  await setSetting(env, reportKey, JSON.stringify(report));
   return report;
 }
 
@@ -230,7 +265,14 @@ async function syncSocialApiInbox(env: Env, report: InboxSyncReport, deadline: n
      آخر رسالة، والإشارات بنداءٍ لكل حسابٍ يدعمها. والتعليقات تأخذ الباقي —
      فلا يأكل منشورٌ كثيرُ التعليقات حصّةَ الرسائل في كل دورة. */
   const direct = accounts.filter((a) => supportsDirectInbox(a.platform)).length;
-  const reserve = Math.min(1 + (direct ? 3 : 0) + direct, 12);
+
+  /* سحب السجلّ يقرأ المراجعات والرسائل والإشارات إلى آخرها مرّةً في اليوم —
+     أحدثُها تقرؤه الدورات المعتادة كل عشرين دقيقة، وقديمُها لا يتغيّر كثيراً. */
+  const history = report.mode === 'history';
+  const deepAt = history ? await getSetting(env, HISTORY_DEEP_KEY) : null;
+  const deep = history && (!deepAt || Date.now() - Date.parse(deepAt) > DAY);
+  const others = !history || deep;
+  const reserve = others ? Math.min(1 + (direct ? 3 : 0) + direct, 12) * (deep ? 3 : 1) : 0;
 
   try {
     await syncCommentThreads(env, token, budget, report, owners, reserve);
@@ -238,23 +280,35 @@ async function syncSocialApiInbox(env: Env, report: InboxSyncReport, deadline: n
     fail('comment', err);
   }
 
+  if (history) {
+    try {
+      await sweepOldReplies(env, token, budget, report, owners, reserve);
+    } catch (err) {
+      fail('comment', err);
+    }
+  }
+
   const fresh: InboxItem[] = [];
-  try {
-    fresh.push(...(await syncReviews(env, token, budget, report)));
-  } catch (err) {
-    fail('review', err);
-  }
+  if (others) {
+    try {
+      fresh.push(...(await syncReviews(env, token, budget, report, deep ? 10 : 2)));
+    } catch (err) {
+      fail('review', err);
+    }
 
-  try {
-    await syncConversations(env, token, budget, report, accounts);
-  } catch (err) {
-    fail('dm', err);
-  }
+    try {
+      await syncConversations(env, token, budget, report, accounts, deep ? 5 : 2);
+    } catch (err) {
+      fail('dm', err);
+    }
 
-  try {
-    await syncMentions(env, token, budget, report, accounts);
-  } catch (err) {
-    fail('mention', err);
+    try {
+      await syncMentions(env, token, budget, report, accounts, deep ? 3 : 1);
+    } catch (err) {
+      fail('mention', err);
+    }
+    // لم تُستكمل قبل الحصّة — تُعاد في السحب التالي لا بعد يوم
+    if (deep && budget.left > 0) await setSetting(env, HISTORY_DEEP_KEY, nowIso());
   }
 
   report.calls = budget.used;
@@ -280,11 +334,12 @@ type Row = {
   replied_at: string | null;
   reply_source: string | null;
   reply_checked_at: string | null;
+  provider_interaction_id: string | null;
   created_at: string;
 };
 
 const ROW_COLUMNS =
-  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, created_at';
+  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, provider_interaction_id, created_at';
 
 /** صفوف منشورٍ واحد بترميزها `منشور|حساب|` — مطابقةُ بادئةٍ حرفية لا `LIKE` (معرّفات فيسبوك فيها `_`). */
 async function rowsByPrefix(env: Env, prefix: string): Promise<Map<string, Row>> {
@@ -358,30 +413,34 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
         stmt: env.DB.prepare(
           `INSERT INTO platform_comments
              (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at,
-              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source)
-           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source, provider_interaction_id)
+           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(platform, provider_comment_id) DO NOTHING`,
         ).bind(
           newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt,
           caps, it.isHidden ? 1 : 0, it.rating ?? null,
           replied ? it.repliedBody : null, replied ? it.repliedAt ?? null : null, replied ? 'external' : null,
+          it.interactionId ?? null,
         ),
       });
       if (replied) result.externalReplies++;
       continue;
     }
 
+    // معرّف المزوّد يُستكمل لصفٍّ كُتب قبل أن يُحفظ — ولا يُستبدل ما حُفظ
+    const interaction = !row.provider_interaction_id && it.interactionId ? it.interactionId : null;
     const changed =
       row.body !== it.body || row.author_name !== it.authorName || row.kind !== it.kind ||
       (row.is_hidden ? 1 : 0) !== (it.isHidden ? 1 : 0) || (row.capabilities_json ?? null) !== caps ||
-      (row.rating ?? null) !== (it.rating ?? null);
+      (row.rating ?? null) !== (it.rating ?? null) || interaction !== null;
     if (changed) {
       updates.push(
         env.DB.prepare(
           `UPDATE platform_comments
-           SET kind = ?, body = ?, author_name = ?, capabilities_json = ?, is_hidden = ?, rating = ?
+           SET kind = ?, body = ?, author_name = ?, capabilities_json = ?, is_hidden = ?, rating = ?,
+               provider_interaction_id = COALESCE(provider_interaction_id, ?)
            WHERE id = ?`,
-        ).bind(it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null, row.id),
+        ).bind(it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null, interaction, row.id),
       );
     }
     if (it.repliedBody && row.reply_body === null) {
@@ -443,6 +502,8 @@ export function postPriority(
 ): number | null {
   if (!st) return 0;
   if (st.needs_more) return 1;
+  // سحب السجلّ للقديم وحده: ما لم يُقرأ قطّ أو وقفت قراءته — والباقي للدورة المعتادة
+  if (mode === 'history') return null;
   if (p.signature && p.signature !== st.signature) return 2;
   const age = now - Date.parse(st.synced_at || '1970-01-01T00:00:00Z');
   if (!p.signature && age > 30 * 60_000) return 3;
@@ -459,8 +520,33 @@ async function syncCommentThreads(
   owners: Owners,
   reserve: number,
 ): Promise<void> {
-  const full = report.mode === 'full';
-  const listing = await listInboxPosts(token, { budget, maxPages: full ? 5 : 2 });
+  const mode = report.mode;
+
+  /* سحب السجلّ يمضي في قائمة المنشورات من مؤشّره المحفوظ نحو أقدمها، ثلاث
+     صفحاتٍ في كل سحب. فإذا بلغ آخرها استراح ثلاثين يوماً ثم عاد من أحدثها —
+     المنشور القديم الذي يجدّ عليه تعليقٌ يصعد إلى أوّل القائمة فتقرؤه الدورة
+     المعتادة، ولا ينتظر السجلّ. */
+  let startCursor: string | null = null;
+  if (mode === 'history') {
+    const doneAt = await getSetting(env, HISTORY_DONE_KEY);
+    if (doneAt && Date.now() - Date.parse(doneAt) < 30 * DAY) {
+      report.kinds.comment.ok = true;
+      return;
+    }
+    startCursor = (await getSetting(env, HISTORY_CURSOR_KEY)) || null;
+  }
+  let listing;
+  try {
+    listing = await listInboxPosts(token, { budget, maxPages: mode === 'full' ? 5 : mode === 'history' ? 3 : 2, startCursor });
+  } catch (err) {
+    // مؤشّرٌ لم يعد يقبله المزوّد — يُبدأ السجلّ من أوّله في السحب التالي
+    if (startCursor && isUnsupported(err)) {
+      await setSetting(env, HISTORY_CURSOR_KEY, '');
+      report.complete = false;
+      return;
+    }
+    throw err;
+  }
   report.kinds.comment.ok = true;
   if (listing.exhausted) report.complete = false;
 
@@ -492,6 +578,8 @@ async function syncCommentThreads(
   const stateWrites: D1PreparedStatement[] = [];
   const stamp = nowIso();
   let seen = 0;
+  let processed = 0;
+  let unfinished = 0;
 
   for (const { p, st } of ranked) {
     // يُترك للردود ثلاثةُ نداءاتٍ على الأقل، وللأنواع الأخرى حصّتها
@@ -514,11 +602,26 @@ async function syncCommentThreads(
       report.complete = false;
       break;
     }
+    processed++;
+    if (!r.complete) unfinished++;
   }
   await runBatch(env, stateWrites);
   report.kinds.comment.items = seen;
 
-  await checkReplies(env, token, budget, report, owners, replyQueue, reserve);
+  /* لا يتقدّم مؤشّر السجلّ إلا وقد قُرئت منشورات صفحاته كلُّها إلى آخر
+     تعليقاتها — وإلا تخطّى منشوراتٍ لم تُقرأ أو بقي منها شيء، ولا تبلغها
+     الدورة المعتادة لأنها في أعماق القائمة. وما اكتمل منها له حالةٌ الآن، فلا
+     يُعاد في السحب التالي، وما بقي منه يُستأنف من آخر صفحةٍ بلغها. */
+  if (mode === 'history' && processed === ranked.length && !unfinished && !listing.exhausted) {
+    if (listing.complete) {
+      await setSetting(env, HISTORY_DONE_KEY, stamp);
+      await setSetting(env, HISTORY_CURSOR_KEY, '');
+    } else {
+      await setSetting(env, HISTORY_CURSOR_KEY, listing.resume ?? '');
+    }
+  }
+
+  await checkReplies(env, token, budget, report, owners, replyQueue, reserve, { anyAge: mode === 'history' });
 }
 
 async function syncOnePost(
@@ -533,7 +636,7 @@ async function syncOnePost(
 ): Promise<{ seen: number; complete: boolean; exhausted: boolean; resume: string | null }> {
   const full = report.mode === 'full';
   const startCursor = full ? null : st?.tail_cursor ?? null;
-  const maxPages = full ? 5 : 3;
+  const maxPages = full || report.mode === 'history' ? 5 : 3;
   let res;
   try {
     res = await listPostComments(token, p.postId, p.accountId, { budget, maxPages, startCursor });
@@ -576,6 +679,7 @@ async function syncOnePost(
       createdAt: c.createdAt,
       capabilities: c.capabilities,
       isHidden: c.isHidden,
+      interactionId: c.interactionId || null,
     });
 
     const row = existing.get(key);
@@ -636,12 +740,18 @@ async function checkReplies(
   owners: Owners,
   queue: ReplyCheck[],
   reserve: number,
+  opts: { anyAge?: boolean } = {},
 ): Promise<void> {
   const cutoff = Date.now() - 14 * DAY;
+  const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
+  /* ما أعلن المزوّد أن عليه ردوداً، وتعليقات الأسبوعين، تُفحص في كل دورة.
+     والأقدم يُفحص أوّل ما يُقرأ، ثم كل أسبوع — لا في كل دورة. وسحب السجلّ
+     يفحص ما يقرؤه كلَّه: هو القراءة الأولى لمنشوراتٍ قديمة. */
   const eligible = queue
-    .filter((q) => q.known || Date.parse(q.createdAt) >= cutoff)
+    .filter((q) => opts.anyAge || q.known || Date.parse(q.createdAt) >= cutoff || q.checkedAt === null || q.checkedAt < weekAgo)
     .sort((a, b) =>
       Number(b.known) - Number(a.known) ||
+      Number(Date.parse(b.createdAt) >= cutoff) - Number(Date.parse(a.createdAt) >= cutoff) ||
       Number(a.checkedAt !== null) - Number(b.checkedAt !== null) ||
       (a.checkedAt ?? '').localeCompare(b.checkedAt ?? '') ||
       b.createdAt.localeCompare(a.createdAt),
@@ -699,16 +809,64 @@ async function checkReplies(
   await runBatch(env, stmts);
 }
 
+/**
+ * يدور سحبُ السجلّ على التعليقات القديمة بلا رد — ما مضى عليه أكثر من
+ * أسبوعين، وأحدثُه تفحصه الدورة المعتادة — فيفحص ردودها: ما لم يُفحص قطّ
+ * أوّلاً، ثم أقدمُها فحصاً، وكلٌّ مرّةً في الأسبوع على الأكثر. هكذا يُعرف ردٌّ
+ * كتبه الفريق من تطبيق المنصّة قبل شهورٍ على تعليقٍ لم يُفتح منشورُه منذئذ.
+ */
+async function sweepOldReplies(
+  env: Env,
+  token: string,
+  budget: CallBudget,
+  report: InboxSyncReport,
+  owners: Owners,
+  reserve: number,
+): Promise<void> {
+  const room = budget.left - reserve;
+  if (room <= 0) return;
+  const { results } = await env.DB.prepare(
+    `SELECT provider_comment_id, provider_interaction_id, created_at, reply_checked_at
+     FROM platform_comments
+     WHERE kind = 'comment' AND reply_body IS NULL AND created_at < ?
+       AND (reply_checked_at IS NULL OR reply_checked_at < ?)
+       AND instr(provider_comment_id, '|') > 0
+     ORDER BY reply_checked_at IS NOT NULL, reply_checked_at, created_at DESC
+     LIMIT ?`,
+  )
+    .bind(new Date(Date.now() - 14 * DAY).toISOString(), new Date(Date.now() - 7 * DAY).toISOString(), Math.min(room, 60))
+    .all<{ provider_comment_id: string; provider_interaction_id: string | null; created_at: string; reply_checked_at: string | null }>();
+
+  const queue: ReplyCheck[] = [];
+  for (const r of results) {
+    // الترميز `منشور|حساب|تعليق`
+    const [postId, accountId, ...rest] = r.provider_comment_id.split('|');
+    const commentId = rest.join('|');
+    if (!postId || !commentId) continue;
+    queue.push({
+      rowKey: r.provider_comment_id,
+      postId,
+      accountId: accountId ?? '',
+      commentId,
+      interactionId: r.provider_interaction_id ?? '',
+      createdAt: r.created_at,
+      known: false,
+      checkedAt: r.reply_checked_at,
+    });
+  }
+  await checkReplies(env, token, budget, report, owners, queue, reserve, { anyAge: true });
+}
+
 /* ─── المراجعات ─── */
 
-async function syncReviews(env: Env, token: string, budget: CallBudget, report: InboxSyncReport): Promise<InboxItem[]> {
+async function syncReviews(env: Env, token: string, budget: CallBudget, report: InboxSyncReport, pages: number): Promise<InboxItem[]> {
   if (budget.left <= 0) {
     report.complete = false;
     return [];
   }
   let r;
   try {
-    r = await listReviews(token, { budget, maxPages: 2 });
+    r = await listReviews(token, { budget, maxPages: pages });
   } catch (err) {
     if (isNotFound(err)) return []; // لا حساب مراجعاتٍ مربوط
     throw err;
@@ -746,13 +904,14 @@ async function syncConversations(
   budget: CallBudget,
   report: InboxSyncReport,
   accounts: SocialApiOwnedAccount[],
+  pages: number,
 ): Promise<void> {
   if (!accounts.some((a) => supportsDirectInbox(a.platform))) return;
   if (budget.left <= 0) {
     report.complete = false;
     return;
   }
-  const r = await listConversations(token, accounts, { budget });
+  const r = await listConversations(token, accounts, { budget, pages });
   if (r.exhausted) report.complete = false;
   report.kinds.dm.ok = true;
   report.kinds.dm.items = r.conversations.length;
@@ -843,6 +1002,7 @@ async function syncMentions(
   budget: CallBudget,
   report: InboxSyncReport,
   accounts: SocialApiOwnedAccount[],
+  pages: number,
 ): Promise<void> {
   const targets = accounts.filter((a) => supportsDirectInbox(a.platform));
   if (!targets.length) return;
@@ -855,7 +1015,7 @@ async function syncMentions(
       break;
     }
     try {
-      const r = await listMentions(token, acc, { budget, prefer: path });
+      const r = await listMentions(token, acc, { budget, prefer: path, pages });
       if (r.path) {
         path = r.path;
         supported = true;

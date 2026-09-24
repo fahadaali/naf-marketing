@@ -593,6 +593,8 @@ export type InboxItem = {
   repliedBody?: string | null; // ردٌّ موجود على المنصة كُتب من خارج هذه المنصة
   repliedAt?: string | null; // ووقته إن أعلنه المزوّد
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
+  /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
+  interactionId?: string | null;
 };
 
 /** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */
@@ -617,11 +619,19 @@ export function mapInboxPost(row: any): InboxPost | null {
   };
 }
 
-/** المنشورات التي عليها تعليقات — الأحدث نشاطاً أوّلاً، مئةٌ في الصفحة. */
-export async function listInboxPosts(apiKey: string, opts: { budget?: CallBudget; maxPages: number }): Promise<{ posts: InboxPost[]; complete: boolean; exhausted: boolean }> {
-  const r = await sapiList(apiKey, EP.comments, { limit: 100 }, { budget: opts.budget, maxPages: opts.maxPages, keys: ['posts', 'comments'] });
+/**
+ * المنشورات التي عليها تعليقات — الأحدث نشاطاً أوّلاً، مئةٌ في الصفحة. والدورة
+ * المعتادة تقرأ أوّلها؛ وسحبُ السجلّ يمضي من مؤشّرٍ محفوظ إلى آخرها.
+ */
+export async function listInboxPosts(
+  apiKey: string,
+  opts: { budget?: CallBudget; maxPages: number; startCursor?: string | null },
+): Promise<{ posts: InboxPost[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(apiKey, EP.comments, { limit: 100 }, {
+    budget: opts.budget, maxPages: opts.maxPages, keys: ['posts', 'comments'], startCursor: opts.startCursor,
+  });
   const posts = r.items.map(mapInboxPost).filter((p): p is InboxPost => p !== null);
-  return { posts, complete: r.complete, exhausted: r.exhausted };
+  return { posts, complete: r.complete, exhausted: r.exhausted, resume: r.resume };
 }
 
 /** تعليقٌ كما يردّه المزوّد، بما يلزم للكتابة ولتمييز الردود. */
@@ -869,10 +879,11 @@ export function supportsDirectInbox(platform: string): boolean {
 export async function listConversations(
   apiKey: string,
   accounts: SocialApiAccount[],
-  opts: { budget?: CallBudget },
+  opts: { budget?: CallBudget; pages?: number },
 ): Promise<{ conversations: SapiConversation[]; complete: boolean; exhausted: boolean }> {
+  const pages = opts.pages ?? 2;
   try {
-    const all = await sapiList(apiKey, EP.conversations, { limit: 100 }, { budget: opts.budget, maxPages: 2, keys: ['conversations'] });
+    const all = await sapiList(apiKey, EP.conversations, { limit: 100 }, { budget: opts.budget, maxPages: pages, keys: ['conversations'] });
     if (all.exhausted) return { conversations: [], complete: false, exhausted: true };
     const mapped = all.items.map((cv) => mapConversation(cv, accounts.find((a) => a.id === String(cv?.account_id || '')) ?? null));
     if (mapped.every((c) => c && c.accountId)) {
@@ -885,7 +896,7 @@ export async function listConversations(
   const out: SapiConversation[] = [];
   for (const acc of accounts.filter((a) => supportsDirectInbox(a.platform))) {
     try {
-      const r = await sapiList(apiKey, EP.conversations, { account_id: acc.id, platform: acc.platform, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['conversations'] });
+      const r = await sapiList(apiKey, EP.conversations, { account_id: acc.id, platform: acc.platform, limit: 50 }, { budget: opts.budget, maxPages: Math.max(pages - 1, 1), keys: ['conversations'] });
       if (r.exhausted) return { conversations: out, complete: false, exhausted: true };
       for (const cv of r.items) {
         const c = mapConversation(cv, acc);
@@ -928,14 +939,15 @@ export type MentionsPath = 'accounts' | 'inbox';
 export async function listMentions(
   apiKey: string,
   account: SocialApiAccount,
-  opts: { budget?: CallBudget; prefer?: MentionsPath | null },
+  opts: { budget?: CallBudget; prefer?: MentionsPath | null; pages?: number },
 ): Promise<{ items: InboxItem[]; path: MentionsPath | null }> {
+  const pages = opts.pages ?? 1;
   const order: MentionsPath[] = opts.prefer === 'inbox' ? ['inbox', 'accounts'] : ['accounts', 'inbox'];
   for (const path of order) {
     try {
       const r = path === 'accounts'
-        ? await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/mentions`, { limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['mentions'] })
-        : await sapiList(apiKey, EP.mentions, { account_id: account.id, platform: account.platform, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['mentions'] });
+        ? await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/mentions`, { limit: 50 }, { budget: opts.budget, maxPages: pages, keys: ['mentions'] })
+        : await sapiList(apiKey, EP.mentions, { account_id: account.id, platform: account.platform, limit: 50 }, { budget: opts.budget, maxPages: pages, keys: ['mentions'] });
       if (r.exhausted) throw new BudgetExhausted();
       const items: InboxItem[] = [];
       for (const m of r.items) {

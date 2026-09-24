@@ -22,6 +22,7 @@ vi.mock('../src/services/newsletterSend', () => ({
 vi.mock('../src/services/metricSync', () => ({ syncAllSources: vi.fn(async () => { called.push('sources'); return []; }) }));
 vi.mock('../src/services/crmSync', () => ({ syncCrm: track('crm') }));
 vi.mock('../src/services/metrics', () => ({ computeAuto: track('compute') }));
+vi.mock('../src/services/metricsHistory', () => ({ recomputePastPeriods: track('past-periods') }));
 
 import { handleScheduled, jobAt } from '../src/cron';
 
@@ -41,6 +42,25 @@ describe('جدول المهام', () => {
     expect(jobAt(new Date('2026-09-24T01:16:00Z'))).toEqual({ job: 'metrics', kind: 'annual' });
     expect(jobAt(new Date('2026-09-26T18:06:00Z')).job).toBe('reports');
     expect(jobAt(new Date('2026-09-24T10:12:00Z')).job).toBeNull();
+  });
+
+  it('يجعل للسجلّ القديم ثلاث دقائق لا تقع على المحجوز', () => {
+    expect(jobAt(new Date('2026-09-24T10:18:00Z')).job).toBe('inbox-history');
+    expect(jobAt(new Date('2026-09-24T10:38:00Z')).job).toBe('analytics-history');
+    expect(jobAt(new Date('2026-09-24T10:58:00Z')).job).toBe('metrics-history');
+    // والساعة الأولى على حالها: الربع في ٠١:١٤ والسنة في ٠١:١٦
+    expect(jobAt(new Date('2026-09-24T01:14:00Z'))).toEqual({ job: 'metrics', kind: 'quarterly' });
+    expect(jobAt(new Date('2026-09-24T01:18:00Z')).job).toBe('inbox-history');
+  });
+
+  it('يسحب سجلّ الصندوق بنمطه لا بنمط الدورة المعتادة', async () => {
+    const { syncComments } = await import('../src/services/commentsSync');
+    await tick('2026-09-24T10:18:00Z');
+    expect(called).toContain('inbox');
+    expect(vi.mocked(syncComments)).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ mode: 'history' }));
+    called.length = 0;
+    await tick('2026-09-24T10:58:00Z');
+    expect(called).toContain('past-periods');
   });
 
   it('الدورة الثقيلة لا تشارك حصّتها بيسكامب ولا دفعة النشرة', async () => {

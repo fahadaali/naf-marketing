@@ -269,3 +269,94 @@ describe('الميزانية', () => {
     expect(report?.calls).toBeLessThanOrEqual(5);
   });
 });
+
+describe('سجلّ المنشورات القديم', () => {
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+  const accountPost = (i: number, days: number) => ({
+    id: `urn:li:share:h${i}`, text: `منشور قديم ${i}`, published_at: daysAgo(days),
+    permalink: `https://www.linkedin.com/feed/update/h${i}`, likes: 10 + i, comments: 1,
+  });
+  const historyState = () => JSON.parse(
+    (db.prepare("SELECT value FROM settings WHERE key = 'account_history:acc_li'").get() as { value: string }).value,
+  );
+
+  beforeEach(() => {
+    route('GET', '/posts', () => ({ body: { data: [] } }));
+  });
+
+  it('يمضي في سجلّ الحساب إلى أقدم منشور، ثم لا يعيده ثلاثين يوماً', async () => {
+    route('GET', '/accounts/acc_li/posts', (url) => {
+      const c = url.searchParams.get('cursor');
+      if (!c) return { body: { data: [accountPost(1, 60)], next_cursor: 'h2' } };
+      if (c === 'h2') return { body: { data: [accountPost(2, 200)], next_cursor: 'h3' } };
+      return { body: { data: [accountPost(3, 400)], next_cursor: null } };
+    });
+
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(snaps().map((s) => s.provider_post_id)).toEqual(['urn:li:share:h1', 'urn:li:share:h2', 'urn:li:share:h3']);
+    // المنشور الذي مضت عليه سنة وأكثر محفوظٌ بأرقامه — لا يُترك لأنه قديم
+    expect(snaps().find((s) => s.provider_post_id === 'urn:li:share:h3')?.engagement).toBe(14);
+    expect(historyState()).toMatchObject({ cursor: null });
+    expect(historyState().doneAt).toBeTruthy();
+
+    calls.length = 0;
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(calls.some((c) => c.startsWith('GET /accounts/acc_li/posts'))).toBe(false);
+  });
+
+  it('يحفظ موضعه حين يقف دون آخر السجلّ، ويستأنف منه لا من أوّله', async () => {
+    // سبع صفحات، وسحب السجلّ يقرأ أربعاً في كل مرّة
+    route('GET', '/accounts/acc_li/posts', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [accountPost(n, 30 * n)], next_cursor: n < 7 ? String(n + 1) : null } };
+    });
+
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(snaps()).toHaveLength(4);
+    expect(historyState()).toMatchObject({ cursor: '5', doneAt: null });
+
+    calls.length = 0;
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(snaps()).toHaveLength(7);
+    const pages = calls.filter((c) => c.startsWith('GET /accounts/acc_li/posts'));
+    expect(pages[0]).toContain('cursor=5');
+    expect(historyState().doneAt).toBeTruthy();
+  });
+
+  it('يطلب أرقام المنشورات القديمة مرّةً في الأسبوع — ولا يعيد في كل سحب ما لا يُرجع المزوّد أرقامه', async () => {
+    db.prepare(
+      `INSERT INTO analytics_snapshots (id, platform, provider_post_id, title, sent_at, provider_uuid, metrics_at, reach, impressions, engagement, source)
+       VALUES ('s_old', 'linkedin', 'urn:li:share:old', 'قديم', ?, 'sp_old', NULL, NULL, NULL, NULL, 'posts'),
+              ('s_old2', 'linkedin', 'urn:li:share:old2', 'قديم ٢', ?, 'sp_old2', NULL, NULL, NULL, NULL, 'posts')`,
+    ).run(daysAgo(100), daysAgo(120));
+    // الأول لا يُرجع المزوّد أرقامه، والثاني يُرجعها
+    route('GET', '/posts/sp_old/metrics', () => ({ body: { data: [] } }));
+    route('GET', '/posts/sp_old2/metrics', () => ({
+      body: { data: [{ platform: 'linkedin', account_id: 'acc_li', platform_post_id: 'urn:li:share:old2', likes: 7, comments: 2, metrics_synced_at: daysAgo(1) }] },
+    }));
+
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(calls.filter((c) => c.startsWith('GET /posts/sp_old/metrics'))).toHaveLength(1);
+    expect(snaps().find((s) => s.id === 's_old2')?.engagement).toBe(9);
+    // والمعتاد لا يطلبها: نافذته الأسابيع الستّة
+    calls.length = 0;
+    await pullAnalytics(env, { budget: 40 });
+    expect(calls.some((c) => c.includes('/metrics'))).toBe(false);
+
+    // وسحب السجلّ التالي لا يعيد ما طُلب للتوّ — أجاب المزوّد بأرقامٍ أم لم يُجب
+    calls.length = 0;
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(calls.some((c) => c.includes('/metrics'))).toBe(false);
+  });
+
+  it('يكتب تقريره في موضعه — ولا يمسّ تقرير السحب المعتاد', async () => {
+    route('GET', '/accounts/acc_li/posts', () => ({ body: { data: [accountPost(1, 90)], next_cursor: null } }));
+    await pullAnalytics(env, { budget: 40 });
+    const regular = await readAnalyticsReport(env);
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    expect(await readAnalyticsReport(env)).toEqual(regular);
+    const hist = JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'analytics_history_report'").get() as { value: string }).value);
+    expect(hist.historyAccounts).toBe(1);
+    expect(hist.historyDone).toBe(1);
+  });
+});

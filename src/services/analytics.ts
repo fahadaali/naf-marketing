@@ -135,11 +135,24 @@ export type AnalyticsSyncReport = {
   fallback?: boolean;
   /** وقف السحب قبل حصّته: المزوّد طلب التمهّل، أو بلغ الاستدعاء حدّ طلباته. */
   stoppedBy?: 'rate_limit' | 'platform_cap' | null;
+  /** سحب السجلّ: حساباتٌ قُرئ سجلّها إلى أقدم منشور، من كم حساب. */
+  historyDone?: number;
+  historyAccounts?: number;
 };
+
+/**
+ * `regular` الجديدُ والأرقام الحيّة لمنشورات الأسابيع الستّة — كل ساعة.
+ * `history` السجلّ القديم: صفحاتُ سجلّ كل حساب إلى أقدم منشور، وما نُشر عبر
+ * المزوّد كلُّه مرّةً في اليوم، وأرقامُ ما مضى عليه أكثر من ستة أسابيع كل أسبوع.
+ */
+export type AnalyticsMode = 'regular' | 'history';
 
 const REPORT_KEY = 'analytics_sync_report';
 /** بدءُ السحب — ما بعد تقريره الأخير بلا تقرير سحبٌ سقط. */
 const LOCK_KEY = 'analytics_sync_lock';
+const HISTORY_REPORT_KEY = 'analytics_history_report';
+const HISTORY_LOCK_KEY = 'analytics_history_lock';
+const DAY = 86_400_000;
 
 async function getSetting(env: Env, key: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
@@ -152,8 +165,8 @@ async function setSetting(env: Env, key: string, value: string): Promise<void> {
   ).bind(key, value).run();
 }
 
-export async function readAnalyticsReport(env: Env): Promise<AnalyticsSyncReport | null> {
-  const raw = await getSetting(env, REPORT_KEY);
+async function readReport(env: Env, key: string): Promise<AnalyticsSyncReport | null> {
+  const raw = await getSetting(env, key);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as AnalyticsSyncReport;
@@ -162,18 +175,32 @@ export async function readAnalyticsReport(env: Env): Promise<AnalyticsSyncReport
   }
 }
 
+export async function readAnalyticsReport(env: Env): Promise<AnalyticsSyncReport | null> {
+  return readReport(env, REPORT_KEY);
+}
+
+export async function readAnalyticsHistoryReport(env: Env): Promise<AnalyticsSyncReport | null> {
+  return readReport(env, HISTORY_REPORT_KEY);
+}
+
 function errorText(err: unknown): string {
   return String((err as Error)?.message || err).slice(0, 240);
 }
 
 // سحب التحليلات دورياً — يختار المسار حسب المزوّد، ويعود بعدد اللقطات ويحفظ تقريره.
-export async function pullAnalytics(env: Env, opts: { trigger?: Trigger; budget?: number } = {}): Promise<number> {
+export async function pullAnalytics(
+  env: Env,
+  opts: { trigger?: Trigger; budget?: number; mode?: AnalyticsMode } = {},
+): Promise<number> {
+  const history = opts.mode === 'history';
+  const reportKey = history ? HISTORY_REPORT_KEY : REPORT_KEY;
+  const lockKey = history ? HISTORY_LOCK_KEY : LOCK_KEY;
   const providerName = ((await getSetting(env, 'provider_name')) || env.PROVIDER_NAME || 'mock').toLowerCase();
-  const prev = await readAnalyticsReport(env);
+  const prev = await readReport(env, reportKey);
   // قبل أن يكتب السحب بدأه: هل سقط الذي قبله؟
-  await noteDeadRun(env, await getSetting(env, LOCK_KEY), prev?.at ?? null);
-  await setSetting(env, LOCK_KEY, nowIso());
-  const trigger = opts.trigger ?? 'cron';
+  await noteDeadRun(env, await getSetting(env, lockKey), prev?.at ?? null);
+  await setSetting(env, lockKey, nowIso());
+  const trigger = opts.trigger ?? (history ? 'history' : 'cron');
   const limits = await runLimits(env, trigger);
   const report: AnalyticsSyncReport = {
     at: nowIso(),
@@ -194,8 +221,11 @@ export async function pullAnalytics(env: Env, opts: { trigger?: Trigger; budget?
 
   let captured = 0;
   try {
-    if (providerName === 'buffer') captured = await pullAllBuffer(env);
-    else if (providerName === 'socialapi') captured = await pullAllSocialApi(env, report, { deadline: limits.deadline, deep: trigger === 'manual' });
+    if (providerName === 'socialapi') {
+      captured = await pullAllSocialApi(env, report, { deadline: limits.deadline, deep: trigger === 'manual', history });
+    } else if (history) {
+      // سجلُّ المزوّدين الآخرين يُقرأ مع كل سحبٍ معتاد — لا مسار له مستقلّ
+    } else if (providerName === 'buffer') captured = await pullAllBuffer(env);
     else captured = await pullViaSchedules(env);
   } catch (err) {
     report.errors.push(errorText(err));
@@ -203,7 +233,7 @@ export async function pullAnalytics(env: Env, opts: { trigger?: Trigger; budget?
 
   report.ok = report.errors.length === 0;
   if (report.ok) report.lastOkAt = report.at;
-  await setSetting(env, REPORT_KEY, JSON.stringify(report));
+  await setSetting(env, reportKey, JSON.stringify(report));
   if (!report.ok && !captured) throw new Error(report.errors[0]);
   return captured;
 }
@@ -371,11 +401,165 @@ export function matchSnapshot(h: AccountPost, platform: string, candidates: Snap
   return near.length === 1 ? near[0] : null;
 }
 
+/* ─── سجلّ كل حساب ─── */
+
+/** أين بلغت قراءة سجلّ حسابٍ نحو أقدم منشور، ومتى اكتملت. */
+type HistoryState = { cursor: string | null; doneAt: string | null };
+
+const historyKey = (accountId: string) => `account_history:${accountId}`;
+
+async function readHistoryState(env: Env, accountId: string): Promise<HistoryState> {
+  const raw = await getSetting(env, historyKey(accountId));
+  try {
+    const v = raw ? JSON.parse(raw) : null;
+    return { cursor: v?.cursor || null, doneAt: v?.doneAt || null };
+  } catch {
+    return { cursor: null, doneAt: null };
+  }
+}
+
+async function writeHistoryState(env: Env, accountId: string, st: HistoryState): Promise<void> {
+  await setSetting(env, historyKey(accountId), JSON.stringify(st));
+}
+
+/**
+ * يكتب صفحةً من سجلّ حسابٍ لقطاتٍ — ما عُرف يُحدَّث في صفّه، وما لم يُعرف
+ * منشورٌ من خارج المنصة. والمطابقة بالمعرّف ثم الرابط ثم وقت النشر وأوّل العنوان
+ * (`matchSnapshot`) كي لا يُعدّ منشورٌ في المسلكين مرّتين.
+ */
+async function ingestAccountPosts(
+  env: Env,
+  report: AnalyticsSyncReport,
+  items: AccountPost[],
+  platform: string,
+  schedMap: Map<string, { postId: string; title: string }>,
+): Promise<number> {
+  if (!items.length) return 0;
+  report.accountPosts += items.length;
+  const oldest = items.reduce((m, h) => (h.sentAt && (!m || h.sentAt < m) ? h.sentAt : m), '' as string);
+  const { results: candidates } = await env.DB.prepare(
+    `SELECT ${SNAP_COLUMNS} FROM analytics_snapshots WHERE platform = ? AND (sent_at IS NULL OR sent_at >= ?)`,
+  )
+    .bind(platform, oldest ? new Date(Date.parse(oldest) - DAY).toISOString() : '1970-01-01T00:00:00Z')
+    .all<Snapshot>();
+
+  const writes: D1PreparedStatement[] = [];
+  for (const h of items) {
+    const match = matchSnapshot(h, platform, candidates);
+    const via = schedMap.get(h.id);
+    const metricsAt = h.metrics.present ? h.metrics.syncedAt ?? nowIso() : null;
+    writes.push(upsertStmt(env, {
+      providerPostId: match?.provider_post_id ?? h.id,
+      platform,
+      title: match?.title || via?.title || h.title || null,
+      postId: via?.postId || null,
+      viaPlatform: via ? 1 : 0,
+      reach: h.metrics.reach,
+      impressions: h.metrics.impressions,
+      engagement: h.metrics.engagement,
+      sentAt: h.sentAt,
+      metricsJson: JSON.stringify(h.metrics.raw),
+      externalUrl: h.externalUrl,
+      source: 'account',
+      metricsAt,
+    }));
+    if (!match) {
+      report.newNative++;
+      // يُضاف إلى المرشّحين كي لا يُطابَق منشورٌ ثانٍ في الصفحة نفسها عليه
+      candidates.push({
+        id: '', provider_post_id: h.id, platform, title: h.title, sent_at: h.sentAt, external_url: h.externalUrl,
+        reach: h.metrics.reach, impressions: h.metrics.impressions, engagement: h.metrics.engagement, metrics_at: metricsAt, provider_uuid: null,
+      });
+    }
+  }
+  await runBatch(env, writes);
+  return items.length;
+}
+
+/* ─── الأرقام الحيّة ─── */
+
+/**
+ * منشوراتٌ تُطلب أرقامها الحيّة، أقدمُها تحديثاً أوّلاً. المعتاد: منشورات
+ * الأسابيع الستّة كل ستّ ساعات — أرقامها تتحرّك. والسجلّ: ما قبلها كل أسبوع،
+ * وما لم تُطلب أرقامه قطّ أوّلاً — أرقامه لا تتحرّك، لكنها لا تُترك غائبة.
+ */
+async function dueForLiveMetrics(env: Env, history: boolean): Promise<string[]> {
+  const since = new Date(Date.now() - 45 * DAY).toISOString();
+  const staleBefore = new Date(Date.now() - (history ? 7 * DAY : 6 * 3_600_000)).toISOString();
+  const { results } = await env.DB.prepare(
+    `SELECT provider_uuid, MIN(MAX(COALESCE(metrics_at, ''), COALESCE(metrics_checked_at, ''))) AS oldest
+     FROM analytics_snapshots
+     WHERE provider_uuid IS NOT NULL AND provider_uuid <> '' AND ${history ? 'sent_at < ?' : 'sent_at >= ?'}
+     GROUP BY provider_uuid
+     HAVING oldest < ?
+     ORDER BY oldest ASC
+     LIMIT ${history ? 40 : 60}`,
+  )
+    .bind(since, staleBefore)
+    .all<{ provider_uuid: string }>();
+  return results.map((r) => r.provider_uuid);
+}
+
+async function refreshLiveMetrics(
+  env: Env,
+  token: string,
+  budget: CallBudget,
+  report: AnalyticsSyncReport,
+  uuids: string[],
+  platformOf: (accountId: string, fallback: string) => string,
+  stop: (err: unknown) => void,
+): Promise<void> {
+  for (const uuid of uuids) {
+    if (budget.left <= 0) {
+      report.complete = false;
+      break;
+    }
+    let entries;
+    try {
+      entries = await fetchPostMetrics(token, uuid, budget);
+    } catch (err) {
+      if (isUnsupported(err)) continue;
+      stop(err);
+      if (err instanceof BudgetExhausted) break;
+      continue;
+    }
+    const { results: rows } = await env.DB.prepare(
+      `SELECT ${SNAP_COLUMNS} FROM analytics_snapshots WHERE provider_uuid = ?`,
+    )
+      .bind(uuid)
+      .all<Snapshot>();
+    const writes: D1PreparedStatement[] = [];
+    for (const e of entries) {
+      if (!e.metrics.present) continue;
+      const target =
+        rows.find((r) => e.platformPostId && r.provider_post_id === e.platformPostId) ??
+        rows.find((r) => e.accountId && r.platform === platformOf(e.accountId, e.platform)) ??
+        rows.find((r) => e.platform && r.platform === e.platform) ??
+        (rows.length === 1 ? rows[0] : undefined);
+      if (!target) continue;
+      writes.push(env.DB.prepare(
+        `UPDATE analytics_snapshots
+         SET reach = COALESCE(?, reach), impressions = COALESCE(?, impressions), engagement = COALESCE(?, engagement),
+             metrics_json = ?, metrics_at = ?, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+         WHERE id = ?`,
+      )
+        .bind(e.metrics.reach, e.metrics.impressions, e.metrics.engagement, JSON.stringify(e.metrics.raw), e.metrics.syncedAt ?? nowIso(), target.id));
+    }
+    /* وقتُ الطلب يُختم أجاب المزوّد بأرقامٍ أم لم يُجب — وإلا بقي منشورٌ لا
+       تُردّ أرقامه أوّلَ القائمة في كل سحب يأكل حصّتها. */
+    writes.push(env.DB.prepare(
+      "UPDATE analytics_snapshots SET metrics_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_uuid = ?",
+    ).bind(uuid));
+    await runBatch(env, writes);
+    report.refreshed++;
+  }
+}
+
 // SocialAPI: ما نُشر عبره، وسجلّ كل حساب، والأرقام الحيّة — بميزانية.
 async function pullAllSocialApi(
   env: Env,
   report: AnalyticsSyncReport,
-  opts: { deadline: number; deep: boolean },
+  opts: { deadline: number; deep: boolean; history: boolean },
 ): Promise<number> {
   const token = providerKey(env, 'socialapi');
   if (!token) {
@@ -413,166 +597,102 @@ async function pullAllSocialApi(
   /* مزامنة يوتيوب القسرية مرّةً في اليوم لا في كل سحب: تطلب من المزوّد أن
      يقرأ القناة من جديد، ونداؤها كل ساعة يأكل حصّة السحب ولا يزيد شيئاً. */
   const ytLast = await getSetting(env, 'youtube_sync_at');
-  if (accounts.some((a) => a.platform === 'youtube') && (!ytLast || Date.now() - Date.parse(ytLast) > 20 * 3_600_000)) {
+  if (!opts.history && accounts.some((a) => a.platform === 'youtube') && (!ytLast || Date.now() - Date.parse(ytLast) > 20 * 3_600_000)) {
     await syncYouTubePosts(token, accounts, budget);
     await setSetting(env, 'youtube_sync_at', nowIso());
   }
 
-  // ٢) ما نُشر عبر المزوّد — صفحاتٍ لا صفحة
-  try {
-    const { posts, exhausted } = await listSocialApiPostsPaged(token, { budget, maxPages: opts.deep ? 5 : 3 });
-    if (exhausted) report.complete = false;
-    // والصفوف المؤقّتة «منشور:منصّة» معها — تُطوى إن وُجدت لا في كل مرّة
-    const existing = await snapshotsByKeys(env, posts.flatMap((p) => [p.id, `${p.postUuid}:${p.platform}`]));
-    const writes: D1PreparedStatement[] = [];
-    for (const post of posts) {
-      // الربط بجدول النشر عبر معرّف المنشور الداخلي (postUuid) أو معرّف المنصة
-      const via = schedMap.get(post.postUuid) || schedMap.get(post.id);
-      const take = acceptStored(existing.get(post.id), post);
-      writes.push(upsertStmt(env, {
-        providerPostId: post.id,
-        platform: platformOf(post.accountId, post.platform),
-        title: via?.title || post.title || null,
-        postId: via?.postId || null,
-        viaPlatform: via ? 1 : 0,
-        reach: post.reach,
-        impressions: post.impressions,
-        engagement: post.engagement,
-        sentAt: post.sentAt,
-        metricsJson: JSON.stringify(post.metrics || []),
-        externalUrl: post.externalUrl || null,
-        source: 'posts',
-        providerUuid: post.postUuid || null,
-        metricsAt: take ? post.metricsSyncedAt ?? nowIso() : null,
-      }));
-      // وجهةٌ حُفظت قبل أن يُعرف معرّفها على المنصة — صفُّها المؤقّت يُطوى
-      const placeholder = `${post.postUuid}:${post.platform}`;
-      if (post.postUuid && post.id !== placeholder && existing.has(placeholder)) {
-        writes.push(env.DB.prepare('DELETE FROM analytics_snapshots WHERE provider_post_id = ? AND post_id IS NULL').bind(placeholder));
+  /* ٢) ما نُشر عبر المزوّد — صفحاتٍ لا صفحة. والسجلّ يقرؤه كلَّه مرّةً في
+     اليوم: عشر صفحاتٍ من مئة، والمعتاد ثلاثٌ من أحدثها. */
+  const postsHistoryAt = opts.history ? await getSetting(env, 'posts_history_at') : null;
+  const readPosts = !opts.history || !postsHistoryAt || Date.now() - Date.parse(postsHistoryAt) > DAY;
+  if (readPosts) {
+    try {
+      const { posts, exhausted, complete } = await listSocialApiPostsPaged(token, { budget, maxPages: opts.history ? 10 : opts.deep ? 5 : 3 });
+      if (exhausted) report.complete = false;
+      // والصفوف المؤقّتة «منشور:منصّة» معها — تُطوى إن وُجدت لا في كل مرّة
+      const existing = await snapshotsByKeys(env, posts.flatMap((p) => [p.id, `${p.postUuid}:${p.platform}`]));
+      const writes: D1PreparedStatement[] = [];
+      for (const post of posts) {
+        // الربط بجدول النشر عبر معرّف المنشور الداخلي (postUuid) أو معرّف المنصة
+        const via = schedMap.get(post.postUuid) || schedMap.get(post.id);
+        const take = acceptStored(existing.get(post.id), post);
+        writes.push(upsertStmt(env, {
+          providerPostId: post.id,
+          platform: platformOf(post.accountId, post.platform),
+          title: via?.title || post.title || null,
+          postId: via?.postId || null,
+          viaPlatform: via ? 1 : 0,
+          reach: post.reach,
+          impressions: post.impressions,
+          engagement: post.engagement,
+          sentAt: post.sentAt,
+          metricsJson: JSON.stringify(post.metrics || []),
+          externalUrl: post.externalUrl || null,
+          source: 'posts',
+          providerUuid: post.postUuid || null,
+          metricsAt: take ? post.metricsSyncedAt ?? nowIso() : null,
+        }));
+        // وجهةٌ حُفظت قبل أن يُعرف معرّفها على المنصة — صفُّها المؤقّت يُطوى
+        const placeholder = `${post.postUuid}:${post.platform}`;
+        if (post.postUuid && post.id !== placeholder && existing.has(placeholder)) {
+          writes.push(env.DB.prepare('DELETE FROM analytics_snapshots WHERE provider_post_id = ? AND post_id IS NULL').bind(placeholder));
+        }
+        captured++;
       }
-      captured++;
+      await runBatch(env, writes);
+      report.posts = posts.length;
+      if (opts.history && complete) await setSetting(env, 'posts_history_at', nowIso());
+    } catch (err) {
+      stop(err);
     }
-    await runBatch(env, writes);
-    report.posts = posts.length;
-  } catch (err) {
-    stop(err);
   }
 
-  // ٣) سجلّ كل حساب على منصّته — ومنه ما نُشر من خارج المنصة
+  /* ٣) سجلّ كل حساب على منصّته — ومنه ما نُشر من خارج المنصة. المعتاد صفحته
+     الأولى؛ والسجلّ يمضي من مؤشّره المحفوظ أربع صفحاتٍ في كل سحب حتى أقدم
+     منشور، ثم يستريح ثلاثين يوماً ويعود من الأحدث. */
   const withHistory = accounts.filter((a) => !/google|trustpilot/.test(a.platform));
+  if (opts.history) {
+    report.historyAccounts = withHistory.length;
+    report.historyDone = 0;
+  }
   for (const acc of withHistory) {
     // تُترك للأرقام الحيّة حصّتها
     if (budget.left <= 6) {
       report.complete = false;
       break;
     }
-    let items: AccountPost[] = [];
+    const state = opts.history ? await readHistoryState(env, acc.id) : null;
+    if (state?.doneAt && Date.now() - Date.parse(state.doneAt) < 30 * DAY) {
+      report.historyDone = (report.historyDone ?? 0) + 1;
+      continue;
+    }
+    let page;
     try {
-      items = (await listAccountPosts(token, acc, { budget })).posts;
+      page = await listAccountPosts(token, acc, { budget, maxPages: opts.history ? 4 : 1, startCursor: state?.cursor ?? null });
     } catch (err) {
-      if (isUnsupported(err)) continue;
+      if (isUnsupported(err)) {
+        // مؤشّرٌ لم يعد يقبله المزوّد — يُبدأ السجلّ من أحدثه في السحب التالي
+        if (state?.cursor) await writeHistoryState(env, acc.id, { cursor: null, doneAt: null });
+        continue;
+      }
       stop(err);
       if (err instanceof BudgetExhausted) break;
       continue;
     }
-    if (!items.length) continue;
-    report.accountPosts += items.length;
-
-    const platform = platformOf(acc.id, acc.platform);
-    const oldest = items.reduce((m, h) => (h.sentAt && (!m || h.sentAt < m) ? h.sentAt : m), '' as string);
-    const { results: candidates } = await env.DB.prepare(
-      `SELECT ${SNAP_COLUMNS} FROM analytics_snapshots WHERE platform = ? AND (sent_at IS NULL OR sent_at >= ?)`,
-    )
-      .bind(platform, oldest ? new Date(Date.parse(oldest) - 86_400_000).toISOString() : '1970-01-01T00:00:00Z')
-      .all<Snapshot>();
-
-    const writes: D1PreparedStatement[] = [];
-    for (const h of items) {
-      const match = matchSnapshot(h, platform, candidates);
-      const via = schedMap.get(h.id);
-      const metricsAt = h.metrics.present ? h.metrics.syncedAt ?? nowIso() : null;
-      writes.push(upsertStmt(env, {
-        providerPostId: match?.provider_post_id ?? h.id,
-        platform,
-        title: match?.title || via?.title || h.title || null,
-        postId: via?.postId || null,
-        viaPlatform: via ? 1 : 0,
-        reach: h.metrics.reach,
-        impressions: h.metrics.impressions,
-        engagement: h.metrics.engagement,
-        sentAt: h.sentAt,
-        metricsJson: JSON.stringify(h.metrics.raw),
-        externalUrl: h.externalUrl,
-        source: 'account',
-        metricsAt,
-      }));
-      if (!match) {
-        report.newNative++;
-        // يُضاف إلى المرشّحين كي لا يُطابَق منشورٌ ثانٍ في الصفحة نفسها عليه
-        candidates.push({
-          id: '', provider_post_id: h.id, platform, title: h.title, sent_at: h.sentAt, external_url: h.externalUrl,
-          reach: h.metrics.reach, impressions: h.metrics.impressions, engagement: h.metrics.engagement, metrics_at: metricsAt, provider_uuid: null,
-        });
-      }
-      captured++;
+    captured += await ingestAccountPosts(env, report, page.posts, platformOf(acc.id, acc.platform), schedMap);
+    if (opts.history) {
+      await writeHistoryState(env, acc.id, page.complete ? { cursor: null, doneAt: nowIso() } : { cursor: page.resume, doneAt: null });
+      if (page.complete) report.historyDone = (report.historyDone ?? 0) + 1;
     }
-    await runBatch(env, writes);
-  }
-
-  // ٤) الأرقام الحيّة — منشورات الأسابيع الستّة الأخيرة، أقدمُها تحديثاً أوّلاً
-  const since = new Date(Date.now() - 45 * 86_400_000).toISOString();
-  const staleBefore = new Date(Date.now() - 6 * 3_600_000).toISOString();
-  const { results: due } = await env.DB.prepare(
-    `SELECT provider_uuid, MIN(COALESCE(metrics_at, '')) AS oldest
-     FROM analytics_snapshots
-     WHERE provider_uuid IS NOT NULL AND provider_uuid <> '' AND sent_at >= ?
-     GROUP BY provider_uuid
-     HAVING oldest < ?
-     ORDER BY oldest ASC
-     LIMIT 60`,
-  )
-    .bind(since, staleBefore)
-    .all<{ provider_uuid: string }>();
-
-  for (const { provider_uuid: uuid } of due) {
-    if (budget.left <= 0) {
+    if (page.exhausted) {
       report.complete = false;
       break;
     }
-    let entries;
-    try {
-      entries = await fetchPostMetrics(token, uuid, budget);
-    } catch (err) {
-      if (isUnsupported(err)) continue;
-      stop(err);
-      if (err instanceof BudgetExhausted) break;
-      continue;
-    }
-    const { results: rows } = await env.DB.prepare(
-      `SELECT ${SNAP_COLUMNS} FROM analytics_snapshots WHERE provider_uuid = ?`,
-    )
-      .bind(uuid)
-      .all<Snapshot>();
-    const writes: D1PreparedStatement[] = [];
-    for (const e of entries) {
-      if (!e.metrics.present) continue;
-      const target =
-        rows.find((r) => e.platformPostId && r.provider_post_id === e.platformPostId) ??
-        rows.find((r) => e.accountId && r.platform === platformOf(e.accountId, e.platform)) ??
-        rows.find((r) => e.platform && r.platform === e.platform) ??
-        (rows.length === 1 ? rows[0] : undefined);
-      if (!target) continue;
-      writes.push(env.DB.prepare(
-        `UPDATE analytics_snapshots
-         SET reach = COALESCE(?, reach), impressions = COALESCE(?, impressions), engagement = COALESCE(?, engagement),
-             metrics_json = ?, metrics_at = ?, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-         WHERE id = ?`,
-      )
-        .bind(e.metrics.reach, e.metrics.impressions, e.metrics.engagement, JSON.stringify(e.metrics.raw), e.metrics.syncedAt ?? nowIso(), target.id));
-    }
-    await runBatch(env, writes);
-    report.refreshed++;
   }
+
+  // ٤) الأرقام الحيّة — أقدمُها تحديثاً أوّلاً
+  await refreshLiveMetrics(env, token, budget, report, await dueForLiveMetrics(env, opts.history), platformOf, stop);
 
   report.calls = budget.used;
   report.stoppedBy = budget.stoppedBy;
