@@ -94,6 +94,12 @@ export function previousPeriod(p: Period): Period {
   return periodOf(p.kind, `${addDays(p.start, -1)}T12:00:00Z`);
 }
 
+/** الفترة التالية لفترةٍ — للتنقّل بين الفترات، ولا تالية بعد الجارية. */
+export function nextPeriod(p: Period, now: Date = new Date()): Period | null {
+  const next = periodOf(p.kind, `${addDays(p.end, 1)}T12:00:00Z`);
+  return next.start <= periodOf(p.kind, now).start ? next : null;
+}
+
 /**
  * حدود الفترة كلحظتين `UTC` — للمقارنة مع الأعمدة المخزَّنة `ISO 8601 UTC`
  * (`sent_at` و`created_at` وأخواتهما). النهاية حصريّة: أوّلُ لحظةٍ بعد الفترة.

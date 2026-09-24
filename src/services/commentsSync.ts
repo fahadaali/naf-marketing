@@ -125,6 +125,11 @@ export async function readInboxHistoryReport(env: Env): Promise<InboxSyncReport 
   return readReport(env, HISTORY_REPORT_KEY);
 }
 
+/** متى بلغت قراءة سجلّ الصندوق أقدم منشور — أو `null` ما دامت تُقرأ. */
+export async function inboxHistoryDoneAt(env: Env): Promise<string | null> {
+  return (await getSetting(env, HISTORY_DONE_KEY)) || null;
+}
+
 /**
  * `hints` تقريرٌ تُؤخذ منه المسارات التي تعلّمتها الدورات — مسارُ ردود التعليقات
  * ومسارُ الإشارات. وهو السابق نفسه، إلا في سحب السجلّ: يأخذها من الصندوق.

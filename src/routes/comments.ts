@@ -13,38 +13,59 @@ export const commentRoutes = new Hono<{ Bindings: Env; Variables: Variables }>()
 commentRoutes.use('*', requireAuth);
 commentRoutes.use('*', requirePermission('comments.manage'));
 
-// قائمة التعليقات/الرسائل مع فلاتر (platform, replied)
+/** عناصر الصفحة الواحدة — والصفحات تُتبع بالسابق والتالي. */
+const PAGE_SIZE = 100;
+
+/* قائمة التعليقات/الرسائل مع فلاتر (platform, replied) ونطاقٍ زمني (from, to).
+   وكانت أحدثَ مئتين بلا نطاقٍ ولا صفحة — فما قبلها لا يُرى وإن كان محفوظاً.
+   والنطاق لحظتان `ISO` بتوقيت الرياض تحسبهما الشاشة، كما في لوحة التحليلات. */
 commentRoutes.get('/', async (c) => {
   const platform = c.req.query('platform');
   const replied = c.req.query('replied'); // '1' | '0'
-  const where: string[] = [];
-  const binds: unknown[] = [];
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const page = Math.max(1, Math.floor(Number(c.req.query('page')) || 1));
+
+  // النطاق يحكم القائمة والأعداد معاً — تبويبٌ يعدّ ما لا تعرضه القائمة يكذب
+  const range: string[] = [];
+  const rangeBinds: unknown[] = [];
+  if (from) { range.push('pc.created_at >= ?'); rangeBinds.push(from); }
+  if (to) { range.push('pc.created_at <= ?'); rangeBinds.push(to); }
+
+  const where = [...range];
+  const binds = [...rangeBinds];
   if (platform) { where.push('pc.platform = ?'); binds.push(platform); }
   if (replied === '1') where.push('pc.reply_body IS NOT NULL');
   if (replied === '0') where.push('pc.reply_body IS NULL');
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
+  // عنصرٌ زائد يقول إن بعد الصفحة صفحة — بلا عدٍّ ثانٍ
   const { results } = await c.env.DB.prepare(
     `SELECT pc.*, p.title AS post_title, u.name AS replier_name
      FROM platform_comments pc
      LEFT JOIN content_posts p ON p.id = pc.post_id
      LEFT JOIN users u ON u.id = pc.replied_by
      ${clause}
-     ORDER BY pc.created_at DESC LIMIT 200`,
+     ORDER BY pc.created_at DESC, pc.id DESC
+     LIMIT ? OFFSET ?`,
   )
-    .bind(...binds)
+    .bind(...binds, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE)
     .all();
 
-  // أعداد لكل حالة (بلا تأثّر بفلتر الرد) — لعرضها على أزرار التبويب
+  // أعداد لكل حالة في النطاق (بلا تأثّر بفلتر الرد) — لعرضها على أزرار التبويب
   const counts = await c.env.DB.prepare(
     `SELECT COUNT(*) AS all_count,
             SUM(CASE WHEN reply_body IS NULL THEN 1 ELSE 0 END) AS unreplied,
             SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied
-     FROM platform_comments`,
-  ).first<{ all_count: number; unreplied: number; replied: number }>();
+     FROM platform_comments pc ${range.length ? `WHERE ${range.join(' AND ')}` : ''}`,
+  )
+    .bind(...rangeBinds)
+    .first<{ all_count: number; unreplied: number; replied: number }>();
 
   return c.json({
-    comments: results,
+    comments: results.slice(0, PAGE_SIZE),
+    page,
+    hasMore: results.length > PAGE_SIZE,
     counts: { all: counts?.all_count || 0, unreplied: counts?.unreplied || 0, replied: counts?.replied || 0 },
     // تقرير آخر سحب — يقول للشاشة متى سُحب الصندوق وهل اكتمل وما تعذّر منه
     sync: await readInboxReport(c.env),

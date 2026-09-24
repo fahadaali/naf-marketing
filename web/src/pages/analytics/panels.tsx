@@ -513,7 +513,25 @@ type SourcesData = {
   inbox: { report: SyncReportLite; count: number; replied: number };
   crm: { leads: number; mql: number; mql_statuses: string[] };
   integrations: { key: string; is_enabled: boolean; last_sync_status: string; last_error: string | null; last_ok_at: string | null }[];
+  /** أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده، وإلا `null`. */
+  history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null;
 };
+
+/**
+ * سطرُ السجلّ القديم — خبرٌ لا حالة: القراءة تجري على دفعاتٍ كل ساعة ولا عطل
+ * فيها. ومن فتح فترةً ماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد.
+ */
+function HistoryLine({ done, accounts }: { done: boolean; accounts?: { done: number; of: number } | null }) {
+  return (
+    <p className="source-line">
+      {done
+        ? 'السجلّ القديم مقروءٌ إلى أقدم منشور.'
+        : accounts
+          ? <>يُقرأ السجلّ القديم على دفعات كل ساعة — اكتمل <bdi>{formatNumber(accounts.done)}</bdi> من <bdi>{formatNumber(accounts.of)}</bdi> حساباً.</>
+          : 'يُقرأ السجلّ القديم على دفعات كل ساعة.'}
+    </p>
+  );
+}
 
 /** حالة مصدرٍ من تقرير سحبه — بمفردات «حالات التكامل» نفسها. */
 function reportStatus(r: SyncReportLite): string {
@@ -609,6 +627,13 @@ export function DataSources({ period, start, refreshKey }: { period: string; sta
               {unmeasured > 0 && (
                 <Warn><bdi>{formatNumber(unmeasured)}</bdi> منشوراً بلا أرقام بعد — لا تُحسب أصفاراً، وتُطلب في السحب التالي.</Warn>
               )}
+              {/* حسابٌ لا سجلّ له على منصّته (الملف التجاري مثلاً) لا يُقرأ له شيء — فلا سطر */}
+              {data.history && data.history.posts.accounts !== 0 && (
+                <HistoryLine
+                  done={!!data.history.posts.accounts && data.history.posts.done === data.history.posts.accounts}
+                  accounts={data.history.posts.accounts ? { done: data.history.posts.done ?? 0, of: data.history.posts.accounts } : null}
+                />
+              )}
             </SourceRow>
 
             <SourceRow
@@ -622,6 +647,7 @@ export function DataSources({ period, start, refreshKey }: { period: string; sta
               <p className="source-line">
                 <bdi>{formatNumber(data.inbox.count)}</bdi> عنصراً في هذه الفترة، رُدّ على <bdi>{formatNumber(data.inbox.replied)}</bdi>
               </p>
+              {data.history && <HistoryLine done={!!data.history.inbox.doneAt} />}
             </SourceRow>
 
             {crm && (

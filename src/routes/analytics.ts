@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { pullAnalytics, ingestExportVideos, readAnalyticsReport } from '../services/analytics';
-import { readInboxReport } from '../services/commentsSync';
+import { pullAnalytics, ingestExportVideos, readAnalyticsReport, readAnalyticsHistoryReport } from '../services/analytics';
+import { readInboxReport, inboxHistoryDoneAt } from '../services/commentsSync';
 import { parsePeriod, periodBoundsUtc, periodOf, isPeriodKind } from '../services/period';
 import { listStaleContent } from '../services/alerts';
 import { providerKey } from '../adapters';
@@ -166,9 +166,21 @@ analyticsRoutes.get('/sources', async (c) => {
   const provider = ((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>())?.value
     || c.env.PROVIDER_NAME || 'mock').toLowerCase();
 
+  /* أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده. فمن فتح
+     السنة الماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد. */
+  let history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null = null;
+  if (provider === 'socialapi') {
+    const postsHistory = await readAnalyticsHistoryReport(c.env);
+    history = {
+      posts: { accounts: postsHistory?.historyAccounts ?? null, done: postsHistory?.historyDone ?? null },
+      inbox: { doneAt: await inboxHistoryDoneAt(c.env) },
+    };
+  }
+
   return c.json({
     period: p,
     provider,
+    history,
     posts: { report: await readAnalyticsReport(c.env), count: posts?.n ?? 0, measured: posts?.measured ?? 0 },
     inbox: { report: await readInboxReport(c.env), count: inbox?.n ?? 0, replied: inbox?.replied ?? 0 },
     crm: { leads: leads?.n ?? 0, mql: leads?.mql ?? 0, mql_statuses: mqlStatuses },

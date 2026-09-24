@@ -123,3 +123,58 @@ describe('تقرير سحب الصندوق في قائمة التعليقات', 
     expect(body.comments[0].reply_source).toBe('external');
   });
 });
+
+describe('الصندوق بفتراته وصفحاته', () => {
+  const insert = (db0: any) => db0.prepare(
+    `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, reply_body)
+     VALUES (?, 'instagram', ?, 'comment', 'عميل', 'سؤال', ?, ?)`,
+  );
+
+  it('يقصر القائمة وأعداد التبويبات على النطاق — فالقديم يُرى بنطاقه', async () => {
+    const add = insert(db);
+    add.run('c_old', 'p|a|1', '2025-11-03T09:00:00Z', 'أجبناك');
+    add.run('c_old2', 'p|a|2', '2025-11-20T09:00:00Z', null);
+    add.run('c_new', 'p|a|3', '2026-09-20T09:00:00Z', null);
+
+    const { body } = await get('/comments?from=2025-10-31T21:00:00.000Z&to=2025-11-30T20:59:59.000Z');
+    expect(body.comments.map((c: any) => c.id)).toEqual(['c_old2', 'c_old']);
+    expect(body.counts).toEqual({ all: 2, unreplied: 1, replied: 1 });
+
+    const replied = await get('/comments?replied=1&from=2025-10-31T21:00:00.000Z&to=2025-11-30T20:59:59.000Z');
+    expect(replied.body.comments.map((c: any) => c.id)).toEqual(['c_old']);
+  });
+
+  it('يقسم القائمة صفحاتٍ من مئة ويقول إن بعدها صفحة — لا أحدث مئتين وحدها', async () => {
+    const add = insert(db);
+    for (let i = 0; i < 230; i++) {
+      add.run(`c${String(i).padStart(3, '0')}`, `p|a|${i}`, new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(), null);
+    }
+    const first = await get('/comments');
+    expect(first.body.comments).toHaveLength(100);
+    expect(first.body.hasMore).toBe(true);
+    expect(first.body.counts.all).toBe(230);
+
+    const third = await get('/comments?page=3');
+    expect(third.body.comments).toHaveLength(30);
+    expect(third.body.hasMore).toBe(false);
+    // الأقدم في الصفحة الأخيرة
+    expect(third.body.comments.at(-1).id).toBe('c000');
+  });
+});
+
+describe('السجلّ القديم في «مصادر الأرقام»', () => {
+  it('يقول أين بلغت قراءة سجلّ المنشورات والصندوق', async () => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'socialapi')").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('analytics_history_report', ?)").run(JSON.stringify({ at: '2026-09-24T10:38:00Z', historyAccounts: 3, historyDone: 1 }));
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', '2026-09-24T10:18:00Z')").run();
+
+    const { body } = await get(`/analytics/sources?period=monthly&start=${JULY.start}`);
+    expect(body.history).toEqual({ posts: { accounts: 3, done: 1 }, inbox: { doneAt: '2026-09-24T10:18:00Z' } });
+  });
+
+  it('لا يذكر سجلّاً لمزوّدٍ لا يُقرأ سجلّه على دفعات', async () => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'buffer')").run();
+    const { body } = await get(`/analytics/sources?period=monthly&start=${JULY.start}`);
+    expect(body.history).toBeNull();
+  });
+});

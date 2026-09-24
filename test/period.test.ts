@@ -5,7 +5,7 @@
 // الأسبوع الماضي، ويُنقص من كل أسبوعٍ ثلاثَ ساعاتٍ من طرفيه بلا سطرِ خطأ.
 
 import { describe, it, expect } from 'vitest';
-import { periodOf, previousPeriod, periodBoundsUtc, periodDays, parsePeriod, riyadhToday } from '../src/services/period';
+import { periodOf, previousPeriod, nextPeriod, periodBoundsUtc, periodDays, parsePeriod, riyadhToday } from '../src/services/period';
 
 describe('periodOf', () => {
   it('يبدأ الأسبوع بالأحد — أوّل أيام العمل في السعودية', () => {
@@ -49,6 +49,22 @@ describe('previousPeriod', () => {
     expect(previousPeriod(periodOf('quarterly', '2027-01-15T00:00:00Z')).start).toBe('2026-10-01');
     // أسبوعُ 2027-01-03 السابقُ ينتهي 2027-01-02
     expect(previousPeriod(periodOf('weekly', '2027-01-05T00:00:00Z')).end).toBe('2027-01-02');
+  });
+});
+
+describe('nextPeriod', () => {
+  const now = new Date('2026-09-24T10:00:00Z');
+
+  it('يتقدّم فترةً من نوعها — ويعبر السنة', () => {
+    expect(nextPeriod(periodOf('monthly', '2025-12-15T00:00:00Z'), now)?.start).toBe('2026-01-01');
+    expect(nextPeriod(periodOf('quarterly', '2025-11-15T00:00:00Z'), now)?.start).toBe('2026-01-01');
+    expect(nextPeriod(periodOf('weekly', '2026-08-31T00:00:00Z'), now)?.start).toBe('2026-09-06');
+  });
+
+  it('يبلغ الجارية ولا يتجاوزها — لا فترة بعدها تُعرض', () => {
+    expect(nextPeriod(periodOf('monthly', '2026-08-10T00:00:00Z'), now)?.start).toBe('2026-09-01');
+    expect(nextPeriod(periodOf('monthly', now), now)).toBeNull();
+    expect(nextPeriod(periodOf('annual', now), now)).toBeNull();
   });
 });
 

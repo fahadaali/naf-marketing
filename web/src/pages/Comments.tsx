@@ -1,10 +1,11 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert } from 'lucide-react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
 import ConfirmModal from '../components/ConfirmModal';
+import { DateRangePicker } from '../components/DatePicker';
 
 // إدارة التعليقات والرسائل والإشارات والتقييمات — مزامنة من المزوّد مع الرد والاقتراحات الذكية والإشراف.
 type Caps = Record<string, boolean>;
@@ -57,6 +58,11 @@ export default function Comments() {
   const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number }>({ all: 0, unreplied: 0, replied: 0 });
   const [sync, setSync] = useState<SyncReport | null>(null);
   const [filter, setFilter] = useState<'' | '0' | '1'>('');
+  // النطاق يوماً بيوم كما يختاره المنتقي، والصفحة منه — والقديم محفوظٌ يُرى بنطاقه
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [msg, setMsg] = useState('');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [privateMode, setPrivateMode] = useState<Record<string, boolean>>({});
@@ -68,14 +74,21 @@ export default function Comments() {
   const [confirming, setConfirming] = useState<{ kind: 'comment' | 'reply'; id: string } | null>(null);
 
   function load() {
-    const q = filter ? `?replied=${filter}` : '';
-    api.get(`/comments${q}`).then((d) => {
+    const q = new URLSearchParams();
+    if (filter) q.set('replied', filter);
+    // حدود اليوم بتوقيت الرياض (UTC+3) — كما في لوحة التحليلات
+    if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
+    if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
+    if (page > 1) q.set('page', String(page));
+    const qs = q.toString() ? `?${q}` : '';
+    api.get(`/comments${qs}`).then((d) => {
       setComments(d.comments);
+      setHasMore(!!d.hasMore);
       if (d.counts) setCounts(d.counts);
       setSync(d.sync ?? null);
     });
   }
-  useEffect(load, [filter]);
+  useEffect(load, [filter, from, to, page]);
 
   async function refresh() {
     setMsg('جارٍ الجلب…');
@@ -138,7 +151,7 @@ export default function Comments() {
   }
 
   const tab = (key: '' | '0' | '1', label: string, n: number) => (
-    <button className={filter === key ? 'on' : ''} onClick={() => setFilter(key)}>
+    <button className={filter === key ? 'on' : ''} onClick={() => { setFilter(key); setPage(1); }}>
       {label} <span className="count-pill">{n}</span>
     </button>
   );
@@ -157,11 +170,16 @@ export default function Comments() {
 
       <SyncLine sync={sync} />
 
-      <div className="row" style={{ marginBottom: 16 }}>
+      <div className="row" style={{ marginBottom: 'var(--space-4)', alignItems: 'flex-end' }}>
         <div className="seg">
           {tab('', 'الكل', counts.all)}
           {tab('0', 'بلا رد', counts.unreplied)}
           {tab('1', 'تم الرد', counts.replied)}
+        </div>
+        <div className="spacer" />
+        <div className="field" style={{ margin: 0 }}>
+          <label>الفترة</label>
+          <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); setPage(1); }} />
         </div>
       </div>
 
@@ -272,8 +290,23 @@ export default function Comments() {
             </div>
           );
         })}
-        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.</p>}
+        {comments.length === 0 && (
+          <p className="muted" style={{ textAlign: 'center' }}>
+            {from || to ? 'لا عنصر في هذه الفترة. وسّع النطاق الزمني.' : 'لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.'}
+          </p>
+        )}
       </div>
+
+      {(page > 1 || hasMore) && (
+        <div className="row" style={{ justifyContent: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+          <button type="button" className="btn ghost sm" disabled={page === 1} onClick={() => setPage(page - 1)}>
+            <ChevronRight size={20} className="chev-dir" aria-hidden="true" /> السابق
+          </button>
+          <button type="button" className="btn ghost sm" disabled={!hasMore} onClick={() => setPage(page + 1)}>
+            التالي <ChevronLeft size={20} className="chev-dir" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {confirming?.kind === 'comment' && (
         <ConfirmModal

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronRight, ChevronLeft, Calendar, Clock } from 'lucide-react';
 import { Popover } from './Popover';
 import { formatDate, formatMonth, formatDateTime } from '../lib/format';
@@ -55,9 +55,9 @@ function CalGrid({
   return (
     <div className="dp-cal">
       <div className="dp-head">
-        <button type="button" className="dp-nav" onClick={prev}><ChevronRight size={20} /></button>
+        <button type="button" className="dp-nav" onClick={prev} aria-label="السابق"><ChevronRight size={20} className="chev-dir" /></button>
         <button type="button" className="dp-title" onClick={cycle}>{title}</button>
-        <button type="button" className="dp-nav" onClick={next}><ChevronLeft size={20} /></button>
+        <button type="button" className="dp-nav" onClick={next} aria-label="التالي"><ChevronLeft size={20} className="chev-dir" /></button>
       </div>
 
       {mode === 'days' && (
@@ -122,16 +122,21 @@ export function DateRangePicker({
           if (!from || (from && to)) onChange(s, '');
           else { let a = from, b = s; if (b < a) [a, b] = [b, a]; onChange(a, b); close(); }
         };
-        const presets: [string, () => void][] = [
-          ['اليوم', () => { const t = ymd(new Date()); onChange(t, t); close(); }],
-          ['آخر 7 أيام', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); onChange(ymd(s), ymd(e)); close(); }],
-          ['آخر 30 يوماً', () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); onChange(ymd(s), ymd(e)); close(); }],
-          ['هذا الشهر', () => { const n = new Date(); onChange(ymd(new Date(n.getFullYear(), n.getMonth(), 1)), ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0))); close(); }],
-          ['مسح', () => { onChange('', ''); close(); }],
+        /* الاختصارات مسجّلةٌ في «الفترة المعروضة» (naf-terms §١٣)، ونهايتُها اليوم
+           والعدد فيها معزول الاتجاه كأيّ رقم. و«آخر 12 شهراً» لا «آخر سنة»: الثانية
+           تُقرأ السنةَ التقويمية الماضية. */
+        const lastDays = (n: number) => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - (n - 1)); onChange(ymd(s), ymd(e)); close(); };
+        const presets: [string, ReactNode, () => void][] = [
+          ['today', 'اليوم', () => { const t = ymd(new Date()); onChange(t, t); close(); }],
+          ['7d', <>آخر <bdi>7</bdi> أيام</>, () => lastDays(7)],
+          ['30d', <>آخر <bdi>30</bdi> يوماً</>, () => lastDays(30)],
+          ['month', 'هذا الشهر', () => { const n = new Date(); onChange(ymd(new Date(n.getFullYear(), n.getMonth(), 1)), ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0))); close(); }],
+          ['12m', <>آخر <bdi>12</bdi> شهراً</>, () => { const e = new Date(); onChange(ymd(new Date(e.getFullYear(), e.getMonth() - 12, e.getDate() + 1)), ymd(e)); close(); }],
+          ['clear', 'مسح', () => { onChange('', ''); close(); }],
         ];
         return (
           <div className="dp-pop">
-            <div className="dp-presets">{presets.map(([l, f]) => <button key={l} type="button" onClick={f}>{l}</button>)}</div>
+            <div className="dp-presets">{presets.map(([k, l, f]) => <button key={k} type="button" onClick={f}>{l}</button>)}</div>
             <CalGrid month={month} setMonth={setMonth} start={from} end={to} onPick={pick} />
           </div>
         );
