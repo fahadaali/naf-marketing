@@ -524,7 +524,7 @@ function reportStatus(r: SyncReportLite): string {
 function Warn({ children }: { children: ReactNode }) {
   return (
     <p className="source-warn">
-      <TriangleAlert size={14} aria-hidden="true" />
+      <TriangleAlert size={16} aria-hidden="true" />
       <span>{children}</span>
     </p>
   );
@@ -580,7 +580,7 @@ export function DataSources({ period, start, refreshKey }: { period: string; sta
   const expanded = open ?? needsAttention;
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
       <button type="button" className="row row-link" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
         <h4 style={{ margin: 0 }}>مصادر الأرقام</h4>
         <div className="spacer" />

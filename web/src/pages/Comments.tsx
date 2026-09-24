@@ -37,13 +37,13 @@ type SyncReport = {
 function SyncLine({ sync }: { sync: SyncReport | null }) {
   if (!sync) return null;
   return (
-    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 12, display: 'grid', gap: 4 }}>
+    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-3)', display: 'grid', gap: 'var(--space-1)' }}>
       <span>
         {sync.lastOkAt ? <>آخر سحبٍ ناجح <bdi>{formatRiyadh(sync.lastOkAt)}</bdi></> : 'لم يُسحب بعد'}
         {!sync.ok && sync.errors[0] && <> — {sync.errors[0]}</>}
       </span>
       {sync.ok && !sync.complete && (
-        <span className="row" style={{ gap: 6 }}>
+        <span className="row" style={{ gap: 'var(--space-2)' }}>
           <TriangleAlert size={16} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} aria-hidden="true" />
           لم يكتمل السحب. يُستكمل الباقي في السحب التالي.
         </span>

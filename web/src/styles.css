@@ -761,13 +761,14 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 .metric-breakdown-value { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* مصادر الأرقام — سطرٌ لكل مصدر: اسمه وحالته، ثم ما وصل منه في الفترة.
-   والتحذير أيقونةٌ ونصّ لا لونٌ وحده. */
+   والتحذير أيقونةٌ ونصّ لا لونٌ وحده، وصندوق الأيقونة بارتفاع سطرٍ واحد
+   فتتوسّط السطر الأول أيّاً كان مقاس النص وطوله — لا إزاحةَ تُضبط باليد. */
 .source-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
 .source-list > li { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
 .source-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .source-line { font-size: var(--text-xs); color: var(--muted-foreground); margin: var(--space-1) 0 0; }
 .source-warn { display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--text-xs); margin: var(--space-1) 0 0; }
-.source-warn svg { color: var(--warning-strong); flex-shrink: 0; margin-top: var(--space-1); }
+.source-warn svg { color: var(--warning-strong); flex-shrink: 0; height: 1lh; }
 
 /* جدول دليل المؤشرات يتّسع بعمود الاسم، فيمرَّر داخل غلافه لا مع الصفحة. */
 .table-scroll { overflow-x: auto; }
