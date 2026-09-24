@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  syncComments, readInboxReport, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply, INBOX_BUDGET,
+  syncComments, readInboxReport, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply,
 } from '../services/commentsSync';
 import type { ModerateAction } from '../adapters/provider';
 import { suggestReplies } from '../services/claude';
@@ -55,7 +55,7 @@ commentRoutes.get('/', async (c) => {
    والأعطال في تقرير الدورة لا في استثناء: نوعٌ تعذّر لا يُسقط ما قُرئ من غيره.
    ويُردّ ٥٠٢ حين لم يُقرأ شيءٌ أصلاً — مفتاحٌ مرفوض أو مزوّدٌ لا يجيب. */
 commentRoutes.post('/refresh', async (c) => {
-  const report = await syncComments(c.env, { mode: 'full', budget: INBOX_BUDGET.manual });
+  const report = await syncComments(c.env, { mode: 'full', trigger: 'manual' });
   if (report && !report.ok && report.kinds.comment.ok !== true) {
     return c.json({ error: `تعذّر السحب. ${report.errors[0] ?? ''}`.trim(), report }, 502);
   }

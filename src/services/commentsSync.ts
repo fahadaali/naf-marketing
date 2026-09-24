@@ -9,6 +9,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { notifyUsers, usersWithPermission } from './notify';
+import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
 
 /* ============================================================
    مزامنة صندوق التعليقات والرسائل.
@@ -68,10 +69,12 @@ export type InboxSyncReport = {
   lastOkAt: string | null;
   repliesPath: RepliesPath | 'none' | null;
   mentionsPath: MentionsPath | 'none' | null;
+  /** الخطة المعلنة، وهل نزلت حصصها إلى المجانية احتياطاً — انظر `limits.ts`. */
+  plan?: Plan;
+  fallback?: boolean;
+  /** وقفت الدورة قبل حصّتها: المزوّد طلب التمهّل، أو بلغ الاستدعاء حدّ طلباته. */
+  stoppedBy?: 'rate_limit' | 'platform_cap' | null;
 };
-
-/** ميزانيات النداءات — دون الخمسين بهامشٍ لما يسبق المزامنة في الاستدعاء نفسه. */
-export const INBOX_BUDGET = { cron: 40, webhook: 30, manual: 45 } as const;
 
 const REPORT_KEY = 'inbox_sync_report';
 const LOCK_KEY = 'inbox_sync_lock';
@@ -145,22 +148,27 @@ async function takeLock(env: Env, withinMs: number): Promise<boolean> {
  */
 export async function syncComments(
   env: Env,
-  opts: { mode?: SyncMode; budget?: number; skipIfRunningWithinMs?: number } = {},
+  opts: { mode?: SyncMode; trigger?: Trigger; budget?: number; skipIfRunningWithinMs?: number } = {},
 ): Promise<InboxSyncReport | null> {
   const mode = opts.mode ?? 'incremental';
+  const prev = await readInboxReport(env);
+  // قبل أن تكتب الدورة قفلها: هل سقطت التي قبلها؟
+  const lastLock = await getSetting(env, LOCK_KEY);
   if (opts.skipIfRunningWithinMs) {
     if (!(await takeLock(env, opts.skipIfRunningWithinMs))) return null;
   } else {
     await setSetting(env, LOCK_KEY, nowIso());
   }
+  await noteDeadRun(env, lastLock, prev?.at ?? null);
 
+  const limits = await runLimits(env, opts.trigger ?? (mode === 'full' ? 'manual' : 'cron'));
   const provider = await providerName(env);
-  const prev = await readInboxReport(env);
-  const budget = opts.budget ?? INBOX_BUDGET.cron;
-  const report = newReport(mode, provider, budget, prev);
+  const report = newReport(mode, provider, opts.budget ?? limits.calls, prev);
+  report.plan = limits.plan;
+  report.fallback = limits.fallback;
 
   try {
-    if (provider === 'socialapi') await syncSocialApiInbox(env, report);
+    if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
     else await syncPerPost(env, report);
   } catch (err) {
     report.errors.push(errorText(err));
@@ -184,13 +192,13 @@ function ownerIndex(accounts: SocialApiOwnedAccount[]): Owners {
   return { forAccount: (accountId) => byAccount.get(accountId) ?? all };
 }
 
-async function syncSocialApiInbox(env: Env, report: InboxSyncReport): Promise<void> {
+async function syncSocialApiInbox(env: Env, report: InboxSyncReport, deadline: number): Promise<void> {
   const token = providerKey(env, 'socialapi');
   if (!token) {
     report.errors.push('مفتاح SocialAPI غير مضبوط. اضبط SOCIALAPI_API_KEY.');
     return;
   }
-  const budget = new CallBudget(report.budget);
+  const budget = new CallBudget(report.budget, deadline);
 
   // تنظيف السجلات الفارغة (بلا نص ولم يُردّ عليها) — يشمل التقييمات بلا تعليق مكتوب.
   await env.DB.prepare(
@@ -250,6 +258,8 @@ async function syncSocialApiInbox(env: Env, report: InboxSyncReport): Promise<vo
   }
 
   report.calls = budget.used;
+  report.stoppedBy = budget.stoppedBy;
+  if (budget.stoppedBy) report.complete = false;
   const negative = fresh.filter((it) => it.rating != null && it.rating <= 2);
   if (negative.length) await notifyNegative(env, negative);
 }

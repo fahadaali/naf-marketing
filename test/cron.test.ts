@@ -10,9 +10,9 @@ const { called, track } = vi.hoisted(() => {
 });
 
 vi.mock('../src/services/rss', () => ({ refreshAllFeeds: track('feeds') }));
-vi.mock('../src/services/analytics', () => ({ pullAnalytics: track('analytics'), ANALYTICS_BUDGET: { cron: 40, manual: 45 } }));
+vi.mock('../src/services/analytics', () => ({ pullAnalytics: track('analytics') }));
 vi.mock('../src/services/report', () => ({ uploadWeeklyReport: track('weekly'), uploadMonthlyReport: track('monthly') }));
-vi.mock('../src/services/commentsSync', () => ({ syncComments: track('inbox'), INBOX_BUDGET: { cron: 40, webhook: 30, manual: 45 } }));
+vi.mock('../src/services/commentsSync', () => ({ syncComments: track('inbox') }));
 vi.mock('../src/services/alerts', () => ({ checkStaleContent: track('stale') }));
 vi.mock('../src/services/basecampSync', () => ({ syncCardCommentsSafe: track('basecamp') }));
 vi.mock('../src/services/publish', () => ({ runDuePublishes: track('publish') }));

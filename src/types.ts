@@ -13,6 +13,9 @@ export type Env = {
   APP_NAME: string;
   PLATFORM_ID?: string;
   AUTH_ISSUER?: string;
+  /* خطة كلاودفلير: `paid` ترفع حصص نداءات المزامنة (`services/limits.ts`).
+     وغيابُها أو أيّ قيمةٍ أخرى = المجانية — الافتراض الآمن. */
+  WORKERS_PLAN?: string;
   // secrets
   CLAUDE_API_KEY?: string;
   PROVIDER_API_KEY?: string; // مفتاح عام (تراجعي) — يُستخدم إن لم يوجد سرّ خاص بالمزوّد

@@ -402,3 +402,48 @@ describe('أدواتٌ صغيرة', () => {
     expect(mapComment({ content: { text: 'نص' } }).body).toBe('نص');
   });
 });
+
+describe('الخطة المدفوعة واحتياطها', () => {
+  it('يقف حين يطلب المزوّد التمهّل — ولا يُلحّ، ولا يعدّه عطلاً', async () => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [1, 2, 3].map((i) => ({ id: `post${i}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 })) },
+    }));
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1)] } }));
+    route('GET', /^\/inbox\/comments\/post[23]$/, () => ({ status: 429, body: { error: 'rate limited' } }));
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(report?.ok).toBe(true);
+    expect(report?.complete).toBe(false);
+    expect(report?.stoppedBy).toBe('rate_limit');
+    // ما قُرئ قبل الطلب محفوظ، ولا نداء بعد الـ٤٢٩
+    expect(rows()).toHaveLength(1);
+    const after = calls.findIndex((c) => /post[23]/.test(c));
+    expect(calls.slice(after + 1)).toEqual([]);
+  });
+
+  it('ينزل إلى حصص المجانية بعد دورةٍ سقطت، ويقول ذلك في التقرير', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    env.WORKERS_PLAN = 'paid';
+    const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    // دورةٌ أتمّت قبل أربعين دقيقة، وأخرى بدأت قبل عشرين ولم تكتب تقريرها
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_report', ?)").run(JSON.stringify({ at: at(40), lastOkAt: at(40) }));
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_lock', ?)").run(at(20));
+
+    const report = await syncComments(env, {});
+    expect(report?.plan).toBe('paid');
+    expect(report?.fallback).toBe(true);
+    expect(report?.budget).toBe(40);
+
+    // والدورة التالية ما زالت في يوم الاحتياط — وإن أتمّت هذه تقريرها
+    const next = await syncComments(env, {});
+    expect(next?.fallback).toBe(true);
+  });
+
+  it('يأخذ حصّة المدفوعة حين لا سقوط', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    env.WORKERS_PLAN = 'paid';
+    const report = await syncComments(env, {});
+    expect(report?.budget).toBe(150);
+    expect(report?.fallback).toBe(false);
+  });
+});

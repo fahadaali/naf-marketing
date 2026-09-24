@@ -1,8 +1,8 @@
 import type { Env } from './types';
 import { refreshAllFeeds } from './services/rss';
-import { pullAnalytics, ANALYTICS_BUDGET } from './services/analytics';
+import { pullAnalytics } from './services/analytics';
 import { uploadWeeklyReport, uploadMonthlyReport } from './services/report';
-import { syncComments, INBOX_BUDGET } from './services/commentsSync';
+import { syncComments } from './services/commentsSync';
 import { checkStaleContent } from './services/alerts';
 import { syncCardCommentsSafe } from './services/basecampSync';
 import { runDuePublishes } from './services/publish';
@@ -93,10 +93,10 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
       await Promise.allSettled([refreshAllFeeds(env), syncNewsletterAnalytics(env), checkStaleContent(env)]);
       break;
     case 'analytics':
-      await pullAnalytics(env, { budget: ANALYTICS_BUDGET.cron }).catch(() => 0);
+      await pullAnalytics(env, { trigger: 'cron' }).catch(() => 0);
       break;
     case 'inbox':
-      await syncComments(env, { budget: INBOX_BUDGET.cron, skipIfRunningWithinMs: 90_000 }).catch(() => null);
+      await syncComments(env, { trigger: 'cron', skipIfRunningWithinMs: 90_000 }).catch(() => null);
       break;
     case 'crm':
       await syncCrm(env).catch(() => null);

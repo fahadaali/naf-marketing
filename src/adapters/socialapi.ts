@@ -77,17 +77,31 @@ export class BudgetExhausted extends Error {
   }
 }
 
-/** عدّادُ نداءات الدورة الواحدة. */
+/**
+ * عدّادُ نداءات الدورة الواحدة، ومعه سقفُ وقتها. وتقف كذلك حين يطلب المزوّد
+ * التمهّل أو يبلغ الاستدعاء حدّ طلباته — وقفاً تُكمله الدورة التالية، لا عطلاً.
+ */
 export class CallBudget {
   used = 0;
-  constructor(readonly max: number) {}
+  /** سببُ الوقف قبل الحصّة — `null` ما دامت الحصّة وحدها تحكم. */
+  stoppedBy: 'rate_limit' | 'platform_cap' | null = null;
+  constructor(readonly max: number, private readonly deadline: number = Number.POSITIVE_INFINITY) {}
   get left(): number {
+    if (this.stoppedBy || Date.now() >= this.deadline) return 0;
     return Math.max(this.max - this.used, 0);
   }
   spend(): void {
-    if (this.used >= this.max) throw new BudgetExhausted();
+    if (this.left <= 0) throw new BudgetExhausted();
     this.used++;
   }
+  stop(reason: 'rate_limit' | 'platform_cap'): void {
+    this.stoppedBy = reason;
+  }
+}
+
+/** حدُّ طلبات الاستدعاء في كلاودفلير — نصٌّ إنجليزي يرميه وقتُ التشغيل. */
+function isPlatformCap(err: unknown): boolean {
+  return /too many subrequests|too many api requests by single worker invocation/i.test(String((err as Error)?.message || err));
 }
 
 /** خطأ المزوّد بحالته — كي يُفرَّق «غير مدعوم» (404/405/501) عن العطل. */
@@ -114,14 +128,28 @@ export function isNotFound(err: unknown): boolean {
 // منفّذ REST مشترك
 async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown, budget?: CallBudget): Promise<T> {
   budget?.spend();
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${apiKey.trim()}`,
-      ...(body ? { 'content-type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${apiKey.trim()}`,
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (err) {
+    if (budget && isPlatformCap(err)) {
+      budget.stop('platform_cap');
+      throw new BudgetExhausted();
+    }
+    throw err;
+  }
+  // المزوّد يطلب التمهّل: تقف الدورة ولا تُلحّ، وتُكمل التي بعدها
+  if (res.status === 429 && budget) {
+    budget.stop('rate_limit');
+    throw new BudgetExhausted();
+  }
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
@@ -405,16 +433,19 @@ function pickMetricFields(p: any): Record<string, number> {
 
 /**
  * منشورات الحساب على منصّته — الأحدث أوّلاً، ومنها ما نُشر من تطبيق المنصّة.
- * صفحةٌ واحدة تكفي الدورة: المنشورات القديمة لا تتغيّر أرقامها كثيراً، وما
- * قُرئ منها يبقى محفوظاً.
+ * الدورة المعتادة تقرأ صفحتها الأولى وحدها؛ وسحبُ السجلّ يمضي من مؤشّرٍ محفوظ
+ * إلى أقدم منشور، صفحاتٍ في كل دورة، حتى تُقرأ السنوات كلُّها مرّة.
  */
 export async function listAccountPosts(
   apiKey: string,
   account: SocialApiAccount,
-  budget?: CallBudget,
-): Promise<AccountPost[]> {
-  const r = await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/posts`, { limit: 50 }, { budget, maxPages: 1, keys: ['posts', 'media'] });
-  return r.items.map((p) => mapAccountPost(p, account)).filter((p): p is AccountPost => p !== null);
+  opts: { budget?: CallBudget; maxPages?: number; startCursor?: string | null } = {},
+): Promise<{ posts: AccountPost[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/posts`, { limit: 50 }, {
+    budget: opts.budget, maxPages: opts.maxPages ?? 1, keys: ['posts', 'media'], startCursor: opts.startCursor,
+  });
+  const posts = r.items.map((p) => mapAccountPost(p, account)).filter((p): p is AccountPost => p !== null);
+  return { posts, complete: r.complete, exhausted: r.exhausted, resume: r.resume };
 }
 
 /* ═══ تخريط المقاييس ═══

@@ -6,6 +6,7 @@ import {
   listSocialApiAccountsDetailed, listSocialApiPostsPaged, mapMetrics, syncYouTubePosts,
   type AccountPost, type SocialApiAccount,
 } from '../adapters/socialapi';
+import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
 import { newId, nowIso } from '../util';
 
 /* ============================================================
@@ -129,11 +130,16 @@ export type AnalyticsSyncReport = {
   refreshed: number;
   errors: string[];
   lastOkAt: string | null;
+  /** الخطة المعلنة، وهل نزلت حصصها إلى المجانية احتياطاً — انظر `limits.ts`. */
+  plan?: Plan;
+  fallback?: boolean;
+  /** وقف السحب قبل حصّته: المزوّد طلب التمهّل، أو بلغ الاستدعاء حدّ طلباته. */
+  stoppedBy?: 'rate_limit' | 'platform_cap' | null;
 };
 
 const REPORT_KEY = 'analytics_sync_report';
-
-export const ANALYTICS_BUDGET = { cron: 40, manual: 45 } as const;
+/** بدءُ السحب — ما بعد تقريره الأخير بلا تقرير سحبٌ سقط. */
+const LOCK_KEY = 'analytics_sync_lock';
 
 async function getSetting(env: Env, key: string): Promise<string | null> {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
@@ -161,28 +167,35 @@ function errorText(err: unknown): string {
 }
 
 // سحب التحليلات دورياً — يختار المسار حسب المزوّد، ويعود بعدد اللقطات ويحفظ تقريره.
-export async function pullAnalytics(env: Env, opts: { budget?: number } = {}): Promise<number> {
+export async function pullAnalytics(env: Env, opts: { trigger?: Trigger; budget?: number } = {}): Promise<number> {
   const providerName = ((await getSetting(env, 'provider_name')) || env.PROVIDER_NAME || 'mock').toLowerCase();
   const prev = await readAnalyticsReport(env);
+  // قبل أن يكتب السحب بدأه: هل سقط الذي قبله؟
+  await noteDeadRun(env, await getSetting(env, LOCK_KEY), prev?.at ?? null);
+  await setSetting(env, LOCK_KEY, nowIso());
+  const trigger = opts.trigger ?? 'cron';
+  const limits = await runLimits(env, trigger);
   const report: AnalyticsSyncReport = {
     at: nowIso(),
     provider: providerName,
     ok: true,
     complete: true,
     calls: 0,
-    budget: opts.budget ?? ANALYTICS_BUDGET.cron,
+    budget: opts.budget ?? limits.calls,
     posts: 0,
     accountPosts: 0,
     newNative: 0,
     refreshed: 0,
     errors: [],
     lastOkAt: prev?.lastOkAt ?? null,
+    plan: limits.plan,
+    fallback: limits.fallback,
   };
 
   let captured = 0;
   try {
     if (providerName === 'buffer') captured = await pullAllBuffer(env);
-    else if (providerName === 'socialapi') captured = await pullAllSocialApi(env, report);
+    else if (providerName === 'socialapi') captured = await pullAllSocialApi(env, report, { deadline: limits.deadline, deep: trigger === 'manual' });
     else captured = await pullViaSchedules(env);
   } catch (err) {
     report.errors.push(errorText(err));
@@ -359,13 +372,17 @@ export function matchSnapshot(h: AccountPost, platform: string, candidates: Snap
 }
 
 // SocialAPI: ما نُشر عبره، وسجلّ كل حساب، والأرقام الحيّة — بميزانية.
-async function pullAllSocialApi(env: Env, report: AnalyticsSyncReport): Promise<number> {
+async function pullAllSocialApi(
+  env: Env,
+  report: AnalyticsSyncReport,
+  opts: { deadline: number; deep: boolean },
+): Promise<number> {
   const token = providerKey(env, 'socialapi');
   if (!token) {
     report.errors.push('مفتاح SocialAPI غير مضبوط. اضبط SOCIALAPI_API_KEY.');
     return 0;
   }
-  const budget = new CallBudget(report.budget);
+  const budget = new CallBudget(report.budget, opts.deadline);
   const stop = (err: unknown) => {
     if (err instanceof BudgetExhausted) report.complete = false;
     else report.errors.push(errorText(err));
@@ -403,7 +420,7 @@ async function pullAllSocialApi(env: Env, report: AnalyticsSyncReport): Promise<
 
   // ٢) ما نُشر عبر المزوّد — صفحاتٍ لا صفحة
   try {
-    const { posts, exhausted } = await listSocialApiPostsPaged(token, { budget, maxPages: report.budget >= ANALYTICS_BUDGET.manual ? 5 : 3 });
+    const { posts, exhausted } = await listSocialApiPostsPaged(token, { budget, maxPages: opts.deep ? 5 : 3 });
     if (exhausted) report.complete = false;
     // والصفوف المؤقّتة «منشور:منصّة» معها — تُطوى إن وُجدت لا في كل مرّة
     const existing = await snapshotsByKeys(env, posts.flatMap((p) => [p.id, `${p.postUuid}:${p.platform}`]));
@@ -451,7 +468,7 @@ async function pullAllSocialApi(env: Env, report: AnalyticsSyncReport): Promise<
     }
     let items: AccountPost[] = [];
     try {
-      items = await listAccountPosts(token, acc, budget);
+      items = (await listAccountPosts(token, acc, { budget })).posts;
     } catch (err) {
       if (isUnsupported(err)) continue;
       stop(err);
@@ -558,6 +575,8 @@ async function pullAllSocialApi(env: Env, report: AnalyticsSyncReport): Promise<
   }
 
   report.calls = budget.used;
+  report.stoppedBy = budget.stoppedBy;
+  if (budget.stoppedBy) report.complete = false;
   return captured;
 }
 

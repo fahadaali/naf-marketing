@@ -3,7 +3,7 @@ import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { providerKey } from '../adapters';
 import { registerSocialApiWebhook, listSocialApiWebhooks, deleteSocialApiWebhook } from '../adapters/socialapi';
-import { syncComments, INBOX_BUDGET } from '../services/commentsSync';
+import { syncComments } from '../services/commentsSync';
 
 export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -69,7 +69,7 @@ webhookRoutes.post('/socialapi', async (c) => {
        ومزامنةٌ كاملة لكلٍّ منها تستهلك الحصّة مرّاتٍ على الشيء نفسه. والقفل
        يجمع الدفعة في دورةٍ واحدة — ما يصل خلالها تلتقطه التالية. */
     c.executionCtx.waitUntil(
-      syncComments(c.env, { budget: INBOX_BUDGET.webhook, skipIfRunningWithinMs: 45_000 }).catch(() => {}),
+      syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }).catch(() => {}),
     );
   }
   return c.text('ok', 200);
