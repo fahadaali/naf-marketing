@@ -40,6 +40,14 @@ function decodeCid(cid: string): { postId: string; accountId: string; commentId:
   return { postId: parts[0], accountId: parts[1], commentId: parts[2] };
 }
 
+/** وقتٌ معلن أو `null` — لا «الآن» مكان الغائب: وقتٌ مخترعٌ يجعل كل رسالةٍ أحدث مما قبلها. */
+function isoOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  const d = Number.isFinite(n) && n > 1e9 && n < 1e11 ? new Date(n * 1000) : new Date(v as string);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function toIso(v: unknown): string {
   if (v == null) return new Date().toISOString();
   const n = Number(v);
@@ -49,35 +57,218 @@ function toIso(v: unknown): string {
 
 export type SocialApiAccount = { id: string; platform: string; name: string };
 
+/* ═══ ميزانيةُ النداءات ═══
+
+   عاملُ كلاودفلير يُحدّ بعدد الطلبات الخارجية في الاستدعاء الواحد: خمسون
+   في الخطة المجانية. والمزامنة كانت تنادي منشوراً منشوراً بلا حدّ، فإذا
+   بلغ الاستدعاء حدّه سقط كل نداءٍ بعده بخطأ «Too many subrequests» —
+   وكلُّها محاطةٌ بـ`catch` صامت. فيصل من الصندوق ما سبق الحدّ ويغيب ما بعده،
+   ويتبدّل الغائب من ساعةٍ إلى ساعة بحسب ما سبقه من مهام: تعليقاتٌ لا تظهر
+   أبداً، وأرقامٌ تظهر مرّةً وتغيب أخرى.
+
+   فكل دورة تحمل ميزانيةً معلومة، وتقف عندها واقفةً لا ساقطة: تحفظ ما جمعت
+   وتقول إنها لم تكمل، وتُكمل الدورةُ التالية من حيث بلغت. */
+
+/** نفدت ميزانية الدورة — ليس عطلاً في المزوّد، فلا يُعرض خطأً. */
+export class BudgetExhausted extends Error {
+  constructor() {
+    super('budget_exhausted');
+    this.name = 'BudgetExhausted';
+  }
+}
+
+/**
+ * عدّادُ نداءات الدورة الواحدة، ومعه سقفُ وقتها. وتقف كذلك حين يطلب المزوّد
+ * التمهّل أو يبلغ الاستدعاء حدّ طلباته — وقفاً تُكمله الدورة التالية، لا عطلاً.
+ */
+export class CallBudget {
+  used = 0;
+  /** سببُ الوقف قبل الحصّة — `null` ما دامت الحصّة وحدها تحكم. */
+  stoppedBy: 'rate_limit' | 'platform_cap' | null = null;
+  constructor(readonly max: number, private readonly deadline: number = Number.POSITIVE_INFINITY) {}
+  get left(): number {
+    if (this.stoppedBy || Date.now() >= this.deadline) return 0;
+    return Math.max(this.max - this.used, 0);
+  }
+  spend(): void {
+    if (this.left <= 0) throw new BudgetExhausted();
+    this.used++;
+  }
+  stop(reason: 'rate_limit' | 'platform_cap'): void {
+    this.stoppedBy = reason;
+  }
+}
+
+/** حدُّ طلبات الاستدعاء في كلاودفلير — نصٌّ إنجليزي يرميه وقتُ التشغيل. */
+function isPlatformCap(err: unknown): boolean {
+  return /too many subrequests|too many api requests by single worker invocation/i.test(String((err as Error)?.message || err));
+}
+
+/** خطأ المزوّد بحالته — كي يُفرَّق «غير مدعوم» (404/405/501) عن العطل. */
+export class SocialApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'SocialApiError';
+  }
+}
+
+/**
+ * مسارٌ لا تدعمه هذه المنصّة أو هذا الحساب — غيابٌ معلوم لا عطل. ويشمل
+ * ٤٠٠ و٤٢٢ لأنه يُستعمل حين تُجرَّب صيغتان لنداءٍ واحد ويُقبل ما أجاب.
+ */
+export function isUnsupported(err: unknown): boolean {
+  return err instanceof SocialApiError && [400, 404, 405, 422, 501].includes(err.status);
+}
+
+/** المسار غير موجودٍ أو غير مدعوم أصلاً — أضيق من `isUnsupported`: طلبٌ مرفوضٌ بمحتواه عطلٌ يُقال. */
+export function isNotFound(err: unknown): boolean {
+  return err instanceof SocialApiError && [404, 405, 501].includes(err.status);
+}
+
 // منفّذ REST مشترك
-async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${apiKey.trim()}`,
-      ...(body ? { 'content-type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown, budget?: CallBudget): Promise<T> {
+  budget?.spend();
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${apiKey.trim()}`,
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (err) {
+    if (budget && isPlatformCap(err)) {
+      budget.stop('platform_cap');
+      throw new BudgetExhausted();
+    }
+    throw err;
+  }
+  // المزوّد يطلب التمهّل: تقف الدورة ولا تُلحّ، وتُكمل التي بعدها
+  if (res.status === 429 && budget) {
+    budget.stop('rate_limit');
+    throw new BudgetExhausted();
+  }
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
   if (res.status === 401 || res.status === 403) {
-    throw new Error(`رمز SocialAPI مرفوض (${res.status}) — تأكد من صحة المفتاح.`);
+    throw new SocialApiError(`رمز SocialAPI مرفوض (${res.status}) — تأكد من صحة المفتاح.`, res.status);
   }
-  if (!res.ok) throw new Error(`SocialAPI ${method} ${path} → ${res.status}: ${data?.message || data?.error || text.slice(0, 160)}`);
+  if (!res.ok) {
+    const detail = data?.message || data?.error?.message || data?.error || text.slice(0, 160);
+    throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status);
+  }
   return data as T;
 }
 
+/* ═══ القوائم صفحاتٌ لا ردٌّ واحد ═══
+
+   كل قائمةٍ في SocialAPI تُردّ صفحةً: `{ data: [...], next_cursor }`، أو
+   `{ data, pagination: { next_cursor } }` في قائمة المنشورات. وتعليقات
+   المنشور تُرتَّب من الأقدم إلى الأحدث بخمسٍ وعشرين في الصفحة — فقراءةُ
+   الصفحة الأولى وحدها، كما كانت، تقرأ أقدم التعليقات وتترك أحدثها أبداً
+   على كل منشورٍ تجاوز الخمسة والعشرين. */
+
+/** مؤشّر الصفحة التالية بأيّ الشكلين جاء — وإلا `null`. */
+export function nextCursor(page: any): string | null {
+  const c = page?.next_cursor ?? page?.pagination?.next_cursor ?? page?.meta?.next_cursor ?? page?.paging?.next_cursor ?? null;
+  return typeof c === 'string' && c.trim() ? c : null;
+}
+
+/** عناصر الصفحة — `data` أولاً ثم الأسماء البديلة، أو الردّ نفسه إن كان مصفوفة. */
+export function itemsOf(page: any, ...keys: string[]): any[] {
+  if (Array.isArray(page)) return page;
+  for (const k of ['data', ...keys]) {
+    const v = page?.[k];
+    if (Array.isArray(v)) return v;
+  }
+  return [];
+}
+
+export type ListResult = {
+  items: any[];
+  /** قُرئت القائمة إلى آخرها — لا حدّ صفحاتٍ ولا ميزانية أوقفها. */
+  complete: boolean;
+  /** وقفت لأن الميزانية نفدت. */
+  exhausted: boolean;
+  /**
+   * من أين تبدأ القراءة التالية: مؤشّرُ آخر صفحةٍ قُرئت إن اكتملت القائمة
+   * (فتُعاد وحدها ويُلحق بها ما جدّ)، أو مؤشّرُ الصفحة التي لم تُقرأ بعدُ
+   * إن وقفت دونها. `null` = من البداية.
+   */
+  resume: string | null;
+};
+
+/** يقرأ قائمةً صفحةً صفحة حتى تنفد أو يبلغ الحدّ — ويحفظ ما جمع إن وقف. */
+export async function sapiList(
+  apiKey: string,
+  path: string,
+  params: Record<string, string | number | undefined | null>,
+  opts: { budget?: CallBudget; maxPages: number; keys?: string[]; startCursor?: string | null },
+): Promise<ListResult> {
+  const items: any[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = opts.startCursor || null;
+  for (let page = 0; page < opts.maxPages; page++) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+    }
+    if (cursor) q.set('cursor', cursor);
+    const qs = q.toString();
+    let data: any;
+    try {
+      data = await sapi<any>(apiKey, 'GET', `${path}${qs ? `?${qs}` : ''}`, undefined, opts.budget);
+    } catch (err) {
+      if (err instanceof BudgetExhausted) return { items, complete: false, exhausted: true, resume: cursor };
+      throw err;
+    }
+    items.push(...itemsOf(data, ...(opts.keys ?? [])));
+    const next = nextCursor(data);
+    // مؤشّرٌ يتكرّر حلقةٌ لا صفحة — تُقطع
+    if (!next || seen.has(next) || next === cursor) return { items, complete: true, exhausted: false, resume: cursor };
+    seen.add(next);
+    cursor = next;
+  }
+  return { items, complete: false, exhausted: false, resume: cursor };
+}
+
 // جلب الحسابات المربوطة (للربط بمنصات المنصة)
-export async function listSocialApiAccounts(apiKey: string): Promise<SocialApiAccount[]> {
-  const data = await sapi<any>(apiKey, 'GET', EP.accounts);
+export async function listSocialApiAccounts(apiKey: string, budget?: CallBudget): Promise<SocialApiAccount[]> {
+  return (await listSocialApiAccountsDetailed(apiKey, budget)).map(({ id, platform, name }) => ({ id, platform, name }));
+}
+
+/** الحساب ومعه ما يُعرف به صاحبه على منصّته — لتمييز ردودنا عن ردود الناس. */
+export type SocialApiOwnedAccount = SocialApiAccount & { ownerKeys: string[] };
+
+/** يوحّد معرّفاً أو اسماً للمقارنة: بلا مسافاتٍ طرفية ولا «@» ولا فرق حروف. */
+export function normKey(v: unknown): string {
+  return String(v ?? '').trim().toLowerCase().replace(/^@/, '');
+}
+
+export async function listSocialApiAccountsDetailed(apiKey: string, budget?: CallBudget): Promise<SocialApiOwnedAccount[]> {
+  const data = await sapi<any>(apiKey, 'GET', EP.accounts, undefined, budget);
   const list: any[] = data?.accounts || data?.data || (Array.isArray(data) ? data : []);
-  return list.map((a) => ({
-    id: String(a.id || a.account_id || a.accountId),
-    platform: String(a.platform || a.network || a.service || ''),
-    name: String(a.name || a.username || a.display_name || a.handle || a.id),
-  }));
+  return list.map((a) => {
+    const meta = a?.metadata && typeof a.metadata === 'object' ? a.metadata : {};
+    /* ما يُعرف به الحساب على منصّته: معرّفُه هناك واسمُه ومعرّفُ صفحته أو
+       قناته. والاسم الظاهر وحده لا يُقبل إن قصُر — «ناف» تطابق من ليس نحن. */
+    const keys = [
+      a.platform_user_id, a.platform_account_id, a.platform_id, a.external_id, a.user_id, a.page_id,
+      a.username, a.handle, a.name, a.display_name,
+      meta.username, meta.name, meta.page_id, meta.page_name, meta.user_id, meta.channel_id, meta.channel_title, meta.ig_user_id,
+    ]
+      .map(normKey)
+      .filter((k) => k.length >= 3);
+    return {
+      id: String(a.id || a.account_id || a.accountId),
+      platform: String(a.platform || a.network || a.service || ''),
+      name: String(a.name || a.username || a.display_name || a.handle || a.id),
+      ownerKeys: [...new Set(keys)],
+    };
+  });
 }
 
 // منشور SocialAPI مع مقاييسه — سطر لكل وجهة نشر (target) لأن المنشور الواحد قد يُنشر لعدّة منصات
@@ -88,9 +279,14 @@ export type SocialApiPost = {
   accountId: string;
   title: string;
   sentAt: string | null;
-  reach: number;
-  impressions: number;
-  engagement: number;
+  /** `null` = لم يُعلنه المزوّد — لا صفر. */
+  reach: number | null;
+  impressions: number | null;
+  engagement: number | null;
+  /** أعلن المزوّد أرقاماً لهذه الوجهة أصلاً — وإلا فغيابٌ لا أصفار. */
+  hasMetrics: boolean;
+  /** متى زامنها المزوّد من المنصّة، إن أعلنه. */
+  metricsSyncedAt: string | null;
   externalUrl: string | null;
   metrics: any[];
 };
@@ -114,78 +310,278 @@ function buildPermalink(platform: string, id: string): string | null {
 
 // يجبر SocialAPI على مزامنة كل فيديوهات قنوات يوتيوب المربوطة (المسار الوحيد الموثّق
 // للمزامنة القسرية للمحتوى القديم). أفضل جهد — نتجاهل أي فشل.
-export async function syncYouTubePosts(apiKey: string): Promise<void> {
-  let accts: SocialApiAccount[] = [];
-  try { accts = await listSocialApiAccounts(apiKey); } catch { return; }
+// والحسابات تُمرَّر إن سبق جلبُها في الدورة نفسها — نداءٌ واحد لا اثنان.
+export async function syncYouTubePosts(apiKey: string, accounts?: SocialApiAccount[], budget?: CallBudget): Promise<void> {
+  let accts: SocialApiAccount[] = accounts ?? [];
+  if (!accounts) {
+    try { accts = await listSocialApiAccounts(apiKey, budget); } catch { return; }
+  }
   for (const a of accts) {
     if (a.platform !== 'youtube') continue;
-    try { await sapi(apiKey, 'POST', `/platforms/youtube/accounts/${a.id}/sync`); } catch { /* أفضل جهد */ }
+    try { await sapi(apiKey, 'POST', `/platforms/youtube/accounts/${a.id}/sync`, undefined, budget); } catch { /* أفضل جهد */ }
   }
 }
 
-// يجلب كل المنشورات: المقاييس والرابط والمنصّة كلها داخل targets[] لكل منشور
-export async function listSocialApiPosts(apiKey: string): Promise<SocialApiPost[]> {
-  const data = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
-  const list: any[] = data?.data || data?.posts || (Array.isArray(data) ? data : []);
+/** منشورٌ ووجهاته كما يردّها `/posts` — سطرٌ لكل وجهة. */
+export function mapPublishedPost(p: any): SocialApiPost[] {
+  const postUuid = String(p?.id || p?.post_id || '');
+  const title = String(p?.text || p?.caption || '').slice(0, 140);
+  const targets: any[] = Array.isArray(p?.targets) ? p.targets : [];
   const out: SocialApiPost[] = [];
-  for (const p of list) {
-    const postUuid = String(p.id || p.post_id || '');
-    const title = (p.text || p.caption || '').slice(0, 140);
-    const targets: any[] = Array.isArray(p.targets) ? p.targets : [];
-    if (!targets.length) continue; // لا وجهة نشر → لا مقاييس
-    for (const t of targets) {
-      const platformPostId = String(t.platform_post_id || t.platform_id || '');
-      const mapped = mapMetrics(t.metrics || {});
-      out.push({
-        id: platformPostId || `${postUuid}:${t.platform || ''}`,
-        postUuid,
-        platform: String(t.platform || ''),
-        accountId: String(t.account_id || ''),
-        title,
-        sentAt: t.published_at || p.published_at || p.created_at || null,
-        reach: mapped.reach,
-        impressions: mapped.impressions,
-        engagement: mapped.engagement,
-        externalUrl: t.permalink || t.url || buildPermalink(String(t.platform || ''), platformPostId),
-        metrics: mapped.raw,
-      });
-    }
+  for (const t of targets) {
+    const platformPostId = String(t.platform_post_id || t.platform_id || '');
+    const mapped = mapMetrics(t.metrics ?? null);
+    out.push({
+      id: platformPostId || `${postUuid}:${t.platform || ''}`,
+      postUuid,
+      platform: String(t.platform || ''),
+      accountId: String(t.account_id || ''),
+      title,
+      // وقتٌ يُقرأ أو لا شيء — رقمٌ خامٌ يُسقط كل مقارنةٍ بعده (`isoOrNull`)
+      sentAt: isoOrNull(t.published_at || p.published_at || p.created_at),
+      reach: mapped.reach,
+      impressions: mapped.impressions,
+      engagement: mapped.engagement,
+      hasMetrics: mapped.present,
+      metricsSyncedAt: mapped.syncedAt,
+      externalUrl: t.permalink || t.url || buildPermalink(String(t.platform || ''), platformPostId),
+      metrics: mapped.raw,
+    });
   }
   return out;
 }
 
-// يطابق مقاييس SocialAPI على reach/impressions/engagement، ويستخرج كل المقاييس الخام.
-// يدعم: كائن {likes, comments, …, extra:{view_count}}، أو مصفوفة [{name,value}].
-const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets']);
-export function mapMetrics(metricsObj: any): { reach: number; impressions: number; engagement: number; raw: any[] } {
-  const entries: [string, number][] = [];
+/**
+ * ما نُشر عبر SocialAPI — صفحةً صفحة.
+ *
+ * و`/posts` قراءةٌ من قاعدة المزوّد لا من المنصّات: فيه ما نُشر عبره وحده،
+ * بمقاييسَ حُفظت آخر مرّةٍ حُدّثت. وما نُشر من تطبيق المنصّة مباشرةً ليس
+ * فيه أصلاً — ذاك يُقرأ من سجلّ الحساب (`listAccountPosts`).
+ */
+export async function listSocialApiPostsPaged(
+  apiKey: string,
+  opts: { budget?: CallBudget; maxPages: number },
+): Promise<{ posts: SocialApiPost[]; complete: boolean; exhausted: boolean }> {
+  const r = await sapiList(apiKey, EP.posts, { limit: 100, sort: 'created_desc' }, { budget: opts.budget, maxPages: opts.maxPages, keys: ['posts'] });
+  return { posts: r.items.flatMap(mapPublishedPost), complete: r.complete, exhausted: r.exhausted };
+}
+
+/**
+ * أرقامٌ حيّة لمنشورٍ نُشر عبر SocialAPI — سطرٌ لكل وجهة.
+ *
+ * هذا وحده ما يطلب الأرقام من المنصّات نفسها في لحظتها؛ و`/posts` يردّ ما
+ * حُفظ. وكانت المنصة لا تناديه إطلاقاً لمزوّد SocialAPI، فبقيت أرقامُ كل
+ * منشورٍ على ما كانت عليه لحظة نشره — أصفاراً في الغالب.
+ */
+export async function fetchPostMetrics(
+  apiKey: string,
+  postUuid: string,
+  budget?: CallBudget,
+): Promise<{ platformPostId: string; platform: string; accountId: string; metrics: ReturnType<typeof mapMetrics> }[]> {
+  const data = await sapi<any>(apiKey, 'GET', EP.metrics(postUuid), undefined, budget);
+  let entries: any[] = itemsOf(data, 'targets', 'metrics', 'results');
+  if (!entries.length && data?.data && typeof data.data === 'object' && !Array.isArray(data.data)) {
+    const inner = itemsOf(data.data, 'targets', 'metrics');
+    entries = inner.length ? inner : [data.data];
+  }
+  if (!entries.length && data && typeof data === 'object' && !Array.isArray(data)) entries = [data];
+  return entries.map((e) => ({
+    platformPostId: String(e?.platform_post_id || e?.platform_id || ''),
+    platform: String(e?.platform || ''),
+    accountId: String(e?.account_id || e?.account?.id || ''),
+    metrics: mapMetrics(e?.metrics ?? e),
+  }));
+}
+
+/** منشورٌ من سجلّ الحساب على منصّته — ومنه ما نُشر من خارج المنصة. */
+export type AccountPost = {
+  id: string;
+  platform: string;
+  accountId: string;
+  title: string;
+  sentAt: string | null;
+  externalUrl: string | null;
+  metrics: ReturnType<typeof mapMetrics>;
+};
+
+/** يخرّط منشوراً من `/accounts/{id}/posts` — الحقول بأسمائها المتعدّدة. */
+export function mapAccountPost(p: any, account: SocialApiAccount): AccountPost | null {
+  const id = String(p?.platform_post_id || p?.platform_id || p?.id || '');
+  if (!id) return null;
+  const platform = String(p?.platform || account.platform || '');
+  // المقاييس في كائنٍ واحد إن وُجد، وإلا فالحقول الرقمية على المنشور نفسه
+  const source = p?.metrics ?? p?.engagement ?? p?.stats ?? p?.insights ?? pickMetricFields(p);
+  return {
+    id,
+    platform,
+    accountId: account.id,
+    title: String(p?.text || p?.caption || p?.title || p?.message || '').slice(0, 140),
+    sentAt: isoOrNull(p?.published_at || p?.timestamp || p?.created_at || p?.created_time),
+    externalUrl: p?.permalink || p?.url || p?.link || buildPermalink(platform, id),
+    metrics: mapMetrics(source),
+  };
+}
+
+/** الحقول الرقمية المعروفة على المنشور نفسه — لا معرّفاته ولا أبعاده. */
+function pickMetricFields(p: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!p || typeof p !== 'object') return out;
+  for (const [k, v] of Object.entries(p)) {
+    if (typeof v === 'number' && canonicalMetric(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * منشورات الحساب على منصّته — الأحدث أوّلاً، ومنها ما نُشر من تطبيق المنصّة.
+ * الدورة المعتادة تقرأ صفحتها الأولى وحدها؛ وسحبُ السجلّ يمضي من مؤشّرٍ محفوظ
+ * إلى أقدم منشور، صفحاتٍ في كل دورة، حتى تُقرأ السنوات كلُّها مرّة.
+ */
+export async function listAccountPosts(
+  apiKey: string,
+  account: SocialApiAccount,
+  opts: { budget?: CallBudget; maxPages?: number; startCursor?: string | null } = {},
+): Promise<{ posts: AccountPost[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/posts`, { limit: 50 }, {
+    budget: opts.budget, maxPages: opts.maxPages ?? 1, keys: ['posts', 'media'], startCursor: opts.startCursor,
+  });
+  const posts = r.items.map((p) => mapAccountPost(p, account)).filter((p): p is AccountPost => p !== null);
+  return { posts, complete: r.complete, exhausted: r.exhausted, resume: r.resume };
+}
+
+/* ═══ تخريط المقاييس ═══
+
+   المزوّد يوحّد أربعةً في المستوى الأعلى — الإعجاب والتعليق والمشاركة
+   والحفظ — ويضع ما عداها في `extra` بأسماء المنصّة نفسها: `view_count`
+   لتيك توك، و`impressionCount` للينكدإن، و`reach` لإنستغرام. وقد يردّ
+   الأربعة بلاحقة (`like_count`، `comments_count`).
+
+   وثلاث قواعد:
+   ١) الاسم يُردّ إلى أصله قبل الجمع — `like_count` إعجابٌ كـ`likes`. وكان
+      التطابق حرفياً، فكل مقياسٍ بلاحقةٍ خارج التفاعل: صفر.
+   ٢) ما في `extra` لا يُضاف إلى ما في المستوى الأعلى باسمه الموحّد — وإلا
+      عُدّ الإعجاب مرّتين.
+   ٣) الغياب ليس صفراً: ما لم يُعلَن يعود `null`، ومنشورٌ لم تُعلَن له أرقام
+      أصلاً `present: false` — فلا يدخل مجموعاً ولا متوسّطاً. */
+
+const METRIC_ALIASES: Record<string, string> = {
+  like: 'likes', like_count: 'likes', likes_count: 'likes', likecount: 'likes', favorite_count: 'favorites',
+  favorites: 'favorites', favourites: 'favorites',
+  reaction_count: 'reactions', reactions_count: 'reactions', reactioncount: 'reactions',
+  comment: 'comments', comment_count: 'comments', comments_count: 'comments', commentcount: 'comments',
+  share: 'shares', share_count: 'shares', shares_count: 'shares', sharecount: 'shares',
+  repost_count: 'reposts', reposts_count: 'reposts', retweet_count: 'retweets', quote_count: 'quotes',
+  save: 'saves', saved: 'saves', save_count: 'saves', saves_count: 'saves', bookmark_count: 'bookmarks',
+  click: 'clicks', click_count: 'clicks', clicks_count: 'clicks', clickcount: 'clicks',
+  follow_count: 'follows',
+  view: 'views', view_count: 'views', views_count: 'views', viewcount: 'views', video_views: 'views', play_count: 'views', plays: 'views',
+  impression_count: 'impressions', impressioncount: 'impressions',
+  reach_count: 'reach',
+};
+
+/** مقاييس التفاعل — تُجمع في «التفاعل». */
+const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets', 'bookmarks']);
+
+/** الاسم الموحّد لمقياس — أو `null` لما ليس مقياساً معروفاً. */
+function canonicalMetric(key: string): string | null {
+  const k = METRIC_ALIASES[key] ?? key;
+  if (ENGAGE.has(k) || k === 'reach' || k === 'impressions' || k === 'views') return k;
+  return null;
+}
+
+/** أسماءٌ لا تُعدّ ظهوراً ولا وصولاً وإن حوت الكلمة: مدّةٌ ونسبةٌ ومتوسّط. */
+function isRatioLike(key: string): boolean {
+  return /rate|ratio|percent|avg|average|duration|time|_ms$|seconds/.test(key);
+}
+
+export function mapMetrics(metricsObj: any): {
+  reach: number | null;
+  impressions: number | null;
+  engagement: number | null;
+  raw: any[];
+  /** أعلن المزوّد أرقاماً أصلاً — لا صفراً افتراضياً عن غياب. */
+  present: boolean;
+  /** متى زامن المزوّد هذه الأرقام من المنصّة (`metrics_synced_at`) إن أعلنه. */
+  syncedAt: string | null;
+} {
+  const top = new Map<string, number>();
+  const nested = new Map<string, number>();
+  // الاسم كما أرسله المزوّد — يُحفظ مع الموحَّد فلا يضيع أصلُه
+  const original = new Map<string, string>();
+  let syncedAt: unknown;
+
+  const put = (into: Map<string, number>, key: string, value: unknown) => {
+    const n = typeof value === 'number' ? value : Number(value);
+    // معرّفٌ أو ترتيبٌ رقميّ ليس مقياساً — ولا يجعل منشوراً بلا أرقام «مقيساً»
+    if (!key || !Number.isFinite(n) || key === 'id' || /_id$|^index$|position|version/.test(key)) return;
+    const k = METRIC_ALIASES[key] ?? key;
+    if (!into.has(k)) into.set(k, n);
+    if (!original.has(k)) original.set(k, key);
+  };
+
   if (Array.isArray(metricsObj)) {
-    for (const m of metricsObj) entries.push([String(m.type || m.name || '').toLowerCase(), Number(m.value || 0)]);
+    for (const m of metricsObj) put(top, String(m?.type || m?.name || '').toLowerCase(), m?.value);
   } else if (metricsObj && typeof metricsObj === 'object') {
+    if ('metrics_synced_at' in metricsObj) syncedAt = metricsObj.metrics_synced_at;
     // نتعمّق في الكائنات المتداخلة (مثل extra:{view_count}) لتسطيح كل المقاييس الرقمية
     const walk = (o: any) => {
       for (const [k, v] of Object.entries(o)) {
-        if (v && typeof v === 'object') walk(v);
-        else if (typeof v === 'number') entries.push([k.toLowerCase(), v]);
+        if (v && typeof v === 'object' && !Array.isArray(v)) walk(v);
+        else if (typeof v === 'number') put(nested, k.toLowerCase(), v);
       }
     };
-    walk(metricsObj);
+    // المستوى الأعلى أوّلاً ثم المتداخل — فيُحفظ للاسم الموحَّد أصلُه من حيث أُخذت قيمته
+    for (const [k, v] of Object.entries(metricsObj)) if (typeof v === 'number') put(top, k.toLowerCase(), v);
+    for (const v of Object.values(metricsObj)) if (v && typeof v === 'object' && !Array.isArray(v)) walk(v);
   }
-  let reach = 0, impressions = 0, views = 0, engagement = 0;
+
+  // المستوى الأعلى يسبق: ما في `extra` يُكمل ولا يُكرّر
+  const entries = new Map(top);
+  for (const [k, v] of nested) if (!entries.has(k)) entries.set(k, v);
+
   const raw: any[] = [];
   for (const [key, value] of entries) {
-    if (!Number.isFinite(value)) continue;
-    raw.push({ type: key, name: key, value, unit: key.includes('rate') ? 'percentage' : 'count' });
-    if (key.includes('reach')) reach += value;
-    else if (key.includes('impression')) impressions += value;
-    else if (key.includes('view')) views += value;
-    else if (ENGAGE.has(key)) engagement += value;
+    raw.push({ type: key, name: original.get(key) ?? key, value, unit: key.includes('rate') ? 'percentage' : 'count' });
   }
-  if (!impressions) impressions = views || reach;
-  return { reach, impressions, engagement, raw };
+
+  /* الوصول والظهور والمشاهدات: الاسم الصريح أوّلاً، وإلا أكبرُ ما حمل الكلمة.
+     الجمعُ على كل ما حوى «impression» كان يضمّ الظهور الكلّي والفريد
+     والمدفوع والعضوي في رقمٍ واحد — أضعافَ الحقيقة. */
+  const pick = (exact: string, word: string): number | null => {
+    if (entries.has(exact)) return entries.get(exact) as number;
+    let best: number | null = null;
+    for (const [k, v] of entries) {
+      // «reviews» تحوي «view» وليست مشاهدة
+      if (k.includes(word) && !isRatioLike(k) && !k.includes('review') && (best === null || v > best)) best = v;
+    }
+    return best;
+  };
+  const reach = pick('reach', 'reach');
+  const views = pick('views', 'view');
+  const impressions = pick('impressions', 'impression') ?? views ?? reach;
+
+  let engagement: number | null = null;
+  for (const [k, v] of entries) {
+    if (ENGAGE.has(k)) engagement = (engagement ?? 0) + v;
+  }
+
+  /* مزوّدٌ صرّح بأنه لم يُزامن أرقام هذا المنشور بعد (`metrics_synced_at: null`)
+     وأعاد أصفاراً: أصفارُه غيابٌ لا قياس. */
+  const allZero = raw.every((r) => r.value === 0);
+  const present = raw.length > 0 && !(syncedAt === null && allZero);
+  const stamp = typeof syncedAt === 'string' && syncedAt ? toIso(syncedAt) : null;
+
+  if (!present) return { reach: null, impressions: null, engagement: null, raw, present, syncedAt: stamp };
+  return { reach, impressions, engagement, raw, present, syncedAt: stamp };
 }
 
-// عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته
+/* ═══ صندوق الوارد ═══
+
+   كل ما في الصندوق «تفاعل» عند المزوّد: معرّفٌ ثابت ونوعٌ ومنصّةٌ وكاتبٌ
+   ونصٌّ ووقت. وهذه الدوال تقرأه صفحاتٍ بميزانية وتخرّطه — ولا تكتب شيئاً:
+   الكتابة وتتبّع ما قُرئ في `services/commentsSync.ts`. */
+
+/** عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته */
 export type InboxItem = {
   id: string;
   platform: string;
@@ -195,164 +591,388 @@ export type InboxItem = {
   createdAt: string;
   capabilities?: Record<string, boolean>;
   isHidden?: boolean;
-  repliedBody?: string | null; // رد موجود مسبقاً على المنصة (للتقييمات)
+  repliedBody?: string | null; // ردٌّ موجود على المنصة كُتب من خارج هذه المنصة
+  repliedAt?: string | null; // ووقته إن أعلنه المزوّد
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
+  /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
+  interactionId?: string | null;
 };
 
-// يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور.
-// خطوتان وفق توثيق SocialAPI:
-//   1) GET /inbox/comments        → قائمة المنشورات التي عليها تعليقات (InboxPostRow): {id, account_id, platform, ...}
-//   2) GET /inbox/comments/{postId}?account_id=…  → تعليقات ذلك المنشور فعلاً (CommentWithCapabilities):
-//      {text, author_name, author_username, platform_id, created_at, platform, ...}
-export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
-  const out: InboxItem[] = [];
+/** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */
+export type InboxPost = {
+  postId: string;
+  accountId: string;
+  platform: string;
+  /** بصمةُ نشاطه — تتغيّر بتعليقٍ جديد، فيُعاد جلبُ تعليقاته. فارغةٌ إن لم يُعلِن المزوّد شيئاً. */
+  signature: string;
+};
 
-  // نجمع المنشورات المرشّحة من مصدرين لتغطية كل المنصّات:
-  //   أ) /inbox/comments  → المنشورات التي رصد SocialAPI عليها تعليقات.
-  //   ب) /posts (targets) → كل منشوراتنا المنشورة (قد تحمل تعليقات لا تظهر في الصندوق بعد).
-  // المفتاح "postId|accountId" لمنع التكرار.
-  const candidates = new Map<string, { postId: string; accountId: string; platform: string }>();
-  const addCand = (postId: string, accountId: string, platform: string) => {
-    if (!postId) return;
-    const key = `${postId}|${accountId}`;
-    if (!candidates.has(key)) candidates.set(key, { postId, accountId, platform });
+export function mapInboxPost(row: any): InboxPost | null {
+  const postId = String(row?.id || row?.post_id || row?.inbox_post_id || '');
+  if (!postId) return null;
+  const count = row?.comment_count ?? row?.comments_count ?? row?.total_comments ?? row?.count ?? '';
+  const touched = row?.last_comment_at ?? row?.updated_at ?? row?.last_activity_at ?? '';
+  return {
+    postId,
+    accountId: String(row?.account_id || row?.account?.id || ''),
+    platform: String(row?.platform || row?.account?.platform || 'unknown'),
+    signature: count === '' && touched === '' ? '' : `${count}|${touched}`,
   };
+}
 
-  try {
-    const data = await sapi<any>(apiKey, 'GET', EP.comments);
-    const rows: any[] = data?.data || data?.comments || data?.posts || (Array.isArray(data) ? data : []);
-    for (const row of rows) {
-      addCand(
-        String(row.id || row.post_id || ''),
-        String(row.account_id || row.account?.id || ''),
-        String(row.platform || row.account?.platform || 'unknown'),
-      );
-    }
-  } catch { /* لا منشورات في الصندوق */ }
+/**
+ * المنشورات التي عليها تعليقات — الأحدث نشاطاً أوّلاً، مئةٌ في الصفحة. والدورة
+ * المعتادة تقرأ أوّلها؛ وسحبُ السجلّ يمضي من مؤشّرٍ محفوظ إلى آخرها.
+ */
+export async function listInboxPosts(
+  apiKey: string,
+  opts: { budget?: CallBudget; maxPages: number; startCursor?: string | null },
+): Promise<{ posts: InboxPost[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(apiKey, EP.comments, { limit: 100 }, {
+    budget: opts.budget, maxPages: opts.maxPages, keys: ['posts', 'comments'], startCursor: opts.startCursor,
+  });
+  const posts = r.items.map(mapInboxPost).filter((p): p is InboxPost => p !== null);
+  return { posts, complete: r.complete, exhausted: r.exhausted, resume: r.resume };
+}
 
-  try {
-    const pData = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
-    const posts: any[] = pData?.data || pData?.posts || (Array.isArray(pData) ? pData : []);
-    for (const p of posts) {
-      for (const t of (Array.isArray(p.targets) ? p.targets : [])) {
-        addCand(String(t.platform_post_id || t.platform_id || ''), String(t.account_id || ''), String(t.platform || 'unknown'));
-      }
-    }
-  } catch { /* تعذّر جلب المنشورات */ }
+/** تعليقٌ كما يردّه المزوّد، بما يلزم للكتابة ولتمييز الردود. */
+export type SapiComment = {
+  /** معرّف التعليق المستعمل في ترميز السجلّ — بترتيب الأسبقية القديم نفسه كي لا يتكرّر سجلّ. */
+  commentId: string;
+  /** معرّف المزوّد `sapi_cmt_…` إن وُجد — به تُقرأ الردود في المسار الآخر. */
+  interactionId: string;
+  body: string;
+  authorName: string;
+  createdAt: string;
+  capabilities?: Record<string, boolean>;
+  isHidden: boolean;
+  /** عدد الردود على المنصة كما يعلنه المزوّد — `null` إن لم يُعلنه. */
+  replyCount: number | null;
+  /** ردودٌ مضمّنة في التعليق نفسه إن جاءت معه. */
+  replies: any[] | null;
+  /** ردٌّ على تعليقٍ آخر لا تعليقٌ مستقلّ. */
+  parentId: string | null;
+  raw: any;
+};
 
-  for (const { postId, accountId, platform: rowPlatform } of candidates.values()) {
+function textOf(c: any): string {
+  if (typeof c?.content === 'string') return c.content;
+  return String(c?.text || c?.content?.text || c?.body || c?.message || c?.comment || '');
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function mapComment(c: any): SapiComment {
+  const embedded = Array.isArray(c?.replies) ? c.replies : Array.isArray(c?.replies?.data) ? c.replies.data : null;
+  const rawId = String(c?.id ?? '');
+  return {
+    commentId: String(c?.platform_id || c?.id || c?.comment_id || ''),
+    interactionId: rawId.startsWith('sapi_') ? rawId : String(c?.interaction_id || ''),
+    body: textOf(c),
+    authorName: c?.author_name || c?.author_username || c?.author?.name || c?.author?.username || 'مستخدم',
+    createdAt: toIso(c?.created_at || c?.created || c?.timestamp),
+    capabilities: c?.capabilities && typeof c.capabilities === 'object' ? c.capabilities : undefined,
+    isHidden: !!c?.is_hidden,
+    replyCount: numOrNull(c?.reply_count ?? c?.replies_count ?? c?.replies?.count ?? c?.replies?.total_count ?? c?.replies?.total),
+    replies: embedded,
+    parentId: (() => {
+      const p = c?.parent_id ?? c?.parent_comment_id ?? c?.in_reply_to ?? c?.parent?.id ?? null;
+      return p === null || p === undefined || p === '' ? null : String(p);
+    })(),
+    raw: c,
+  };
+}
+
+/**
+ * أمِن حسابنا هذا التفاعل؟
+ *
+ * العلامة الصريحة أولاً إن أعلنها المزوّد، ثم المطابقة بمعرّف الكاتب أو اسمه
+ * مع ما يُعرف به الحساب. وما لم تثبت نسبتُه إلينا فليس منّا: تعليقُ عميلٍ
+ * يُحسب ردّاً منّا يسقط من «بلا رد» ولا يجيبه أحد — وهذا أسوأ الخطأين.
+ */
+export function isOwnAuthor(c: any, ownerKeys: Set<string>): boolean {
+  const flags = [c?.is_owner, c?.is_own, c?.is_self, c?.is_mine, c?.from_owner, c?.from_me, c?.is_from_me, c?.is_page_owner,
+    c?.author?.is_owner, c?.author?.is_self, c?.author?.is_me];
+  if (flags.some((f) => f === true)) return true;
+  const dir = normKey(c?.direction);
+  if (dir === 'outgoing' || dir === 'outbound' || dir === 'sent') return true;
+  if (!ownerKeys.size) return false;
+  const a = c?.author && typeof c.author === 'object' ? c.author : {};
+  const candidates = [a.id, a.platform_id, a.username, a.handle, a.name, c?.author_id, c?.author_username, c?.author_name, c?.username, c?.from?.id, c?.from?.name]
+    .map(normKey)
+    .filter((k) => k.length >= 3);
+  return candidates.some((k) => ownerKeys.has(k));
+}
+
+/**
+ * تعليقات منشور — من الأقدم إلى الأحدث، فتُقرأ الصفحات إلى آخرها كي لا يضيع
+ * أحدثُها. ومنشورٌ قُرئ من قبل يُستأنف من آخر صفحةٍ بلغها لا من أوّله.
+ */
+export async function listPostComments(
+  apiKey: string,
+  postId: string,
+  accountId: string,
+  opts: { budget?: CallBudget; maxPages: number; startCursor?: string | null },
+): Promise<{ comments: SapiComment[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(
+    apiKey,
+    EP.postComments(postId),
+    { account_id: accountId || undefined, limit: 100 },
+    { budget: opts.budget, maxPages: opts.maxPages, keys: ['comments'], startCursor: opts.startCursor },
+  );
+  return { comments: r.items.map(mapComment), complete: r.complete, exhausted: r.exhausted, resume: r.resume };
+}
+
+export type RepliesPath = 'inbox' | 'interactions';
+
+/**
+ * ردود تعليقٍ على المنصة.
+ *
+ * مساران موثّقان عند المزوّد: `‎/inbox/comments/{post}/{comment}/replies` في
+ * عقدته الأحدث، و`‎/accounts/{account}/interactions/{sapi_cmt}/replies` في
+ * الأقدم. يُجرّب المسار الذي نجح آخر مرّة أوّلاً، ويُعاد أيّهما أجاب — أو
+ * `null` إن لم يُجب أيٌّ منهما لهذه المنصّة.
+ */
+export async function listCommentReplies(
+  apiKey: string,
+  args: { postId: string; accountId: string; commentId: string; interactionId: string },
+  opts: { budget?: CallBudget; prefer?: RepliesPath | null },
+): Promise<{ replies: any[]; path: RepliesPath | null }> {
+  const order: RepliesPath[] = opts.prefer === 'interactions' ? ['interactions', 'inbox'] : ['inbox', 'interactions'];
+  for (const path of order) {
+    if (path === 'interactions' && (!args.interactionId || !args.accountId)) continue;
+    const url = path === 'inbox'
+      ? `${EP.postComments(args.postId)}/${encodeURIComponent(args.commentId)}/replies`
+      : `/accounts/${encodeURIComponent(args.accountId)}/interactions/${encodeURIComponent(args.interactionId)}/replies`;
     try {
-      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
-      const cData = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
-      const comments: any[] = cData?.data || cData?.comments || (Array.isArray(cData) ? cData : []);
-      for (const c of comments) {
-        const commentId = String(c.platform_id || c.id || c.comment_id || '');
-        const body = c.text || c.body || c.message || c.comment || '';
-        if (!commentId && !body) continue;
-        out.push({
-          // نُرمّز (المنشور|الحساب|التعليق) كي يتوفّر للرد/الإشراف لاحقاً كل ما يحتاجه SocialAPI
-          id: encodeCid(postId, accountId, commentId),
-          platform: String(c.platform || rowPlatform),
-          kind: 'comment',
-          authorName: c.author_name || c.author_username || c.author?.name || c.author?.username || 'مستخدم',
-          body,
-          createdAt: toIso(c.created_at || c.created || c.timestamp),
-          capabilities: (c.capabilities && typeof c.capabilities === 'object') ? c.capabilities : undefined,
-          isHidden: !!c.is_hidden,
-        });
-      }
-    } catch { /* تعذّر جلب تعليقات هذا المنشور */ }
+      const r = await sapiList(apiKey, url, { account_id: path === 'inbox' ? args.accountId || undefined : undefined, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['replies', 'comments'] });
+      if (r.exhausted) throw new BudgetExhausted();
+      return { replies: r.items, path };
+    } catch (err) {
+      if (isUnsupported(err)) continue;
+      throw err;
+    }
   }
+  return { replies: [], path: null };
+}
 
-  // المراجعات (Google Business/Facebook) — خطوتان: ملخّص لكل حساب ثم مراجعات كل حساب.
-  // نُرمّز المعرّف "rv:{accountId}:{reviewId}" لتوجيه الرد لاحقاً.
-  try {
-    const rv = await sapi<any>(apiKey, 'GET', EP.reviews);
-    const accounts: any[] = rv?.data || rv?.reviews || (Array.isArray(rv) ? rv : []);
-    for (const acc of accounts) {
-      const accountId = String(acc.account_id || acc.id || '');
-      const accPlatform = String(acc.platform || 'google');
-      if (!accountId) continue;
-      let list: any[] = [];
-      try {
-        const detail = await sapi<any>(apiKey, 'GET', EP.reviewsForAccount(accountId));
-        list = detail?.data || detail?.reviews || (Array.isArray(detail) ? detail : []);
-      } catch { list = []; }
-      for (const r of list) {
-        const stars = r.rating ?? r.star_rating ?? r.stars;
-        const body = r.text || r.comment || r.content || r.body || '';
-        const rid = String(r.id || r.review_id || r.platform_id || '');
-        // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
-        if (!body.trim()) continue;
-        if (!rid) continue;
-        const starNum = Number(stars);
-        out.push({
-          id: `rv:${accountId}:${rid}`,
-          platform: accPlatform,
-          kind: 'review',
-          // الاسم نظيف — التقييم يُخزَّن رقماً في حقل مستقل ويُعرض نجوماً في الواجهة
-          authorName: r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة',
-          body,
-          createdAt: toIso(r.created_at || r.updated_at || r.created || r.timestamp),
-          repliedBody: r.reply?.text || null,
-          rating: Number.isFinite(starNum) && starNum > 0 ? starNum : null,
-        });
-      }
-    }
-  } catch { /* لا مراجعات */ }
-
-  // نجلب الحسابات مرة واحدة للرسائل الخاصة والإشارات (كلاهما لكل حساب)
-  let accts: SocialApiAccount[] = [];
-  try { accts = await listSocialApiAccounts(apiKey); } catch { accts = []; }
-
-  // الرسائل الخاصة (DMs) — لكل حساب: GET /inbox/conversations?account_id=&platform=
-  // نُرمّز "dm:{conversationId}:{accountId}" لتوجيه الرد عبر /inbox/conversations/{id}/messages
-  for (const acc of accts) {
-    try {
-      const q = `?account_id=${encodeURIComponent(acc.id)}${acc.platform ? `&platform=${encodeURIComponent(acc.platform)}` : ''}&limit=50`;
-      const data = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
-      const convos: any[] = data?.data || data?.conversations || (Array.isArray(data) ? data : []);
-      for (const cv of convos || []) {
-        const convId = String(cv.id || cv.conversation_id || '');
-        if (!convId) continue;
-        out.push({
-          id: `dm:${convId}:${acc.id}`,
-          platform: String(cv.platform || acc.platform || 'unknown'),
-          kind: 'dm',
-          authorName: cv.participant_name || cv.participant?.name || cv.from || 'مستخدم',
-          body: cv.last_message || cv.last_message_text || '',
-          createdAt: toIso(cv.last_message_at || cv.updated_at || cv.created_at),
-        });
-      }
-    } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها */ }
+/** أحدثُ ردٍّ من حسابنا بين ردود تعليق — نصُّه ووقته ومعرّفه على المنصة. */
+export function ownReply(replies: any[], ownerKeys: Set<string>): { text: string; at: string | null; id: string | null } | null {
+  let best: { text: string; at: string | null; id: string | null; t: number } | null = null;
+  for (const r of replies) {
+    if (!isOwnAuthor(r, ownerKeys)) continue;
+    const atRaw = r?.created_at || r?.created || r?.timestamp || null;
+    const at = atRaw ? toIso(atRaw) : null;
+    const t = at ? new Date(at).getTime() : 0;
+    if (!best || t >= best.t) best = { text: textOf(r), at, id: r?.platform_id || r?.id ? String(r.platform_id || r.id) : null, t };
   }
+  return best ? { text: best.text, at: best.at, id: best.id } : null;
+}
 
-  // الإشارات (Mentions) — تُطلب لكل حساب مع account_id (النداء العام يعيد 404).
-  // تلقائية بالكامل: نُجرّبها على كل الحسابات ونتجاهل غير الداعمة بصمت (404/501).
-  // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
-  for (const acc of accts) {
+/** يخرّط مراجعةً — والمعرّف بالترميز القديم نفسه «rv:{حساب}:{مراجعة}» كي لا تتكرّر. */
+export function mapReview(r: any, fallbackAccountId: string, fallbackPlatform: string): InboxItem | null {
+  const body = String(r?.text || r?.comment || (typeof r?.content === 'string' ? r.content : r?.content?.text) || r?.body || '');
+  const rid = String(r?.id || r?.review_id || r?.platform_id || '');
+  // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
+  if (!body.trim() || !rid) return null;
+  const accountId = String(r?.account_id || r?.account?.id || fallbackAccountId || '');
+  const stars = Number(r?.rating ?? r?.star_rating ?? r?.stars);
+  const reply = r?.reply ?? r?.owner_reply ?? r?.business_reply ?? r?.response ?? null;
+  const replyText = typeof reply === 'string' ? reply : reply?.text || reply?.comment || r?.reply_text || null;
+  const replyAtRaw = (reply && typeof reply === 'object' ? reply.created_at || reply.updated_at || reply.timestamp : null) || r?.replied_at || r?.reply_created_at || null;
+  return {
+    id: `rv:${accountId}:${rid}`,
+    platform: String(r?.platform || fallbackPlatform || 'google'),
+    kind: 'review',
+    // الاسم نظيف — التقييم يُخزَّن رقماً في حقل مستقل ويُعرض نجوماً في الواجهة
+    authorName: r?.author_name || r?.reviewer || r?.name || r?.author?.name || 'مراجعة',
+    body,
+    createdAt: toIso(r?.created_at || r?.updated_at || r?.created || r?.timestamp),
+    repliedBody: replyText ? String(replyText) : null,
+    repliedAt: replyText && replyAtRaw ? toIso(replyAtRaw) : null,
+    rating: Number.isFinite(stars) && stars > 0 ? stars : null,
+  };
+}
+
+/**
+ * المراجعات — قائمةً مباشرة في عقد المزوّد الحالي، أو ملخّصاً لكل حساب يتبعه
+ * نداءٌ لكل حساب في العقد الأقدم. يُقرأ الشكلان.
+ */
+export async function listReviews(apiKey: string, opts: { budget?: CallBudget; maxPages: number }): Promise<{ items: InboxItem[]; complete: boolean; exhausted: boolean }> {
+  const r = await sapiList(apiKey, EP.reviews, { limit: 100 }, { budget: opts.budget, maxPages: opts.maxPages, keys: ['reviews'] });
+  const items: InboxItem[] = [];
+  let complete = r.complete;
+  let exhausted = r.exhausted;
+  for (const row of r.items) {
+    if (looksLikeReview(row)) {
+      const it = mapReview(row, '', String(row?.platform || 'google'));
+      if (it) items.push(it);
+      continue;
+    }
+    // ملخّص حساب — المراجعات في نداءٍ ثانٍ
+    const accountId = String(row?.account_id || row?.id || '');
+    if (!accountId) continue;
     try {
-      const q = `?account_id=${encodeURIComponent(acc.id)}&platform=${encodeURIComponent(acc.platform)}&limit=50`;
-      const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}${q}`);
-      const mentions: any[] = data?.data || data?.mentions || (Array.isArray(data) ? data : []);
-      for (const m of mentions || []) {
-        const mid = String(m.id || m.platform_id || '');
+      const detail = await sapiList(apiKey, EP.reviewsForAccount(accountId), { limit: 100 }, { budget: opts.budget, maxPages: 1, keys: ['reviews'] });
+      if (detail.exhausted) { exhausted = true; complete = false; break; }
+      for (const d of detail.items) {
+        const it = mapReview(d, accountId, String(row?.platform || 'google'));
+        if (it) items.push(it);
+      }
+    } catch (err) {
+      if (!isUnsupported(err)) throw err;
+    }
+  }
+  return { items, complete, exhausted };
+}
+
+/** محادثةٌ خاصة كما تردّها القائمة. */
+export type SapiConversation = {
+  id: string;
+  accountId: string;
+  platform: string;
+  participant: string;
+  lastText: string;
+  /** وقت آخر رسالة إن أعلنه المزوّد — `null` إن غاب. */
+  lastAt: string | null;
+  /** اتجاه آخر رسالة إن أعلنه المزوّد — `in` منهم و`out` منّا. */
+  lastDirection: 'in' | 'out' | null;
+};
+
+export function directionOf(v: unknown): 'in' | 'out' | null {
+  const d = normKey(v);
+  if (['incoming', 'inbound', 'received', 'in'].includes(d)) return 'in';
+  if (['outgoing', 'outbound', 'sent', 'out'].includes(d)) return 'out';
+  return null;
+}
+
+export function mapConversation(cv: any, account: SocialApiAccount | null): SapiConversation | null {
+  const id = String(cv?.id || cv?.conversation_id || '');
+  if (!id) return null;
+  const last = cv?.last_message;
+  const lastObj = last && typeof last === 'object' ? last : null;
+  const fromMe = cv?.last_message_from_me ?? cv?.last_message_is_from_me ?? lastObj?.is_from_me ?? lastObj?.from_me;
+  return {
+    id,
+    accountId: String(cv?.account_id || cv?.account?.id || account?.id || ''),
+    platform: String(cv?.platform || account?.platform || 'unknown'),
+    participant: cv?.participant_name || cv?.participant?.name || cv?.participant?.username || cv?.from || 'مستخدم',
+    lastText: typeof last === 'string' ? last : String(lastObj?.text || cv?.last_message_text || cv?.snippet || ''),
+    lastAt: isoOrNull(lastObj?.created_at || cv?.last_message_at || cv?.updated_at || cv?.created_at),
+    lastDirection: directionOf(lastObj?.direction ?? cv?.last_message_direction) ?? (fromMe === true ? 'out' : fromMe === false ? 'in' : null),
+  };
+}
+
+/** منصّاتٌ يدعم المزوّد فيها الرسائل الخاصة والإشارات — وما عداها يردّ «غير مدعوم». */
+export function supportsDirectInbox(platform: string): boolean {
+  return /instagram|facebook|messenger/.test(platform.toLowerCase());
+}
+
+/**
+ * المحادثات — نداءٌ واحد لكل الحسابات إن حملت كلُّ محادثةٍ حسابَها، وإلا
+ * نداءٌ لكل حسابٍ يدعم الرسائل. والمعرّف يُبنى بالحساب كما كان يُبنى، فلا
+ * يتكرّر سجلٌّ كُتب قبل هذا.
+ */
+export async function listConversations(
+  apiKey: string,
+  accounts: SocialApiAccount[],
+  opts: { budget?: CallBudget; pages?: number },
+): Promise<{ conversations: SapiConversation[]; complete: boolean; exhausted: boolean }> {
+  const pages = opts.pages ?? 2;
+  try {
+    const all = await sapiList(apiKey, EP.conversations, { limit: 100 }, { budget: opts.budget, maxPages: pages, keys: ['conversations'] });
+    if (all.exhausted) return { conversations: [], complete: false, exhausted: true };
+    const mapped = all.items.map((cv) => mapConversation(cv, accounts.find((a) => a.id === String(cv?.account_id || '')) ?? null));
+    if (mapped.every((c) => c && c.accountId)) {
+      return { conversations: mapped.filter((c): c is SapiConversation => c !== null), complete: all.complete, exhausted: false };
+    }
+  } catch (err) {
+    if (err instanceof BudgetExhausted) return { conversations: [], complete: false, exhausted: true };
+    if (!isUnsupported(err)) throw err;
+  }
+  const out: SapiConversation[] = [];
+  for (const acc of accounts.filter((a) => supportsDirectInbox(a.platform))) {
+    try {
+      const r = await sapiList(apiKey, EP.conversations, { account_id: acc.id, platform: acc.platform, limit: 50 }, { budget: opts.budget, maxPages: Math.max(pages - 1, 1), keys: ['conversations'] });
+      if (r.exhausted) return { conversations: out, complete: false, exhausted: true };
+      for (const cv of r.items) {
+        const c = mapConversation(cv, acc);
+        if (c) out.push({ ...c, accountId: acc.id });
+      }
+    } catch (err) {
+      if (!isUnsupported(err)) throw err;
+    }
+  }
+  return { conversations: out, complete: true, exhausted: false };
+}
+
+/** أحدثُ رسالةٍ واردة وأحدثُ رسالةٍ منّا في محادثة — من رسائلها، الأحدث أوّلاً. */
+export async function conversationLatest(
+  apiKey: string,
+  conversationId: string,
+  budget?: CallBudget,
+): Promise<{ lastIn: { text: string; at: string } | null; lastOut: { text: string; at: string; id: string | null } | null }> {
+  const r = await sapiList(apiKey, EP.conversationMessages(conversationId), { limit: 20 }, { budget, maxPages: 1, keys: ['messages'] });
+  if (r.exhausted) throw new BudgetExhausted();
+  let lastIn: { text: string; at: string } | null = null;
+  let lastOut: { text: string; at: string; id: string | null } | null = null;
+  for (const m of r.items) {
+    // رسالةٌ بلا وقت لا تُرتَّب — فلا تُحسب أحدث ولا أقدم
+    const at = isoOrNull(m?.created_at || m?.timestamp || m?.sent_at);
+    if (!at) continue;
+    const dir = directionOf(m?.direction) ?? (m?.is_from_me === true || m?.from_me === true ? 'out' : m?.is_from_me === false ? 'in' : null);
+    if (dir === 'in' && (!lastIn || at > lastIn.at)) lastIn = { text: textOf(m), at };
+    if (dir === 'out' && (!lastOut || at > lastOut.at)) lastOut = { text: textOf(m), at, id: m?.id ? String(m.id) : null };
+  }
+  return { lastIn, lastOut };
+}
+
+export type MentionsPath = 'accounts' | 'inbox';
+
+/**
+ * الإشارات لحسابٍ واحد — `‎/accounts/{id}/mentions` في عقد المزوّد، و`‎/inbox/mentions`
+ * احتياطاً لمن بقي على العقد الأقدم. ولا تُطلب إلا لمنصّةٍ تدعمها.
+ */
+export async function listMentions(
+  apiKey: string,
+  account: SocialApiAccount,
+  opts: { budget?: CallBudget; prefer?: MentionsPath | null; pages?: number },
+): Promise<{ items: InboxItem[]; path: MentionsPath | null }> {
+  const pages = opts.pages ?? 1;
+  const order: MentionsPath[] = opts.prefer === 'inbox' ? ['inbox', 'accounts'] : ['accounts', 'inbox'];
+  for (const path of order) {
+    try {
+      const r = path === 'accounts'
+        ? await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/mentions`, { limit: 50 }, { budget: opts.budget, maxPages: pages, keys: ['mentions'] })
+        : await sapiList(apiKey, EP.mentions, { account_id: account.id, platform: account.platform, limit: 50 }, { budget: opts.budget, maxPages: pages, keys: ['mentions'] });
+      if (r.exhausted) throw new BudgetExhausted();
+      const items: InboxItem[] = [];
+      for (const m of r.items) {
+        const mid = String(m?.id || m?.platform_id || '');
         if (!mid) continue;
-        const accountId = String(m.account_id || m.account?.id || acc.id);
-        const mediaId = String(m.metadata?.media_id || m.media_id || '');
-        out.push({
+        const accountId = String(m?.account_id || m?.account?.id || account.id);
+        const mediaId = String(m?.metadata?.media_id || m?.media_id || '');
+        // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً — الترميز القديم نفسه.
+        items.push({
           id: `mn:${mid}:${accountId}:${mediaId}`,
-          platform: String(m.platform || acc.platform),
+          platform: String(m?.platform || account.platform),
           kind: 'mention',
-          authorName: m.author?.name || m.author_name || m.username || 'مستخدم',
-          body: m.content?.text || m.text || m.caption || '',
-          createdAt: toIso(m.created_at || m.received_at || m.timestamp),
+          authorName: m?.author?.name || m?.author_name || m?.username || 'مستخدم',
+          body: String(m?.content?.text || m?.text || m?.caption || ''),
+          createdAt: toIso(m?.created_at || m?.received_at || m?.timestamp),
         });
       }
-    } catch { /* لا إشارات لهذا الحساب أو غير مدعومة */ }
+      return { items, path };
+    } catch (err) {
+      if (isUnsupported(err)) continue;
+      throw err;
+    }
   }
-
-  return out;
+  return { items: [], path: null };
 }
 
 // تشخيص: يُعيد الاستجابات الخام من SocialAPI كما هي، لتحديد أسماء الحقول الفعلية بدقّة
@@ -472,7 +1092,13 @@ const FOLLOWER_FIELDS = ['followers', 'followers_count', 'follower_count', 'subs
 
 export type SocialApiAudience = { platform: string; accountId: string; followers: number | null };
 
-/** المتابعون لكل حساب — من `/accounts`، ومن الحقول المتداخلة `stats`/`metrics`/`insights` إن وُجدت. */
+/**
+ * المتابعون لكل حساب — من `/accounts`.
+ *
+ * والمزوّد يضع العدد في `metadata` مع بقية بيانات المنصّة (`follower_count`
+ * بجوار `avatar_url`)، وكانت القراءة تبحث في `stats` و`metrics` و`insights`
+ * وحدها — فبقي «إجمالي المتابعين» بلا قيمة لكل منصّة.
+ */
 export async function socialApiAudience(apiKey: string): Promise<SocialApiAudience[]> {
   const data = await sapi<any>(apiKey, 'GET', EP.accounts);
   const list: any[] = data?.accounts || data?.data || (Array.isArray(data) ? data : []);
@@ -481,10 +1107,21 @@ export async function socialApiAudience(apiKey: string): Promise<SocialApiAudien
     accountId: String(a.id || a.account_id || a.accountId || ''),
     followers:
       pickNumber(a, FOLLOWER_FIELDS) ??
+      pickNumber(a.metadata, FOLLOWER_FIELDS) ??
       pickNumber(a.stats, FOLLOWER_FIELDS) ??
       pickNumber(a.metrics, FOLLOWER_FIELDS) ??
       pickNumber(a.insights, FOLLOWER_FIELDS),
   }));
+}
+
+/** أهذا العنصر مراجعةٌ بعينها لا ملخّصُ حساب؟ الملخّص يحمل عدداً ومتوسطاً — والمتوسط قد يُسمّى `rating`. */
+function looksLikeReview(r: any): boolean {
+  if (!r || typeof r !== 'object') return false;
+  if (String(r.id || '').startsWith('sapi_rev_')) return true;
+  const hasText = typeof r.text === 'string' || typeof r.comment === 'string' || typeof r.content === 'string' || typeof r.content?.text === 'string';
+  const hasCount = ['total', 'count', 'total_reviews', 'review_count', 'reviews_count'].some((k) => r[k] !== null && r[k] !== undefined);
+  if (hasCount && !hasText) return false;
+  return hasText || r.rating != null || r.star_rating != null || r.stars != null || r.reviewer != null || r.author != null;
 }
 
 export type SocialApiReviewSummary = { platform: string; accountId: string; count: number | null; average: number | null };
@@ -496,13 +1133,37 @@ export type SocialApiReviewSummary = { platform: string; accountId: string; coun
  * (تقييم نجومٍ بلا تعليق)، فمتوسطُها متوسطُ من كتب لا متوسطُ من قيّم.
  */
 export async function socialApiReviewSummary(apiKey: string): Promise<SocialApiReviewSummary[]> {
-  const data = await sapi<any>(apiKey, 'GET', EP.reviews);
-  const list: any[] = data?.data || data?.reviews || (Array.isArray(data) ? data : []);
-  return list.map((r) => ({
-    platform: String(r.platform || 'google'),
-    accountId: String(r.account_id || r.id || ''),
-    count: pickNumber(r, ['total', 'count', 'total_reviews', 'review_count', 'reviews_count']),
-    average: pickNumber(r, ['average', 'average_rating', 'rating', 'avg_rating', 'star_rating']),
+  /* شكلان: ملخّصٌ لكل حساب (عددٌ ومتوسط)، أو المراجعات نفسها قائمةً — وهو
+     عقد المزوّد الحالي. وفي الثاني يُحسب العدد والمتوسط منها كلِّها،
+     وفيها تقييمُ النجوم بلا تعليق: القائمة لا تُسقطه، الصندوق وحده يُسقطه. */
+  const r = await sapiList(apiKey, EP.reviews, { limit: 100 }, { maxPages: 10, keys: ['reviews'] });
+  const list = r.items;
+  if (list.length && list.every((x) => looksLikeReview(x))) {
+    const byAccount = new Map<string, { platform: string; n: number; rated: number; sum: number }>();
+    for (const x of list) {
+      const key = String(x.account_id || x.account?.id || '');
+      const e = byAccount.get(key) ?? { platform: String(x.platform || 'google'), n: 0, rated: 0, sum: 0 };
+      e.n += 1;
+      const stars = Number(x.rating ?? x.star_rating ?? x.stars);
+      if (Number.isFinite(stars) && stars > 0) {
+        e.rated += 1;
+        e.sum += stars;
+      }
+      byAccount.set(key, e);
+    }
+    return [...byAccount.entries()].map(([accountId, e]) => ({
+      platform: e.platform,
+      accountId,
+      // قائمةٌ لم تُقرأ إلى آخرها لا تُعطي عدداً — تُعطي حدّاً أدنى يُقرأ نقصاً
+      count: r.complete ? e.n : null,
+      average: e.rated ? Math.round((e.sum / e.rated) * 100) / 100 : null,
+    }));
+  }
+  return list.map((x) => ({
+    platform: String(x.platform || 'google'),
+    accountId: String(x.account_id || x.id || ''),
+    count: pickNumber(x, ['total', 'count', 'total_reviews', 'review_count', 'reviews_count']),
+    average: pickNumber(x, ['average', 'average_rating', 'rating', 'avg_rating', 'star_rating']),
   }));
 }
 
@@ -574,7 +1235,7 @@ export class SocialApiProvider implements PublishingProvider {
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
     const data = await sapi<any>(this.key, 'GET', EP.metrics(providerPostId));
     const m = mapMetrics(data?.metrics || data?.data || data);
-    return { reach: m.reach, impressions: m.impressions, engagement: m.engagement };
+    return { reach: m.reach ?? 0, impressions: m.impressions ?? 0, engagement: m.engagement ?? 0 };
   }
 
   async deletePost(providerPostId: string): Promise<void> {

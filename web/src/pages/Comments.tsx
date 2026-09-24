@@ -1,10 +1,11 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil } from 'lucide-react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
 import ConfirmModal from '../components/ConfirmModal';
+import { DateRangePicker } from '../components/DatePicker';
 
 // إدارة التعليقات والرسائل والإشارات والتقييمات — مزامنة من المزوّد مع الرد والاقتراحات الذكية والإشراف.
 type Caps = Record<string, boolean>;
@@ -23,10 +24,45 @@ function kindMeta(kind: string) {
   }
 }
 
+/** تقرير آخر سحبٍ للصندوق كما يحفظه الخادم — ما يلزم الشاشة منه وحده. */
+type SyncReport = {
+  ok: boolean;
+  complete: boolean;
+  lastOkAt: string | null;
+  errors: string[];
+};
+
+/* سطر حالة الصندوق: متى نجح آخر سحب، وسببُ العطل إن وقع، وهل وقف السحب
+   دون آخره. وكان الصندوق يُسحب أو يسقط صامتاً، فلا يعرف من فتح الشاشة
+   أغاب التعليق لأنه لم يصل، أم لأن السحب لم يبلغه. */
+function SyncLine({ sync }: { sync: SyncReport | null }) {
+  if (!sync) return null;
+  return (
+    <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-3)', display: 'grid', gap: 'var(--space-1)' }}>
+      <span>
+        {sync.lastOkAt ? <>آخر سحبٍ ناجح <bdi>{formatRiyadh(sync.lastOkAt)}</bdi></> : 'لم يُسحب بعد'}
+        {!sync.ok && sync.errors[0] && <> — {sync.errors[0]}</>}
+      </span>
+      {sync.ok && !sync.complete && (
+        <span className="row" style={{ gap: 'var(--space-2)' }}>
+          <TriangleAlert size={16} style={{ color: 'var(--warning-strong)', flexShrink: 0 }} aria-hidden="true" />
+          لم يكتمل السحب. يُستكمل الباقي في السحب التالي.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function Comments() {
   const [comments, setComments] = useState<any[]>([]);
   const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number }>({ all: 0, unreplied: 0, replied: 0 });
+  const [sync, setSync] = useState<SyncReport | null>(null);
   const [filter, setFilter] = useState<'' | '0' | '1'>('');
+  // النطاق يوماً بيوم كما يختاره المنتقي، والصفحة منه — والقديم محفوظٌ يُرى بنطاقه
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [msg, setMsg] = useState('');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [privateMode, setPrivateMode] = useState<Record<string, boolean>>({});
@@ -38,10 +74,21 @@ export default function Comments() {
   const [confirming, setConfirming] = useState<{ kind: 'comment' | 'reply'; id: string } | null>(null);
 
   function load() {
-    const q = filter ? `?replied=${filter}` : '';
-    api.get(`/comments${q}`).then((d) => { setComments(d.comments); if (d.counts) setCounts(d.counts); });
+    const q = new URLSearchParams();
+    if (filter) q.set('replied', filter);
+    // حدود اليوم بتوقيت الرياض (UTC+3) — كما في لوحة التحليلات
+    if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
+    if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
+    if (page > 1) q.set('page', String(page));
+    const qs = q.toString() ? `?${q}` : '';
+    api.get(`/comments${qs}`).then((d) => {
+      setComments(d.comments);
+      setHasMore(!!d.hasMore);
+      if (d.counts) setCounts(d.counts);
+      setSync(d.sync ?? null);
+    });
   }
-  useEffect(load, [filter]);
+  useEffect(load, [filter, from, to, page]);
 
   async function refresh() {
     setMsg('جارٍ الجلب…');
@@ -104,7 +151,7 @@ export default function Comments() {
   }
 
   const tab = (key: '' | '0' | '1', label: string, n: number) => (
-    <button className={filter === key ? 'on' : ''} onClick={() => setFilter(key)}>
+    <button className={filter === key ? 'on' : ''} onClick={() => { setFilter(key); setPage(1); }}>
       {label} <span className="count-pill">{n}</span>
     </button>
   );
@@ -121,11 +168,18 @@ export default function Comments() {
         <button className="btn ghost" onClick={refresh}><RefreshCw size={20} /> جلب الآن</button>
       </div>
 
-      <div className="row" style={{ marginBottom: 16 }}>
+      <SyncLine sync={sync} />
+
+      <div className="row" style={{ marginBottom: 'var(--space-4)', alignItems: 'flex-end' }}>
         <div className="seg">
           {tab('', 'الكل', counts.all)}
           {tab('0', 'بلا رد', counts.unreplied)}
           {tab('1', 'تم الرد', counts.replied)}
+        </div>
+        <div className="spacer" />
+        <div className="field" style={{ margin: 0 }}>
+          <label>الفترة</label>
+          <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); setPage(1); }} />
         </div>
       </div>
 
@@ -135,7 +189,12 @@ export default function Comments() {
           const km = kindMeta(c.kind);
           const isComment = c.kind === 'comment';
           const canPrivate = !!caps.can_private_reply;
-          const canEditReply = isComment || c.kind === 'review'; // الرسائل/الإشارات لا تُعدَّل بعد الإرسال
+          const external = c.reply_source === 'external';
+          /* الرسائل/الإشارات لا تُعدَّل بعد الإرسال. وردٌّ على تعليقٍ كُتب في تطبيق
+             المنصّة لا يُعدَّل من هنا: تعديلُ التعليق إرسالُ ردٍّ جديد وحذفُ القديم،
+             وحذفُ ما لم يُكتب من هنا يُسقط ردّاً لا يعرف كاتبُه أنه سقط. والتقييم
+             يُعدَّل ردُّه في موضعه أيّاً كان كاتبه. */
+          const canEditReply = (isComment && !external) || c.kind === 'review';
           const sugg = suggestions[c.id] || [];
           return (
             <div className="card" key={c.id} style={c.is_hidden ? { opacity: 0.6 } : undefined}>
@@ -169,7 +228,10 @@ export default function Comments() {
               {c.reply_body && editing[c.id] === undefined ? (
                 <div className="card" style={{ background: 'var(--primary-soft)', padding: 10 }}>
                   <div className="row" style={{ marginBottom: 4 }}>
-                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>ردّ {c.replier_name || ''} — {formatRiyadh(c.replied_at)}</div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                      {external ? 'ردّ من خارج المنصة' : <>ردّ {c.replier_name || ''}</>}
+                      {c.replied_at && <> — {formatRiyadh(c.replied_at)}</>}
+                    </div>
                     <div className="spacer" />
                     {/* التعديل/الحذف مدعومان للتعليقات والتقييمات فقط — الرسائل والإشارات لا تُعدَّل بعد الإرسال */}
                     {canEditReply && (
@@ -228,8 +290,23 @@ export default function Comments() {
             </div>
           );
         })}
-        {comments.length === 0 && <p className="muted" style={{ textAlign: 'center' }}>لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.</p>}
+        {comments.length === 0 && (
+          <p className="muted" style={{ textAlign: 'center' }}>
+            {from || to ? 'لا عنصر في هذه الفترة. وسّع النطاق الزمني.' : 'لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.'}
+          </p>
+        )}
       </div>
+
+      {(page > 1 || hasMore) && (
+        <div className="row" style={{ justifyContent: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+          <button type="button" className="btn ghost sm" disabled={page === 1} onClick={() => setPage(page - 1)}>
+            <ChevronRight size={20} className="chev-dir" aria-hidden="true" /> السابق
+          </button>
+          <button type="button" className="btn ghost sm" disabled={!hasMore} onClick={() => setPage(page + 1)}>
+            التالي <ChevronLeft size={20} className="chev-dir" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {confirming?.kind === 'comment' && (
         <ConfirmModal

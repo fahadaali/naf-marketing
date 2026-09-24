@@ -75,11 +75,22 @@ async function readValue(env: Env, p: Period, key: string): Promise<number | nul
   return row ? row.value : null;
 }
 
+/**
+ * ما كُتب في احتسابٍ واحد — `مؤشر|بُعد|قيمة البُعد`. ومنه يُعرف ما لم يعد
+ * يُحتسب فيُرفع (انظر `computeAuto`).
+ */
+type Written = Set<string>;
+
+function writtenKey(metricKey: string, dimKey = '', dimValue = ''): string {
+  return `${metricKey}|${dimKey}|${dimValue}`;
+}
+
 /** كاتبٌ يطرح الغياب: `null` لا يُكتب، والصفر يُكتب لأنه قيمة. */
-function writer(env: Env, p: Period) {
+function writer(env: Env, p: Period, written?: Written) {
   return async (metricKey: string, value: number | null, extra?: Partial<MetricValueInput>) => {
     if (value === null || !Number.isFinite(value)) return;
     await upsertValue(env, p, { metricKey, value, source: 'auto', ...extra });
+    written?.add(writtenKey(metricKey, extra?.dimKey, extra?.dimValue));
   };
 }
 
@@ -90,13 +101,26 @@ function writer(env: Env, p: Period) {
 type SnapshotRow = {
   post_id: string | null;
   platform: string;
-  reach: number;
-  impressions: number;
-  engagement: number;
+  /** `null` = لم يُعلنه المزوّد لهذا المنشور — لا يدخل مجموعاً ولا نسبة. */
+  reach: number | null;
+  impressions: number | null;
+  engagement: number | null;
   sent_at: string | null;
   metrics_json: string | null;
   content_type: string | null;
 };
+
+/** مجموع ما أُعلن وحده، وعدد من أعلنه — أو `null` إن لم يُعلنه أحد. */
+function sumKnown(values: (number | null)[]): { sum: number; n: number } | null {
+  let sum = 0;
+  let n = 0;
+  for (const v of values) {
+    if (v === null || v === undefined || !Number.isFinite(v)) continue;
+    sum += v;
+    n++;
+  }
+  return n ? { sum, n } : null;
+}
 
 /** يجمع مقياساً خاماً من `metrics_json` عبر كل اللقطات — الأسماء كما يرسلها المزوّد. */
 function sumRaw(rows: SnapshotRow[], types: string[]): number | null {
@@ -123,39 +147,67 @@ function sumRaw(rows: SnapshotRow[], types: string[]): number | null {
   return seen ? total : null;
 }
 
-async function computeSocial(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeSocial(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
+  /* النشرة البريدية تُكتب في جدول اللقطات نفسه لتظهر في لوحة المنصّات —
+     المُسلَّم في عمود الوصول، والفتح في الظهور، والنقر في التفاعل. وكانت
+     تدخل هنا فيرتفع «وصول» منصّات التواصل بكل نشرةٍ تُرسل، وتختلط نقراتُ
+     البريد بنقرات المنشورات في معدل النقر. ولطبقة البريد احتسابُها من
+     الإرسال نفسه (`computeEmail`). */
   const { results: rows } = await env.DB.prepare(
     `SELECT a.post_id, a.platform, a.reach, a.impressions, a.engagement, a.sent_at, a.metrics_json,
             cp.content_type
      FROM analytics_snapshots a
      LEFT JOIN content_posts cp ON cp.id = a.post_id
-     WHERE a.sent_at IS NOT NULL AND a.sent_at >= ? AND a.sent_at < ?`,
+     WHERE a.sent_at IS NOT NULL AND a.sent_at >= ? AND a.sent_at < ?
+       AND COALESCE(a.source, '') <> 'newsletter' AND a.platform <> 'email'`,
   )
     .bind(from, to)
     .all<SnapshotRow>();
 
   if (!rows.length) return;
 
-  const reach = rows.reduce((s, r) => s + (r.reach || 0), 0);
-  const impressions = rows.reduce((s, r) => s + (r.impressions || 0), 0);
-  const engagement = rows.reduce((s, r) => s + (r.engagement || 0), 0);
+  /* ما لم يُعلنه المزوّد لا يدخل: منشورٌ لم تُزامَن أرقامه بعد لا يُحسب
+     صفراً في الوصول، ولا يُقسَم تفاعلُ منشورٍ على وصول منشورٍ آخر. والعيّنة
+     عدد المنشورات التي أعلنت الرقم — تظهر تحته فيُعرف من كم حُسب. */
+  const reach = sumKnown(rows.map((r) => r.reach));
+  const impressions = sumKnown(rows.map((r) => r.impressions));
+  const engagement = sumKnown(rows.map((r) => r.engagement));
 
-  await put('reach', reach);
-  await put('impressions', impressions);
-  await put('engagement', engagement);
-  await put('frequency', ratio(impressions, reach));
-  await put('engagement_rate_reach', pct(engagement, reach), { sample: rows.length });
+  await put('reach', reach?.sum ?? null, { sample: reach?.n });
+  await put('impressions', impressions?.sum ?? null, { sample: impressions?.n });
+  await put('engagement', engagement?.sum ?? null, { sample: engagement?.n });
+
+  const both = (a: 'reach' | 'impressions' | 'engagement', b: 'reach' | 'impressions' | 'engagement') =>
+    rows.filter((r) => r[a] !== null && r[b] !== null);
+  const freqRows = both('impressions', 'reach');
+  if (freqRows.length) {
+    await put('frequency', ratio(
+      freqRows.reduce((s, r) => s + (r.impressions as number), 0),
+      freqRows.reduce((s, r) => s + (r.reach as number), 0),
+    ), { sample: freqRows.length });
+  }
+  const rateRows = both('engagement', 'reach');
+  if (rateRows.length) {
+    await put('engagement_rate_reach', pct(
+      rateRows.reduce((s, r) => s + (r.engagement as number), 0),
+      rateRows.reduce((s, r) => s + (r.reach as number), 0),
+    ), { sample: rateRows.length });
+  }
 
   await put('likes', sumRaw(rows, ['likes', 'reactions']));
   await put('comments', sumRaw(rows, ['comments']));
   await put('shares', sumRaw(rows, ['shares', 'reposts', 'retweets']));
   await put('saves', sumRaw(rows, ['saves', 'bookmarks']));
 
-  const clicks = sumRaw(rows, ['clicks']);
-  if (clicks !== null) await put('ctr', pct(clicks, impressions));
+  // النقر إلى الظهور على المنشورات التي أعلنت الاثنين معاً
+  const clickRows = rows.filter((r) => r.impressions !== null && sumRaw([r], ['clicks']) !== null);
+  const clicks = sumRaw(clickRows, ['clicks']);
+  if (clicks !== null) {
+    await put('ctr', pct(clicks, clickRows.reduce((s, r) => s + (r.impressions as number), 0)), { sample: clickRows.length });
+  }
 
   /* متوسط مدة المشاهدة: المزوّدون يعطون مجموع وقت المشاهدة بالدقائق وعدد
      المشاهدات، والمؤشر مسجَّل `seconds`. ولا يُكتب إلا إذا وُجد الطرفان —
@@ -164,17 +216,21 @@ async function computeSocial(env: Env, p: Period): Promise<void> {
   const views = sumRaw(rows, ['views', 'view_count']);
   if (watchMinutes !== null && views) await put('avg_view_duration', round2((watchMinutes * 60) / views), { sample: views });
 
-  const completion = sumRaw(rows, ['completionrate', 'completion_rate']);
-  if (completion !== null && rows.length) await put('completion_rate', round2(completion / rows.length), { sample: rows.length });
+  // متوسط الإكمال على المنشورات التي أعلنته وحدها — لا على كل المنشورات
+  const completionRows = rows.filter((r) => sumRaw([r], ['completionrate', 'completion_rate']) !== null);
+  const completion = sumRaw(completionRows, ['completionrate', 'completion_rate']);
+  if (completion !== null) {
+    await put('completion_rate', round2(completion / completionRows.length), { sample: completionRows.length });
+  }
 
   // معدل التفاعل حسب نوع المحتوى — للمنشورات التي عبرت هذه المنصة فقط،
   // فنوعُ المحتوى عمودٌ عندنا لا عند المزوّد.
   const byType = new Map<string, { eng: number; imp: number; n: number }>();
   for (const r of rows) {
-    if (!r.content_type) continue;
+    if (!r.content_type || r.engagement === null || r.impressions === null) continue;
     const e = byType.get(r.content_type) ?? { eng: 0, imp: 0, n: 0 };
-    e.eng += r.engagement || 0;
-    e.imp += r.impressions || 0;
+    e.eng += r.engagement;
+    e.imp += r.impressions;
     e.n += 1;
     byType.set(r.content_type, e);
   }
@@ -188,11 +244,11 @@ async function computeSocial(env: Env, p: Period): Promise<void> {
      هنا يجعل تغيير التسمية هجرةَ بيانات. */
   const bySlot = new Map<string, { eng: number; n: number }>();
   for (const r of rows) {
-    if (!r.sent_at) continue;
+    if (!r.sent_at || r.engagement === null) continue;
     const at = new Date(new Date(r.sent_at).getTime() + 3 * 60 * 60 * 1000);
     const slot = `${at.getUTCDay()}-${String(at.getUTCHours()).padStart(2, '0')}`;
     const e = bySlot.get(slot) ?? { eng: 0, n: 0 };
-    e.eng += r.engagement || 0;
+    e.eng += r.engagement;
     e.n += 1;
     bySlot.set(slot, e);
   }
@@ -208,8 +264,8 @@ async function computeSocial(env: Env, p: Period): Promise<void> {
     .bind(p.start, p.end)
     .first<{ n: number }>();
   const paidImpressions = paid?.n ?? 0;
-  if (impressions > 0) {
-    await put('organic_paid_split', pct(Math.max(impressions - paidImpressions, 0), impressions));
+  if (impressions && impressions.sum > 0) {
+    await put('organic_paid_split', pct(Math.max(impressions.sum - paidImpressions, 0), impressions.sum));
   }
 
   // نمو المتابعين — من قيم «إجمالي المتابعين» المسجّلة، وهو مؤشر مُدخَل.
@@ -246,16 +302,16 @@ const QUALITATIVE_HINTS = [
   'ممكن', 'رقم التواصل', 'تواصل', 'واتس', 'قضي', 'عقد', 'مذكرة', 'دعوى',
 ];
 
-async function computeInbox(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeInbox(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
   const { results } = await env.DB.prepare(
-    `SELECT kind, platform, body, replied_at, created_at FROM platform_comments
+    `SELECT kind, platform, body, reply_body, replied_at, created_at FROM platform_comments
      WHERE created_at >= ? AND created_at < ?`,
   )
     .bind(from, to)
-    .all<{ kind: string; platform: string; body: string | null; replied_at: string | null; created_at: string }>();
+    .all<{ kind: string; platform: string; body: string | null; reply_body: string | null; replied_at: string | null; created_at: string }>();
 
   if (!results.length) return;
 
@@ -264,16 +320,22 @@ async function computeInbox(env: Env, p: Period): Promise<void> {
   ).length;
   await put('qualitative_comments', qualitative, { sample: results.length });
 
-  // المحادثات المباشرة — الرسائل الخاصة، موزّعةً على القناة ومجموعةً
+  /* المحادثات المباشرة — الرسائل الخاصة، موزّعةً على القناة ومجموعةً.
+     وصفرُها لا يُكتب ما لم يُعرف أن الرسائل تُقرأ أصلاً: صندوقٌ لم تُسحب منه
+     رسالةٌ قطّ لأن المزوّد لا يعيدها لا يقول «لا محادثات» بل لا يقول شيئاً. */
   const dms = results.filter((r) => r.kind === 'dm');
-  await put('direct_conversations', dms.length);
+  if (dms.length || (await dmsAreRead(env))) {
+    await put('direct_conversations', dms.length);
+  }
   const byChannel = new Map<string, number>();
   for (const d of dms) byChannel.set(d.platform, (byChannel.get(d.platform) ?? 0) + 1);
   for (const [channel, n] of byChannel) {
     await put('direct_conversations', n, { dimKey: 'channel', dimValue: channel });
   }
 
-  await put('first_reply_rate', pct(results.filter((r) => r.replied_at).length, results.length));
+  /* المردود عليه: ما رُدّ عليه من هنا، وما رُدّ عليه من تطبيق المنصّة وعُرف
+     ردُّه — وقتُه قد لا يُعلَن فيُعدّ ردّاً ولا يدخل زمن الاستجابة. */
+  await put('first_reply_rate', pct(results.filter((r) => r.reply_body !== null || r.replied_at !== null).length, results.length));
 
   /* زمن الاستجابة الأول — المؤشر التنافسي في القطاع القانوني: من يردّ أولاً
      غالباً يفوز بالعميل. ويُحسب على ما رُدّ عليه فقط؛ إدخالُ ما لم يُرَد
@@ -289,12 +351,24 @@ async function computeInbox(env: Env, p: Period): Promise<void> {
   }
 }
 
+/** أتُقرأ الرسائل الخاصة من المزوّد؟ رسالةٌ مخزّنة قطّ، أو آخر سحبٍ للصندوق قرأها. */
+async function dmsAreRead(env: Env): Promise<boolean> {
+  const any = await env.DB.prepare("SELECT 1 AS x FROM platform_comments WHERE kind = 'dm' LIMIT 1").first<{ x: number }>();
+  if (any) return true;
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'inbox_sync_report'").first<{ value: string }>();
+  try {
+    return JSON.parse(row?.value || '{}')?.kinds?.dm?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /* ============================================================
    الطبقة الثامنة — البريد
    ============================================================ */
 
-async function computeEmail(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeEmail(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
   const sends = await env.DB.prepare(
@@ -372,8 +446,8 @@ async function computeEmail(env: Env, p: Period): Promise<void> {
    الطبقة العاشرة — التشغيل
    ============================================================ */
 
-async function computeOperations(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeOperations(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
   /* الالتزام بخطة النشر: من كل ما استُحقّ نشره في هذه الفترة، كم نُشر فعلاً.
@@ -422,8 +496,8 @@ const LOST_STATUSES = ['غير مناسب', 'تم الرفض'];
 /** ما يدلّ على أن المحتمل جاء بتوصية عميل قائم — والقناة الأعلى تحويلاً في القطاع. */
 const REFERRAL_HINTS = ['إحالة', 'احالة', 'توصية', 'referral'];
 
-async function computeFunnel(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeFunnel(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
   const mqlStatuses = await settingList(env, 'mql_statuses');
   const sqlStatuses = await settingList(env, 'sql_statuses');
@@ -540,8 +614,8 @@ async function computeFunnel(env: Env, p: Period): Promise<void> {
   }
 }
 
-async function computeCrmRevenue(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeCrmRevenue(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
   const cases = await env.DB.prepare(
@@ -687,8 +761,8 @@ async function computeCrmRevenue(env: Env, p: Period): Promise<void> {
    الطبقة الخامسة — التكلفة والعائد
    ============================================================ */
 
-async function computeCost(env: Env, p: Period): Promise<void> {
-  const put = writer(env, p);
+async function computeCost(env: Env, p: Period, written?: Written): Promise<void> {
+  const put = writer(env, p, written);
   const { from, to } = periodBoundsUtc(p);
 
   const spendRows = await env.DB.prepare(
@@ -778,27 +852,47 @@ export type ComputeResult = { period: Period; written: number };
  * «الجلسات» التي كتبها سحبُ تحليلات الموقع. فما يُقرأ يُكتب أوّلاً.
  */
 export async function computeAuto(env: Env, p: Period): Promise<ComputeResult> {
-  const before = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM metric_values WHERE period = ? AND period_start = ?`,
+  const written: Written = new Set();
+
+  await computeSocial(env, p, written);
+  await computeInbox(env, p, written);
+  await computeEmail(env, p, written);
+  await computeOperations(env, p, written);
+  await computeFunnel(env, p, written);
+  await computeCrmRevenue(env, p, written);
+  await computeCost(env, p, written); // آخرها: يقرأ ما كتبته الثلاثة قبله
+
+  await dropStale(env, p, written);
+  return { period: p, written: written.size };
+}
+
+/**
+ * يرفع ما احتُسب قبلُ ولم يعد يُحتسب.
+ *
+ * الاحتساب يكتب ما يجد ويترك ما لا يجد — وكان ما كتبه مرّةً يبقى أبداً:
+ * صفرٌ كُتب يوم كانت الأرقام تُقرأ أصفاراً يظلّ في اللوحة بعد أن صار
+ * الغياب غياباً، ونسبةٌ حُسبت من منشوراتٍ حُذفت تبقى كأنها قيست. فالقيمة
+ * المحتسبة لا تُحفظ إلا ما دام حسابُها يُنتجها.
+ *
+ * والمحتسب وحده: ما سُجّل باليد أو وصل من مصدرٍ خارجي لا يمسّه الاحتساب.
+ * ولا يُرفع شيءٌ إن سقط الاحتساب في منتصفه — فهذا بعد اكتماله.
+ */
+async function dropStale(env: Env, p: Period, written: Written): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, metric_key, dim_key, dim_value FROM metric_values
+     WHERE period = ? AND period_start = ? AND source = 'auto'`,
   )
     .bind(p.kind, p.start)
-    .first<{ n: number }>();
+    .all<{ id: string; metric_key: string; dim_key: string; dim_value: string }>();
 
-  await computeSocial(env, p);
-  await computeInbox(env, p);
-  await computeEmail(env, p);
-  await computeOperations(env, p);
-  await computeFunnel(env, p);
-  await computeCrmRevenue(env, p);
-  await computeCost(env, p); // آخرها: يقرأ ما كتبته الثلاثة قبله
-
-  const after = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM metric_values WHERE period = ? AND period_start = ?`,
-  )
-    .bind(p.kind, p.start)
-    .first<{ n: number }>();
-
-  return { period: p, written: Math.max((after?.n ?? 0) - (before?.n ?? 0), 0) };
+  const stale = results.filter((r) => !written.has(writtenKey(r.metric_key, r.dim_key, r.dim_value))).map((r) => r.id);
+  // دفعاتٌ دون حدّ الروابط في D1
+  for (let i = 0; i < stale.length; i += 90) {
+    const chunk = stale.slice(i, i + 90);
+    await env.DB.prepare(`DELETE FROM metric_values WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .bind(...chunk)
+      .run();
+  }
 }
 
 /* ============================================================

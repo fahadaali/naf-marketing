@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { isolate } from '../lib/format';
+import { formatDate, isolate } from '../lib/format';
 import MetricCard, { type MetricReading } from '../components/MetricCard';
 import { CADENCE_LABELS, LAYERS, PERIOD_LABELS } from '../metrics';
 import { DateRangePicker } from '../components/DatePicker';
@@ -10,7 +10,7 @@ import { platformLabel } from '../platforms';
 import Catalogue from './analytics/Catalogue';
 import Spend from './analytics/Spend';
 import {
-  BestTimesCard, CampaignPerformance, HeatmapLink, PipelineStatus, PlatformBreakdown,
+  BestTimesCard, CampaignPerformance, DataSources, HeatmapLink, PipelineStatus, PlatformBreakdown,
   ReputationCard, StaleAlerts, TeamPerformance, TopPosts, VideoAnalyticsExport,
   type DashboardData,
 } from './analytics/panels';
@@ -44,11 +44,15 @@ export default function Analytics() {
   const [tab, setTab] = useState<string>('board');
   const [period, setPeriod] = useState<PeriodKind>('monthly');
   const [start, setStart] = useState<string>('');
+  // بدايتا الفترتين المجاورتين كما يردّهما الخادم — ولا تالية بعد الجارية
+  const [nav, setNav] = useState<{ previous: string | null; next: string | null }>({ previous: null, next: null });
   const [metrics, setMetrics] = useState<MetricReading[]>([]);
   // مفتاح المؤشر ← قيمُه عبر الفترات، أقدمُها أوّلاً
   const [series, setSeries] = useState<Record<string, { period_start: string; value: number }[]>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  // يُعاد به تحميل «مصادر الأرقام» بعد «سحب الآن»
+  const [sourcesKey, setSourcesKey] = useState(0);
 
   // ألواح المنصة — فلاترها الخاصة باقية كما كانت
   const [dash, setDash] = useState<DashboardData | null>(null);
@@ -76,6 +80,7 @@ export default function Analytics() {
         setMetrics(rows);
         // الخادم يردّ حدود الفترة الفعلية — أيُّ يومٍ أُرسل يُردّ إلى بدايتها
         if (d.period?.start) setStart(d.period.start);
+        setNav({ previous: d.previous?.start ?? null, next: d.next?.start ?? null });
         loadSeries(rows.map((r: MetricReading) => r.key));
       })
       .catch((e) => setMsg(e.message))
@@ -126,16 +131,14 @@ export default function Analytics() {
   async function syncNow() {
     setMsg('جارٍ السحب…');
     try {
+      /* لقطات المنشورات أوّلاً، في كل تبويب، ثم المصادر والاحتساب. كانت
+         تُسحب بعد الاحتساب وفي تبويبات الألواح وحدها، فيُحتسب الوصول
+         والتفاعل من لقطاتٍ قديمة وتتقدّم الجداول على البطاقات إلى الغد.
+         والصمت قرار: عطلُ هذا السحب تقوله «مصادر الأرقام» بسببه. */
+      await api.post('/analytics/refresh').catch(() => {});
+
       const d = await api.post(`/metrics/sync?period=${period}${start ? `&start=${start}` : ''}`);
       const failed = (d.sources || []).filter((s: any) => !s.ok);
-
-      /* لوحات المنصات تقرأ لقطات النشر لا المؤشرات، ومصدرُها سحبٌ آخر
-         يجريه الكرون كل ساعة. فـ«سحب الآن» يسحبهما معاً وإلا بقيت
-         الأرقام المعروضة تحت الزرّ على حالها ويُقرأ الزرّ عاطلاً. */
-      if (PANEL_LAYERS.has(tab)) {
-        // الصمت قرار: سحبٌ ثانويّ داخل «سحب الآن»، وخبرُ الأوّل يُقال أدناه
-        await api.post('/analytics/refresh').catch(() => {});
-      }
 
       setMsg(
         failed.length
@@ -144,6 +147,7 @@ export default function Analytics() {
       );
       loadMetrics();
       if (PANEL_LAYERS.has(tab)) loadDashboard();
+      setSourcesKey((k) => k + 1);
     } catch (e: any) {
       setMsg(e.message);
     }
@@ -179,13 +183,25 @@ export default function Analytics() {
             </div>
           </div>
           <div className="spacer" />
+          {/* الفترات الماضية محفوظةٌ بأرقامها — تُبلغ بالسابق، ويعود التالي حتى الجارية */}
           {start && (
-            <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-              تبدأ <bdi>{start}</bdi> · {CADENCE_LABELS[period]}
-            </span>
+            <div className="row" style={{ gap: 'var(--space-2)' }}>
+              <button type="button" className="btn ghost sm" disabled={!nav.previous} onClick={() => nav.previous && setStart(nav.previous)}>
+                <ChevronRight size={20} className="chev-dir" aria-hidden="true" /> السابق
+              </button>
+              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                تبدأ <bdi>{formatDate(`${start}T12:00:00`)}</bdi> · {CADENCE_LABELS[period]}
+              </span>
+              <button type="button" className="btn ghost sm" disabled={!nav.next} onClick={() => nav.next && setStart(nav.next)}>
+                التالي <ChevronLeft size={20} className="chev-dir" aria-hidden="true" />
+              </button>
+            </div>
           )}
         </div>
       </div>
+
+      {/* من أين يأتي كل رقم — قبل التبويبات لأنها تخصّ كل رقمٍ فيها */}
+      {!isCatalogue && <DataSources period={period} start={start} refreshKey={sourcesKey} />}
 
       <nav className="metric-tabs" aria-label="طبقات التحليل">
         {LAYERS.map((l) => (

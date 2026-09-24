@@ -65,7 +65,12 @@ webhookRoutes.post('/socialapi', async (c) => {
   try { evt = JSON.parse(raw); } catch { return c.text('bad request', 400); }
   const event = String(evt?.event || evt?.type || '');
   if (INBOX_EVENTS.includes(event)) {
-    c.executionCtx.waitUntil(syncComments(c.env).catch(() => {}));
+    /* دورةٌ تزايدية بحصّتها، لا مسحٌ كامل لكل حدث: التعليقات تصل دفعاتٍ،
+       ومزامنةٌ كاملة لكلٍّ منها تستهلك الحصّة مرّاتٍ على الشيء نفسه. والقفل
+       يجمع الدفعة في دورةٍ واحدة — ما يصل خلالها تلتقطه التالية. */
+    c.executionCtx.waitUntil(
+      syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }).catch(() => {}),
+    );
   }
   return c.text('ok', 200);
 });

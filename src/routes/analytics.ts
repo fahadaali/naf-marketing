@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { pullAnalytics, ingestExportVideos } from '../services/analytics';
+import { pullAnalytics, ingestExportVideos, readAnalyticsReport, readAnalyticsHistoryReport } from '../services/analytics';
+import { readInboxReport, inboxHistoryDoneAt } from '../services/commentsSync';
+import { parsePeriod, periodBoundsUtc, periodOf, isPeriodKind } from '../services/period';
 import { listStaleContent } from '../services/alerts';
 import { providerKey } from '../adapters';
 import { createAnalyticsExport, listAnalyticsExports, getAnalyticsExport, listSocialApiAccounts } from '../adapters/socialapi';
@@ -110,6 +112,85 @@ analyticsRoutes.get('/dashboard', async (c) => {
     topPosts: topPosts.results,
     pipeline: pipeline.results,
     campaigns: campaigns.results,
+  });
+});
+
+/* ═══ مصادر الأرقام ═══
+
+   جوابُ سؤالٍ واحد: رقمٌ غائبٌ أو صفرٌ في هذه الشاشة — أمِن مصدرٍ غير مربوط،
+   أم من مصدرٍ مربوطٍ لم يُسحب منه شيء، أم من مصدرٍ سُحب ولم يُعلن الرقم؟
+   فلكل مصدرٍ حالةُ آخر سحبٍ وسببُ تعذّره، ومعها ما وصل منه في الفترة
+   المعروضة: منشوراتٌ لها أرقام من كم منشور، وعناصرُ صندوقٍ رُدّ على كم منها،
+   ومحتملون تأهّل كم منهم. والحالة من تقرير السحب نفسه لا من تخمين. */
+analyticsRoutes.get('/sources', async (c) => {
+  const kind = c.req.query('period');
+  const start = c.req.query('start');
+  const p = (start ? parsePeriod(kind ?? 'monthly', start) : null) ?? periodOf(isPeriodKind(kind) ? kind : 'monthly');
+  const { from, to } = periodBoundsUtc(p);
+
+  const posts = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n,
+            SUM(CASE WHEN reach IS NOT NULL OR impressions IS NOT NULL OR engagement IS NOT NULL THEN 1 ELSE 0 END) AS measured
+     FROM analytics_snapshots
+     WHERE sent_at >= ? AND sent_at < ? AND COALESCE(source, '') <> 'newsletter' AND platform <> 'email'`,
+  )
+    .bind(from, to)
+    .first<{ n: number; measured: number | null }>();
+
+  const inbox = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n, SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied
+     FROM platform_comments WHERE created_at >= ? AND created_at < ?`,
+  )
+    .bind(from, to)
+    .first<{ n: number; replied: number | null }>();
+
+  const { results: integrations } = await c.env.DB.prepare(
+    `SELECT key, is_enabled, last_sync_status, last_error, last_ok_at FROM integrations ORDER BY key`,
+  ).all<{ key: string; is_enabled: number; last_sync_status: string; last_error: string | null; last_ok_at: string | null }>();
+
+  // المؤهلون بحالات الإعدادات نفسها التي يحتسب بها الاحتساب — لا بقائمةٍ ثانية
+  const statusRow = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'mql_statuses'").first<{ value: string }>();
+  let mqlStatuses: string[] = [];
+  try {
+    const parsed = JSON.parse(statusRow?.value || '[]');
+    mqlStatuses = Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch { mqlStatuses = []; }
+  const leads = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n,
+            SUM(CASE WHEN status IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END) AS mql
+     FROM crm_leads WHERE created_at >= ? AND created_at < ?`,
+  )
+    .bind(JSON.stringify(mqlStatuses), from, to)
+    .first<{ n: number; mql: number | null }>();
+
+  const provider = ((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>())?.value
+    || c.env.PROVIDER_NAME || 'mock').toLowerCase();
+
+  /* أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده. فمن فتح
+     السنة الماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد. */
+  let history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null = null;
+  if (provider === 'socialapi') {
+    const postsHistory = await readAnalyticsHistoryReport(c.env);
+    history = {
+      posts: { accounts: postsHistory?.historyAccounts ?? null, done: postsHistory?.historyDone ?? null },
+      inbox: { doneAt: await inboxHistoryDoneAt(c.env) },
+    };
+  }
+
+  return c.json({
+    period: p,
+    provider,
+    history,
+    posts: { report: await readAnalyticsReport(c.env), count: posts?.n ?? 0, measured: posts?.measured ?? 0 },
+    inbox: { report: await readInboxReport(c.env), count: inbox?.n ?? 0, replied: inbox?.replied ?? 0 },
+    crm: { leads: leads?.n ?? 0, mql: leads?.mql ?? 0, mql_statuses: mqlStatuses },
+    integrations: integrations.map((i) => ({
+      key: i.key,
+      is_enabled: i.is_enabled === 1,
+      last_sync_status: i.last_sync_status,
+      last_error: i.last_error,
+      last_ok_at: i.last_ok_at,
+    })),
   });
 });
 
@@ -256,13 +337,13 @@ analyticsRoutes.get('/alerts', async (c) => {
   return c.json({ stale });
 });
 
-// سحب فوري (إضافةً إلى Cron)
+// سحب فوري (إضافةً إلى Cron) — بحصّة الطلب اليدوي، ويعود بتقرير السحب
 analyticsRoutes.post('/refresh', async (c) => {
   try {
-    const captured = await pullAnalytics(c.env);
-    return c.json({ ok: true, captured });
+    const captured = await pullAnalytics(c.env, { trigger: 'manual' });
+    return c.json({ ok: true, captured, report: await readAnalyticsReport(c.env) });
   } catch (e: any) {
-    return c.json({ error: `فشل سحب التحليلات: ${String(e?.message || e)}` }, 502);
+    return c.json({ error: `تعذّر السحب. ${String(e?.message || e)}` }, 502);
   }
 });
 

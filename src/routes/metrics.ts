@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { parsePeriod, periodOf, previousPeriod, isPeriodKind, type Period } from '../services/period';
+import { parsePeriod, periodOf, previousPeriod, nextPeriod, isPeriodKind, type Period } from '../services/period';
 import { computeAuto, listDefinitions, markReviewed, readBoard, readLayer, readSeries, readSeriesBulk, recordManual } from '../services/metrics';
 import { syncAllSources } from '../services/metricSync';
 import { syncCrm } from '../services/crmSync';
@@ -32,14 +32,14 @@ metricsRoutes.get('/definitions', async (c) => {
 // اللوحة المختصرة — عشرة أرقام بترتيبها المسجَّل
 metricsRoutes.get('/board', async (c) => {
   const p = resolvePeriod(c);
-  return c.json({ period: p, previous: previousPeriod(p), metrics: await readBoard(c.env, p) });
+  return c.json({ period: p, previous: previousPeriod(p), next: nextPeriod(p), metrics: await readBoard(c.env, p) });
 });
 
 // طبقةٌ واحدة أو كلها
 metricsRoutes.get('/layer', async (c) => {
   const p = resolvePeriod(c);
   const layer = c.req.query('layer') || undefined;
-  return c.json({ period: p, previous: previousPeriod(p), metrics: await readLayer(c.env, p, layer) });
+  return c.json({ period: p, previous: previousPeriod(p), next: nextPeriod(p), metrics: await readLayer(c.env, p, layer) });
 });
 
 /* سلاسل عدّة مؤشرات دفعةً — خطّ الاتجاه في بطاقات اللوحة والطبقة.

@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, FileOutput, RefreshCw, TriangleAlert } from 'lucide-react';
-import { api } from '../../api';
+import { api, formatRiyadh } from '../../api';
 import { formatNumber, isolate } from '../../lib/format';
 import StatusBadge from '../../components/StatusBadge';
 import Bar from '../../components/Bar';
 import { RatingValue } from '../../components/Rating';
+import { SyncStateChip } from '../../components/MetricSources';
+import { INTEGRATION_LABELS } from '../../metrics';
 import { PlatformIcon, platformLabel } from '../../platforms';
+
+/** رقمٌ لم يُعلنه المزوّد يُعرض «—» لا صفراً — الغياب ليس صفراً. */
+function numOrDash(v: number | null | undefined) {
+  return v === null || v === undefined ? '—' : <bdi>{formatNumber(v)}</bdi>;
+}
 
 /* ألواح المنصة — ما تعرفه المنصة عن نفسها من لقطات المزوّد وسجلّ الاعتماد.
    كانت كلُّها في شاشةٍ واحدة طويلة، وهي هنا موزّعةٌ على طبقاتها من الدليل:
@@ -15,10 +22,11 @@ import { PlatformIcon, platformLabel } from '../../platforms';
 
 export type DashboardData = {
   totals?: Record<string, number>;
-  byPlatform?: { platform: string; impressions: number; reach: number; engagement: number }[];
+  // `null` = لم يُعلنه المزوّد لأيّ منشورٍ في المنصّة
+  byPlatform?: { platform: string; impressions: number | null; reach: number | null; engagement: number | null }[];
   topPosts?: {
     post_id: string | null; title: string; platform: string; external_url: string | null;
-    engagement: number; impressions: number; via_platform: number;
+    engagement: number | null; impressions: number | null; via_platform: number;
   }[];
   pipeline?: { status: string; count: number }[];
   campaigns?: { id: string; name: string; impressions: number; engagement: number }[];
@@ -37,7 +45,7 @@ export function PlatformBreakdown({ data }: { data: DashboardData | null }) {
             <span>{platformLabel(p.platform)}</span>
             <div className="spacer" />
             <span className="muted">
-              <bdi>{formatNumber(p.impressions || 0)}</bdi> ظهور
+              {numOrDash(p.impressions)} ظهور
             </span>
           </div>
           <Bar value={p.impressions || 0} max={max} />
@@ -101,8 +109,8 @@ export function TopPosts({ data }: { data: DashboardData | null }) {
                   </span>
                 </td>
                 <td><span className={`badge ${p.via_platform ? 'green' : 'gray'}`}>{p.via_platform ? 'المنصة' : 'خارجي'}</span></td>
-                <td><bdi>{formatNumber(p.engagement)}</bdi></td>
-                <td><bdi>{formatNumber(p.impressions)}</bdi></td>
+                <td>{numOrDash(p.engagement)}</td>
+                <td>{numOrDash(p.impressions)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
@@ -487,6 +495,200 @@ export function VideoAnalyticsExport({ onImported }: { onImported: () => void })
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ===== مصادر الأرقام =====
+   جوابُ سؤالٍ واحد: رقمٌ غائبٌ أو صفرٌ في هذه الشاشة — أمِن مصدرٍ غير مربوط،
+   أم من مصدرٍ مربوطٍ لم يصل منه شيء، أم من مصدرٍ سُحب ولم يُعلن الرقم؟
+   والحالة من تقرير السحب نفسه، والعدّ من الفترة المعروضة. وتُفتح وحدها
+   حين يكون في مصدرٍ ما يحتاج انتباهاً، وتُطوى حين يسلم كلُّها. */
+
+type SyncReportLite = { ok: boolean; complete: boolean; errors: string[]; lastOkAt: string | null } | null;
+
+type SourcesData = {
+  posts: { report: SyncReportLite; count: number; measured: number };
+  inbox: { report: SyncReportLite; count: number; replied: number };
+  crm: { leads: number; mql: number; mql_statuses: string[] };
+  integrations: { key: string; is_enabled: boolean; last_sync_status: string; last_error: string | null; last_ok_at: string | null }[];
+  /** أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده، وإلا `null`. */
+  history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null;
+};
+
+/**
+ * سطرُ السجلّ القديم — خبرٌ لا حالة: القراءة تجري على دفعاتٍ كل ساعة ولا عطل
+ * فيها. ومن فتح فترةً ماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد.
+ */
+function HistoryLine({ done, accounts }: { done: boolean; accounts?: { done: number; of: number } | null }) {
+  return (
+    <p className="source-line">
+      {done
+        ? 'السجلّ القديم مقروءٌ إلى أقدم منشور.'
+        : accounts
+          ? <>يُقرأ السجلّ القديم على دفعات كل ساعة — اكتمل <bdi>{formatNumber(accounts.done)}</bdi> من <bdi>{formatNumber(accounts.of)}</bdi> حساباً.</>
+          : 'يُقرأ السجلّ القديم على دفعات كل ساعة.'}
+    </p>
+  );
+}
+
+/** حالة مصدرٍ من تقرير سحبه — بمفردات «حالات التكامل» نفسها. */
+function reportStatus(r: SyncReportLite): string {
+  if (!r) return 'never_synced';
+  return r.ok ? 'ok' : 'sync_failed';
+}
+
+function Warn({ children }: { children: ReactNode }) {
+  return (
+    <p className="source-warn">
+      <TriangleAlert size={16} aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+function SourceRow({
+  label, enabled, status, lastOkAt, error, partial, children,
+}: {
+  label: string; enabled: boolean; status: string; lastOkAt: string | null; error?: string | null;
+  partial?: boolean; children?: ReactNode;
+}) {
+  return (
+    <li>
+      <div className="source-head">
+        <strong style={{ fontSize: 'var(--text-sm)' }}>{label}</strong>
+        <SyncStateChip enabled={enabled} status={status} />
+      </div>
+      {enabled && (lastOkAt || error) && (
+        <p className="source-line">
+          {lastOkAt && <>آخر سحبٍ ناجح <bdi>{formatRiyadh(lastOkAt)}</bdi></>}
+          {error && <>{lastOkAt ? ' — ' : ''}{error}</>}
+        </p>
+      )}
+      {children}
+      {partial && <Warn>لم يكتمل السحب. يُستكمل الباقي في السحب التالي.</Warn>}
+    </li>
+  );
+}
+
+export function DataSources({ period, start, refreshKey }: { period: string; start: string; refreshKey: number }) {
+  const [data, setData] = useState<SourcesData | null>(null);
+  const [open, setOpen] = useState<boolean | null>(null); // null = بحسب حال المصادر
+
+  useEffect(() => {
+    const q = new URLSearchParams({ period });
+    if (start) q.set('start', start);
+    // تُخفي نفسها إن تعذّرت — انظر `StaleAlerts` لسبب الصمت
+    api.get(`/analytics/sources?${q}`).then(setData).catch(() => setData(null));
+  }, [period, start, refreshKey]);
+
+  if (!data) return null;
+
+  const crm = data.integrations.find((i) => i.key === 'crm');
+  const linked = data.integrations.filter((i) => i.key !== 'crm' && i.is_enabled);
+  const unlinked = data.integrations.filter((i) => i.key !== 'crm' && !i.is_enabled);
+  const unmeasured = data.posts.count - data.posts.measured;
+  const mqlMismatch = !!crm?.is_enabled && data.crm.leads > 0 && data.crm.mql === 0;
+  const troubled = (r: SyncReportLite) => !!r && (!r.ok || !r.complete);
+
+  const needsAttention =
+    troubled(data.posts.report) || troubled(data.inbox.report) || unmeasured > 0 || mqlMismatch ||
+    data.integrations.some((i) => i.is_enabled && i.last_sync_status === 'sync_failed');
+  const expanded = open ?? needsAttention;
+
+  return (
+    <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
+      <button type="button" className="row row-link" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
+        <h4 style={{ margin: 0 }}>مصادر الأرقام</h4>
+        <div className="spacer" />
+        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{expanded ? 'إخفاء' : 'عرض'}</span>
+      </button>
+
+      {expanded && (
+        <>
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: 'var(--space-2) 0 0' }}>
+            من أين يأتي كل رقم في هذه الشاشة، ومتى سُحب آخر مرّة.
+          </p>
+          <ul className="source-list">
+            <SourceRow
+              label="منشورات مزوّد النشر"
+              enabled
+              status={reportStatus(data.posts.report)}
+              lastOkAt={data.posts.report?.lastOkAt ?? null}
+              error={data.posts.report && !data.posts.report.ok ? data.posts.report.errors[0] : null}
+              partial={!!data.posts.report?.ok && !data.posts.report.complete}
+            >
+              <p className="source-line">
+                {data.posts.count === 0
+                  ? 'لا منشور في هذه الفترة بعد. انشر محتوى ثم اسحب التحليلات.'
+                  : <><bdi>{formatNumber(data.posts.measured)}</bdi> من <bdi>{formatNumber(data.posts.count)}</bdi> منشوراً في هذه الفترة لها أرقام</>}
+              </p>
+              {unmeasured > 0 && (
+                <Warn><bdi>{formatNumber(unmeasured)}</bdi> منشوراً بلا أرقام بعد — لا تُحسب أصفاراً، وتُطلب في السحب التالي.</Warn>
+              )}
+              {/* حسابٌ لا سجلّ له على منصّته (الملف التجاري مثلاً) لا يُقرأ له شيء — فلا سطر */}
+              {data.history && data.history.posts.accounts !== 0 && (
+                <HistoryLine
+                  done={!!data.history.posts.accounts && data.history.posts.done === data.history.posts.accounts}
+                  accounts={data.history.posts.accounts ? { done: data.history.posts.done ?? 0, of: data.history.posts.accounts } : null}
+                />
+              )}
+            </SourceRow>
+
+            <SourceRow
+              label="التعليقات والرسائل"
+              enabled
+              status={reportStatus(data.inbox.report)}
+              lastOkAt={data.inbox.report?.lastOkAt ?? null}
+              error={data.inbox.report && !data.inbox.report.ok ? data.inbox.report.errors[0] : null}
+              partial={!!data.inbox.report?.ok && !data.inbox.report.complete}
+            >
+              <p className="source-line">
+                <bdi>{formatNumber(data.inbox.count)}</bdi> عنصراً في هذه الفترة، رُدّ على <bdi>{formatNumber(data.inbox.replied)}</bdi>
+              </p>
+              {data.history && <HistoryLine done={!!data.history.inbox.doneAt} />}
+            </SourceRow>
+
+            {crm && (
+              <SourceRow
+                label={INTEGRATION_LABELS.crm}
+                enabled={crm.is_enabled}
+                status={crm.last_sync_status}
+                lastOkAt={crm.last_ok_at}
+                error={crm.last_sync_status === 'sync_failed' ? crm.last_error : null}
+              >
+                {crm.is_enabled && (
+                  <p className="source-line">
+                    <bdi>{formatNumber(data.crm.leads)}</bdi> محتملاً في هذه الفترة، والمؤهلون تسويقياً <bdi>{formatNumber(data.crm.mql)}</bdi>
+                  </p>
+                )}
+                {mqlMismatch && (
+                  <Warn>لا يطابق أيٌّ منهم حالاتِ التأهيل المسجّلة: {data.crm.mql_statuses.join('، ')}</Warn>
+                )}
+              </SourceRow>
+            )}
+
+            {linked.map((i) => (
+              <SourceRow
+                key={i.key}
+                label={INTEGRATION_LABELS[i.key] ?? i.key}
+                enabled
+                status={i.last_sync_status}
+                lastOkAt={i.last_ok_at}
+                error={i.last_sync_status === 'sync_failed' ? i.last_error : null}
+              />
+            ))}
+
+            {unlinked.length > 0 && (
+              <li>
+                <p className="source-line" style={{ marginTop: 0 }}>
+                  غير مربوط: {unlinked.map((i) => INTEGRATION_LABELS[i.key] ?? i.key).join('، ')}
+                </p>
+              </li>
+            )}
+          </ul>
+        </>
       )}
     </div>
   );

@@ -39,17 +39,22 @@ const STATUS_BADGE: Record<string, string> = {
   sync_failed: 'red',
 };
 
-function StateChip({ i }: { i: Integration }) {
-  if (!i.is_enabled) {
+/** شارة حالة السحب — تُعرض هنا وفي «مصادر الأرقام» بالمفردات والأيقونات نفسها. */
+export function SyncStateChip({ enabled, status }: { enabled: boolean; status: string }) {
+  if (!enabled) {
     return <span className="badge gray"><Link2Off size={13} /> غير مربوط</span>;
   }
-  const Icon = STATUS_ICON[i.last_sync_status] ?? CircleHelp;
+  const Icon = STATUS_ICON[status] ?? CircleHelp;
   return (
-    <span className={`badge ${STATUS_BADGE[i.last_sync_status] ?? 'gray'}`}>
+    <span className={`badge ${STATUS_BADGE[status] ?? 'gray'}`}>
       <Icon size={13} />
-      {SYNC_STATUS_LABELS[i.last_sync_status] ?? i.last_sync_status}
+      {SYNC_STATUS_LABELS[status] ?? status}
     </span>
   );
+}
+
+function StateChip({ i }: { i: Integration }) {
+  return <SyncStateChip enabled={i.is_enabled} status={i.last_sync_status} />;
 }
 
 export default function MetricSources() {
