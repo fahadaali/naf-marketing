@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { syncComments, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply } from '../services/commentsSync';
+import {
+  syncComments, readInboxReport, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply, INBOX_BUDGET,
+} from '../services/commentsSync';
 import type { ModerateAction } from '../adapters/provider';
 import { suggestReplies } from '../services/claude';
 import { htmlToText } from '../util';
@@ -44,17 +46,20 @@ commentRoutes.get('/', async (c) => {
   return c.json({
     comments: results,
     counts: { all: counts?.all_count || 0, unreplied: counts?.unreplied || 0, replied: counts?.replied || 0 },
+    // تقرير آخر سحب — يقول للشاشة متى سُحب الصندوق وهل اكتمل وما تعذّر منه
+    sync: await readInboxReport(c.env),
   });
 });
 
-// جلب فوري (إضافةً إلى الدورة الآلية كل ساعة)
+/* جلب فوري (إضافةً إلى الدورة الآلية) — كاملٌ: صفحاتٌ أكثر، وكل منشورٍ من أوّله.
+   والأعطال في تقرير الدورة لا في استثناء: نوعٌ تعذّر لا يُسقط ما قُرئ من غيره.
+   ويُردّ ٥٠٢ حين لم يُقرأ شيءٌ أصلاً — مفتاحٌ مرفوض أو مزوّدٌ لا يجيب. */
 commentRoutes.post('/refresh', async (c) => {
-  try {
-    const added = await syncComments(c.env);
-    return c.json({ ok: true, added });
-  } catch (e: any) {
-    return c.json({ error: `فشل جلب التعليقات: ${String(e?.message || e)}` }, 502);
+  const report = await syncComments(c.env, { mode: 'full', budget: INBOX_BUDGET.manual });
+  if (report && !report.ok && report.kinds.comment.ok !== true) {
+    return c.json({ error: `تعذّر السحب. ${report.errors[0] ?? ''}`.trim(), report }, 502);
   }
+  return c.json({ ok: true, added: report?.added ?? 0, report });
 });
 
 // تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية

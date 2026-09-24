@@ -1,0 +1,404 @@
+// مزامنة صندوق التعليقات على قاعدةٍ حقيقية بالمخطّط الفعلي، ومزوّدٍ مخنوق.
+//
+// ما يُثبَّت هنا هو ما غاب فغابت معه التعليقات: الصفحات تُتبع إلى آخرها،
+// والدورة تقف عند ميزانيتها ولا تسقط، والردّ المكتوب من تطبيق المنصّة يُعرف
+// فينقل التعليق إلى «تم الرد» — وما لم يُكتب منّا لا يُنسب إلينا.
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: new (path: string) => any;
+};
+
+import { syncComments, readInboxReport, postPriority } from '../src/services/commentsSync';
+import { mapComment, isOwnAuthor, nextCursor } from '../src/adapters/socialapi';
+
+const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
+
+function d1(db: any) {
+  const stmt = (sql: string, binds: unknown[] = []): any => ({
+    sql,
+    binds,
+    bind: (...args: unknown[]) => stmt(sql, args),
+    all: async () => ({ results: db.prepare(sql).all(...binds) }),
+    first: async () => db.prepare(sql).get(...binds) ?? null,
+    run: async () => {
+      const r = db.prepare(sql).run(...binds);
+      return { meta: { changes: r.changes } };
+    },
+  });
+  return {
+    prepare: (sql: string) => stmt(sql),
+    batch: async (stmts: any[]) => stmts.map((s) => {
+      const r = db.prepare(s.sql).run(...s.binds);
+      return { meta: { changes: r.changes } };
+    }),
+  };
+}
+
+function build(): any {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const f of readdirSync(MIGRATIONS).filter((f) => /^0\d+.*\.sql$/.test(f)).sort()) {
+    db.exec(readFileSync(join(MIGRATIONS, f), 'utf8'));
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'socialapi')").run();
+  return db;
+}
+
+/* ─── مزوّدٌ مخنوق ─── */
+
+type Handler = (url: URL, method: string) => { status?: number; body: unknown } | undefined;
+let handlers: Handler[] = [];
+let calls: string[] = [];
+
+/** يُسجّل مساراً مخنوقاً — والأحدث تسجيلاً يسبق، فيعلو ما يعرّفه الاختبار على الافتراضي. */
+function route(method: string, path: string | RegExp, respond: (url: URL) => { status?: number; body: unknown }): void {
+  handlers.unshift((url, m) => {
+    if (m !== method) return undefined;
+    const p = url.pathname.replace(/^\/v1/, '');
+    const ok = typeof path === 'string' ? p === path : path.test(p);
+    return ok ? respond(url) : undefined;
+  });
+}
+
+function install(): void {
+  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = (init?.method || 'GET').toUpperCase();
+    calls.push(`${method} ${url.pathname.replace(/^\/v1/, '')}${url.search}`);
+    for (const h of handlers) {
+      const r = h(url, method);
+      if (r) {
+        const status = r.status ?? 200;
+        return { ok: status < 400, status, text: async () => JSON.stringify(r.body) } as unknown as Response;
+      }
+    }
+    return { ok: false, status: 404, text: async () => '{"error":"not found"}' } as unknown as Response;
+  });
+}
+
+const ACCOUNT = { id: 'acc_ig', platform: 'instagram', name: 'NAF Law', username: 'naf.law' };
+
+function comment(i: number, extra: Record<string, unknown> = {}) {
+  return {
+    id: `sapi_cmt_${i}`,
+    platform_id: `c${i}`,
+    platform: 'instagram',
+    author: { id: `u${i}`, name: `عميل ${i}` },
+    text: `سؤال رقم ${i}؟`,
+    created_at: `2026-09-${String(1 + (i % 20)).padStart(2, '0')}T10:00:00Z`,
+    ...extra,
+  };
+}
+
+let db: any;
+let env: any;
+
+function rows(where = '1=1'): any[] {
+  return db.prepare(`SELECT * FROM platform_comments WHERE ${where} ORDER BY provider_comment_id`).all();
+}
+
+beforeEach(() => {
+  db = build();
+  env = { DB: d1(db), SOCIALAPI_API_KEY: 'sapi_key_test' };
+  handlers = [];
+  calls = [];
+  install();
+  route('GET', '/accounts', () => ({ body: { data: [ACCOUNT] } }));
+  // لا مراجعات ولا محادثات ولا إشارات ما لم يُعرّفها الاختبار
+  route('GET', '/inbox/reviews', () => ({ status: 501, body: { error: 'not supported' } }));
+  route('GET', '/inbox/conversations', () => ({ body: { data: [] } }));
+  route('GET', /^\/accounts\/[^/]+\/mentions$/, () => ({ body: { data: [] } }));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('التعليقات تُقرأ صفحاتٍ إلى آخرها', () => {
+  it('يقرأ أحدث التعليقات على منشورٍ تجاوز الصفحة الأولى', async () => {
+    const all = Array.from({ length: 130 }, (_, i) => comment(i + 1));
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 130 }] } }));
+    route('GET', '/inbox/comments/post1', (url) => {
+      const cursor = url.searchParams.get('cursor');
+      return cursor === 'p2'
+        ? { body: { data: all.slice(100), next_cursor: null } }
+        : { body: { data: all.slice(0, 100), next_cursor: 'p2' } };
+    });
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(report?.ok).toBe(true);
+    expect(rows()).toHaveLength(130);
+    // الأحدث — في الصفحة الثانية — موجود
+    expect(rows("provider_comment_id = 'post1|acc_ig|c130'")).toHaveLength(1);
+    expect(report?.added).toBe(130);
+  });
+
+  it('لا يعدّ الثابت جديداً، ولا يعيد جلب منشورٍ لم تتغيّر بصمتُه', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 2 }] } }));
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1, { reply_count: 0 }), comment(2, { reply_count: 0 })] } }));
+
+    const first = await syncComments(env, { budget: 40 });
+    expect(first?.added).toBe(2);
+
+    calls = [];
+    const second = await syncComments(env, { budget: 40 });
+    expect(second?.added).toBe(0);
+    expect(calls.some((c) => c.startsWith('GET /inbox/comments/post1'))).toBe(false);
+  });
+});
+
+describe('الردّ من خارج المنصة', () => {
+  beforeEach(() => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 3 }] } }));
+  });
+
+  it('ينقل التعليق إلى «تم الرد» حين يجد ردّاً كتبه حسابُنا', async () => {
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1, { reply_count: 1 })] } }));
+    route('GET', '/inbox/comments/post1/c1/replies', () => ({
+      body: { data: [{ id: 'sapi_cmt_r1', platform_id: 'r1', author: { id: 'x', name: 'naf.law' }, text: 'أهلاً، تواصل معنا', created_at: '2026-09-02T12:30:00Z' }] },
+    }));
+
+    const report = await syncComments(env, { budget: 40 });
+    const [row] = rows();
+    expect(row.reply_body).toBe('أهلاً، تواصل معنا');
+    expect(row.reply_source).toBe('external');
+    expect(row.replied_at).toBe('2026-09-02T12:30:00.000Z');
+    expect(row.replied_by).toBeNull();
+    expect(report?.externalReplies).toBe(1);
+  });
+
+  it('لا ينسب إلينا ردَّ غيرنا — يبقى التعليق «بلا رد»', async () => {
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1, { reply_count: 1 })] } }));
+    route('GET', '/inbox/comments/post1/c1/replies', () => ({
+      body: { data: [{ id: 'r1', author: { id: 'u99', name: 'عميل آخر' }, text: 'وأنا كذلك', created_at: '2026-09-02T12:30:00Z' }] },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    const [row] = rows();
+    expect(row.reply_body).toBeNull();
+    expect(row.reply_checked_at).not.toBeNull();
+  });
+
+  it('يقرأ الردّ المضمّن في التعليق بلا نداءٍ ثانٍ', async () => {
+    route('GET', '/inbox/comments/post1', () => ({
+      body: { data: [comment(1, { replies: [{ id: 'r1', author: { username: '@NAF.law' }, text: 'تم', created_at: '2026-09-02T13:00:00Z' }] })] },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    expect(rows()[0].reply_body).toBe('تم');
+    expect(calls.some((c) => c.includes('/replies'))).toBe(false);
+  });
+
+  it('يعدّ تعليقَنا المرتبط بتعليقٍ ردّاً عليه، ولا يُدرجه عنصراً', async () => {
+    route('GET', '/inbox/comments/post1', () => ({
+      body: {
+        data: [
+          comment(1, { reply_count: 0 }),
+          { id: 'sapi_cmt_9', platform_id: 'c9', parent_id: 'c1', author: { name: 'NAF Law' }, text: 'نرحب بتواصلك', created_at: '2026-09-02T14:00:00Z' },
+        ],
+      },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    const all = rows();
+    expect(all).toHaveLength(1);
+    expect(all[0].reply_body).toBe('نرحب بتواصلك');
+    expect(all[0].reply_source).toBe('external');
+  });
+
+  it('يُخرج من الصندوق تعليقاً لنا دخله قبلُ عنصراً ينتظر ردّاً', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at)
+       VALUES ('cm_old', 'instagram', 'post1|acc_ig|c50', 'comment', 'naf.law', 'رابط الموقع في التعليق الأول', '2026-09-01T09:00:00Z')`,
+    ).run();
+    route('GET', '/inbox/comments/post1', () => ({
+      body: { data: [{ id: 'sapi_cmt_50', platform_id: 'c50', author: { name: 'naf.law' }, text: 'رابط الموقع في التعليق الأول', created_at: '2026-09-01T09:00:00Z' }] },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('يجرّب المسار الآخر للردود إن لم يُجب الأول، ويتذكّر ما أجاب', async () => {
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1, { reply_count: 1 })] } }));
+    route('GET', '/accounts/acc_ig/interactions/sapi_cmt_1/replies', () => ({
+      body: { data: [{ id: 'r1', author: { name: 'naf.law' }, text: 'تفضّل', created_at: '2026-09-03T08:00:00Z' }] },
+    }));
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(rows()[0].reply_body).toBe('تفضّل');
+    expect(report?.repliesPath).toBe('interactions');
+    expect((await readInboxReport(env))?.repliesPath).toBe('interactions');
+  });
+});
+
+describe('الميزانية', () => {
+  it('تقف الدورة عند حدّها واقفةً لا ساقطة، وتُكمل التالية ما بقي', async () => {
+    const posts = Array.from({ length: 12 }, (_, i) => ({ id: `post${i}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }));
+    route('GET', '/inbox/comments', () => ({ body: { data: posts } }));
+    route('GET', /^\/inbox\/comments\/post\d+$/, (url) => {
+      const id = url.pathname.split('/').pop() as string;
+      return { body: { data: [{ ...comment(1, { reply_count: 0 }), platform_id: `${id}-c` }] } };
+    });
+
+    const first = await syncComments(env, { budget: 12 });
+    expect(first?.ok).toBe(true);
+    expect(first?.complete).toBe(false);
+    expect(first?.calls).toBeLessThanOrEqual(12);
+    const afterFirst = rows().length;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(afterFirst).toBeLessThan(12);
+
+    // دورات أخرى بالحصّة نفسها حتى يكتمل الصندوق
+    for (let i = 0; i < 6 && rows().length < 12; i++) await syncComments(env, { budget: 12 });
+    expect(rows()).toHaveLength(12);
+  });
+
+  it('يقول ما تعذّر ولا يُسقط ما قُرئ', async () => {
+    route('GET', '/inbox/comments', () => ({ status: 500, body: { error: 'upstream' } }));
+    route('GET', '/inbox/reviews', () => ({ body: { data: [{ id: 'sapi_rev_1', account_id: 'acc_g', platform: 'google', rating: 5, text: 'خدمة ممتازة' }] } }));
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(report?.ok).toBe(false);
+    expect(report?.kinds.comment.ok).toBe(false);
+    expect(report?.kinds.comment.error).toContain('500');
+    expect(report?.kinds.review.ok).toBe(true);
+    expect(rows("kind = 'review'")).toHaveLength(1);
+  });
+});
+
+describe('المراجعات', () => {
+  it('ينقل المراجعة المردود عليها في الملف التجاري إلى «تم الرد» بوقتها', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    route('GET', '/inbox/reviews', () => ({
+      body: {
+        data: [
+          { id: 'sapi_rev_1', account_id: 'acc_g', platform: 'google', rating: 2, text: 'تأخروا في الرد', created_at: '2026-09-05T08:00:00Z',
+            reply: { text: 'نعتذر ونتواصل معك', created_at: '2026-09-05T10:00:00Z' } },
+          { id: 'sapi_rev_2', account_id: 'acc_g', platform: 'google', rating: 5, text: 'ممتاز', created_at: '2026-09-06T08:00:00Z' },
+        ],
+      },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    const replied = rows("provider_comment_id = 'rv:acc_g:sapi_rev_1'")[0];
+    expect(replied.reply_source).toBe('external');
+    expect(replied.replied_at).toBe('2026-09-05T10:00:00.000Z');
+    expect(rows("provider_comment_id = 'rv:acc_g:sapi_rev_2'")[0].reply_body).toBeNull();
+  });
+
+  it('يقرأ الشكل الأقدم: ملخّصٌ لكل حساب ثم مراجعاته', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    route('GET', '/inbox/reviews', () => ({ body: { data: [{ account_id: 'acc_g', platform: 'google', total: 1, average: 4 }] } }));
+    route('GET', '/inbox/reviews/acc_g', () => ({ body: { data: [{ id: 'r9', rating: 4, text: 'جيد جداً' }] } }));
+
+    await syncComments(env, { budget: 40 });
+    expect(rows("provider_comment_id = 'rv:acc_g:r9'")).toHaveLength(1);
+  });
+});
+
+describe('الرسائل الخاصة', () => {
+  beforeEach(() => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+  });
+
+  it('يعدّ المحادثة مردوداً عليها حين تكون آخر رسالةٍ منّا', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at)
+       VALUES ('cm_dm', 'instagram', 'dm:cv1:acc_ig', 'dm', 'سارة', 'أحتاج استشارة', '2026-09-07T08:00:00Z')`,
+    ).run();
+    route('GET', '/inbox/conversations', () => ({
+      body: { data: [{ id: 'cv1', account_id: 'acc_ig', platform: 'instagram', participant_name: 'سارة',
+        last_message: { text: 'أرسلنا لك الرابط', direction: 'outgoing', created_at: '2026-09-07T09:00:00Z' } }] },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    const [row] = rows();
+    expect(row.body).toBe('أحتاج استشارة');
+    expect(row.reply_body).toBe('أرسلنا لك الرابط');
+    expect(row.reply_source).toBe('external');
+  });
+
+  it('يعيد المحادثة إلى «بلا رد» حين يكتب العميل بعد آخر ردّ', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, reply_body, replied_at, reply_source)
+       VALUES ('cm_dm', 'instagram', 'dm:cv1:acc_ig', 'dm', 'سارة', 'أحتاج استشارة', '2026-09-07T08:00:00Z', 'تفضّلي', '2026-09-07T09:00:00Z', 'platform')`,
+    ).run();
+    route('GET', '/inbox/conversations', () => ({
+      body: { data: [{ id: 'cv1', account_id: 'acc_ig', platform: 'instagram', participant_name: 'سارة',
+        last_message: { text: 'وكم التكلفة؟', direction: 'incoming', created_at: '2026-09-08T10:00:00Z' } }] },
+    }));
+
+    await syncComments(env, { budget: 40 });
+    const [row] = rows();
+    expect(row.body).toBe('وكم التكلفة؟');
+    expect(row.reply_body).toBeNull();
+    expect(row.created_at).toBe('2026-09-08T10:00:00.000Z');
+  });
+});
+
+describe('الرسائل الخاصة بلا وقت', () => {
+  it('لا يعيد فتح محادثةٍ مردودٍ عليها لأن آخر رسالتها بلا وقت', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, reply_body, replied_at, reply_source)
+       VALUES ('cm_dm', 'instagram', 'dm:cv1:acc_ig', 'dm', 'سارة', 'أحتاج استشارة', '2026-09-07T08:00:00Z', 'تفضّلي', '2026-09-07T09:00:00Z', 'platform')`,
+    ).run();
+    route('GET', '/inbox/conversations', () => ({
+      body: { data: [{ id: 'cv1', account_id: 'acc_ig', platform: 'instagram', participant_name: 'سارة',
+        last_message: { text: 'شكراً', direction: 'incoming' } }] },
+    }));
+
+    // مرّتان: وقتٌ مخترع («الآن») كان سيجعل الرسالة أحدث من الردّ في كل دورة
+    await syncComments(env, { budget: 40 });
+    await syncComments(env, { budget: 40 });
+    expect(rows()[0].reply_body).toBe('تفضّلي');
+  });
+});
+
+describe('الإشارات', () => {
+  it('تُقرأ من مسار الحساب، ويُرجع إلى المسار الأقدم إن لم يُجب', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    handlers = handlers.filter((h) => !h(new URL('https://api.social-api.ai/v1/accounts/acc_ig/mentions'), 'GET'));
+    route('GET', '/inbox/mentions', () => ({ body: { data: [{ id: 'm1', author: { name: 'مكتب آخر' }, text: 'شكراً @naf.law', created_at: '2026-09-09T08:00:00Z' }] } }));
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(rows("kind = 'mention'")).toHaveLength(1);
+    expect(report?.mentionsPath).toBe('inbox');
+  });
+});
+
+describe('أدواتٌ صغيرة', () => {
+  it('يقرأ مؤشّر الصفحة بشكليه', () => {
+    expect(nextCursor({ next_cursor: 'a' })).toBe('a');
+    expect(nextCursor({ pagination: { next_cursor: 'b' } })).toBe('b');
+    expect(nextCursor({ data: [] })).toBeNull();
+  });
+
+  it('يقدّم المنشور الجديد ثم المتغيّر، ويتخطّى الثابت في الدورة التزايدية', () => {
+    const now = Date.parse('2026-09-10T12:00:00Z');
+    const post = { postId: 'p', accountId: 'a', platform: 'instagram', signature: '3|' };
+    const st = { inbox_post_id: 'p', account_id: 'a', signature: '3|', synced_at: '2026-09-10T11:50:00Z', tail_cursor: null, needs_more: 0 };
+    expect(postPriority(post, null, false, 'incremental', now)).toBe(0);
+    expect(postPriority({ ...post, signature: '4|' }, st, false, 'incremental', now)).toBe(2);
+    expect(postPriority(post, st, false, 'incremental', now)).toBeNull();
+    expect(postPriority(post, st, false, 'full', now)).toBe(5);
+  });
+
+  it('لا يعدّ الاسم القصير دليلاً على أن الكاتب نحن', () => {
+    expect(isOwnAuthor({ author: { name: 'ن' } }, new Set(['ن']))).toBe(false);
+    expect(isOwnAuthor({ author: { name: 'NAF.law' } }, new Set(['naf.law']))).toBe(true);
+    expect(isOwnAuthor({ is_owner: true }, new Set())).toBe(true);
+  });
+
+  it('يحفظ ترتيب أسبقية معرّف التعليق القديم كي لا يتكرّر سجلّ', () => {
+    expect(mapComment({ id: 'sapi_cmt_1', platform_id: 'c1' }).commentId).toBe('c1');
+    expect(mapComment({ id: 'sapi_cmt_1' }).commentId).toBe('sapi_cmt_1');
+    expect(mapComment({ content: { text: 'نص' } }).body).toBe('نص');
+  });
+});

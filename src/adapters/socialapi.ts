@@ -40,6 +40,14 @@ function decodeCid(cid: string): { postId: string; accountId: string; commentId:
   return { postId: parts[0], accountId: parts[1], commentId: parts[2] };
 }
 
+/** وقتٌ معلن أو `null` — لا «الآن» مكان الغائب: وقتٌ مخترعٌ يجعل كل رسالةٍ أحدث مما قبلها. */
+function isoOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  const d = Number.isFinite(n) && n > 1e9 && n < 1e11 ? new Date(n * 1000) : new Date(v as string);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function toIso(v: unknown): string {
   if (v == null) return new Date().toISOString();
   const n = Number(v);
@@ -340,7 +348,13 @@ export function mapMetrics(metricsObj: any): { reach: number; impressions: numbe
   return { reach, impressions, engagement, raw };
 }
 
-// عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته
+/* ═══ صندوق الوارد ═══
+
+   كل ما في الصندوق «تفاعل» عند المزوّد: معرّفٌ ثابت ونوعٌ ومنصّةٌ وكاتبٌ
+   ونصٌّ ووقت. وهذه الدوال تقرأه صفحاتٍ بميزانية وتخرّطه — ولا تكتب شيئاً:
+   الكتابة وتتبّع ما قُرئ في `services/commentsSync.ts`. */
+
+/** عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته */
 export type InboxItem = {
   id: string;
   platform: string;
@@ -350,164 +364,376 @@ export type InboxItem = {
   createdAt: string;
   capabilities?: Record<string, boolean>;
   isHidden?: boolean;
-  repliedBody?: string | null; // رد موجود مسبقاً على المنصة (للتقييمات)
+  repliedBody?: string | null; // ردٌّ موجود على المنصة كُتب من خارج هذه المنصة
+  repliedAt?: string | null; // ووقته إن أعلنه المزوّد
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
 };
 
-// يجلب كامل الصندوق الموحّد (تعليقات + مراجعات) عبر كل الحسابات — لا لكل منشور.
-// خطوتان وفق توثيق SocialAPI:
-//   1) GET /inbox/comments        → قائمة المنشورات التي عليها تعليقات (InboxPostRow): {id, account_id, platform, ...}
-//   2) GET /inbox/comments/{postId}?account_id=…  → تعليقات ذلك المنشور فعلاً (CommentWithCapabilities):
-//      {text, author_name, author_username, platform_id, created_at, platform, ...}
-export async function listSocialApiInbox(apiKey: string): Promise<InboxItem[]> {
-  const out: InboxItem[] = [];
+/** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */
+export type InboxPost = {
+  postId: string;
+  accountId: string;
+  platform: string;
+  /** بصمةُ نشاطه — تتغيّر بتعليقٍ جديد، فيُعاد جلبُ تعليقاته. فارغةٌ إن لم يُعلِن المزوّد شيئاً. */
+  signature: string;
+};
 
-  // نجمع المنشورات المرشّحة من مصدرين لتغطية كل المنصّات:
-  //   أ) /inbox/comments  → المنشورات التي رصد SocialAPI عليها تعليقات.
-  //   ب) /posts (targets) → كل منشوراتنا المنشورة (قد تحمل تعليقات لا تظهر في الصندوق بعد).
-  // المفتاح "postId|accountId" لمنع التكرار.
-  const candidates = new Map<string, { postId: string; accountId: string; platform: string }>();
-  const addCand = (postId: string, accountId: string, platform: string) => {
-    if (!postId) return;
-    const key = `${postId}|${accountId}`;
-    if (!candidates.has(key)) candidates.set(key, { postId, accountId, platform });
+export function mapInboxPost(row: any): InboxPost | null {
+  const postId = String(row?.id || row?.post_id || row?.inbox_post_id || '');
+  if (!postId) return null;
+  const count = row?.comment_count ?? row?.comments_count ?? row?.total_comments ?? row?.count ?? '';
+  const touched = row?.last_comment_at ?? row?.updated_at ?? row?.last_activity_at ?? '';
+  return {
+    postId,
+    accountId: String(row?.account_id || row?.account?.id || ''),
+    platform: String(row?.platform || row?.account?.platform || 'unknown'),
+    signature: count === '' && touched === '' ? '' : `${count}|${touched}`,
   };
+}
 
-  try {
-    const data = await sapi<any>(apiKey, 'GET', EP.comments);
-    const rows: any[] = data?.data || data?.comments || data?.posts || (Array.isArray(data) ? data : []);
-    for (const row of rows) {
-      addCand(
-        String(row.id || row.post_id || ''),
-        String(row.account_id || row.account?.id || ''),
-        String(row.platform || row.account?.platform || 'unknown'),
-      );
-    }
-  } catch { /* لا منشورات في الصندوق */ }
+/** المنشورات التي عليها تعليقات — الأحدث نشاطاً أوّلاً، مئةٌ في الصفحة. */
+export async function listInboxPosts(apiKey: string, opts: { budget?: CallBudget; maxPages: number }): Promise<{ posts: InboxPost[]; complete: boolean; exhausted: boolean }> {
+  const r = await sapiList(apiKey, EP.comments, { limit: 100 }, { budget: opts.budget, maxPages: opts.maxPages, keys: ['posts', 'comments'] });
+  const posts = r.items.map(mapInboxPost).filter((p): p is InboxPost => p !== null);
+  return { posts, complete: r.complete, exhausted: r.exhausted };
+}
 
-  try {
-    const pData = await sapi<any>(apiKey, 'GET', `${EP.posts}?limit=100`);
-    const posts: any[] = pData?.data || pData?.posts || (Array.isArray(pData) ? pData : []);
-    for (const p of posts) {
-      for (const t of (Array.isArray(p.targets) ? p.targets : [])) {
-        addCand(String(t.platform_post_id || t.platform_id || ''), String(t.account_id || ''), String(t.platform || 'unknown'));
-      }
-    }
-  } catch { /* تعذّر جلب المنشورات */ }
+/** تعليقٌ كما يردّه المزوّد، بما يلزم للكتابة ولتمييز الردود. */
+export type SapiComment = {
+  /** معرّف التعليق المستعمل في ترميز السجلّ — بترتيب الأسبقية القديم نفسه كي لا يتكرّر سجلّ. */
+  commentId: string;
+  /** معرّف المزوّد `sapi_cmt_…` إن وُجد — به تُقرأ الردود في المسار الآخر. */
+  interactionId: string;
+  body: string;
+  authorName: string;
+  createdAt: string;
+  capabilities?: Record<string, boolean>;
+  isHidden: boolean;
+  /** عدد الردود على المنصة كما يعلنه المزوّد — `null` إن لم يُعلنه. */
+  replyCount: number | null;
+  /** ردودٌ مضمّنة في التعليق نفسه إن جاءت معه. */
+  replies: any[] | null;
+  /** ردٌّ على تعليقٍ آخر لا تعليقٌ مستقلّ. */
+  parentId: string | null;
+  raw: any;
+};
 
-  for (const { postId, accountId, platform: rowPlatform } of candidates.values()) {
+function textOf(c: any): string {
+  if (typeof c?.content === 'string') return c.content;
+  return String(c?.text || c?.content?.text || c?.body || c?.message || c?.comment || '');
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function mapComment(c: any): SapiComment {
+  const embedded = Array.isArray(c?.replies) ? c.replies : Array.isArray(c?.replies?.data) ? c.replies.data : null;
+  const rawId = String(c?.id ?? '');
+  return {
+    commentId: String(c?.platform_id || c?.id || c?.comment_id || ''),
+    interactionId: rawId.startsWith('sapi_') ? rawId : String(c?.interaction_id || ''),
+    body: textOf(c),
+    authorName: c?.author_name || c?.author_username || c?.author?.name || c?.author?.username || 'مستخدم',
+    createdAt: toIso(c?.created_at || c?.created || c?.timestamp),
+    capabilities: c?.capabilities && typeof c.capabilities === 'object' ? c.capabilities : undefined,
+    isHidden: !!c?.is_hidden,
+    replyCount: numOrNull(c?.reply_count ?? c?.replies_count ?? c?.replies?.count ?? c?.replies?.total_count ?? c?.replies?.total),
+    replies: embedded,
+    parentId: (() => {
+      const p = c?.parent_id ?? c?.parent_comment_id ?? c?.in_reply_to ?? c?.parent?.id ?? null;
+      return p === null || p === undefined || p === '' ? null : String(p);
+    })(),
+    raw: c,
+  };
+}
+
+/**
+ * أمِن حسابنا هذا التفاعل؟
+ *
+ * العلامة الصريحة أولاً إن أعلنها المزوّد، ثم المطابقة بمعرّف الكاتب أو اسمه
+ * مع ما يُعرف به الحساب. وما لم تثبت نسبتُه إلينا فليس منّا: تعليقُ عميلٍ
+ * يُحسب ردّاً منّا يسقط من «بلا رد» ولا يجيبه أحد — وهذا أسوأ الخطأين.
+ */
+export function isOwnAuthor(c: any, ownerKeys: Set<string>): boolean {
+  const flags = [c?.is_owner, c?.is_own, c?.is_self, c?.is_mine, c?.from_owner, c?.from_me, c?.is_from_me, c?.is_page_owner,
+    c?.author?.is_owner, c?.author?.is_self, c?.author?.is_me];
+  if (flags.some((f) => f === true)) return true;
+  const dir = normKey(c?.direction);
+  if (dir === 'outgoing' || dir === 'outbound' || dir === 'sent') return true;
+  if (!ownerKeys.size) return false;
+  const a = c?.author && typeof c.author === 'object' ? c.author : {};
+  const candidates = [a.id, a.platform_id, a.username, a.handle, a.name, c?.author_id, c?.author_username, c?.author_name, c?.username, c?.from?.id, c?.from?.name]
+    .map(normKey)
+    .filter((k) => k.length >= 3);
+  return candidates.some((k) => ownerKeys.has(k));
+}
+
+/**
+ * تعليقات منشور — من الأقدم إلى الأحدث، فتُقرأ الصفحات إلى آخرها كي لا يضيع
+ * أحدثُها. ومنشورٌ قُرئ من قبل يُستأنف من آخر صفحةٍ بلغها لا من أوّله.
+ */
+export async function listPostComments(
+  apiKey: string,
+  postId: string,
+  accountId: string,
+  opts: { budget?: CallBudget; maxPages: number; startCursor?: string | null },
+): Promise<{ comments: SapiComment[]; complete: boolean; exhausted: boolean; resume: string | null }> {
+  const r = await sapiList(
+    apiKey,
+    EP.postComments(postId),
+    { account_id: accountId || undefined, limit: 100 },
+    { budget: opts.budget, maxPages: opts.maxPages, keys: ['comments'], startCursor: opts.startCursor },
+  );
+  return { comments: r.items.map(mapComment), complete: r.complete, exhausted: r.exhausted, resume: r.resume };
+}
+
+export type RepliesPath = 'inbox' | 'interactions';
+
+/**
+ * ردود تعليقٍ على المنصة.
+ *
+ * مساران موثّقان عند المزوّد: `‎/inbox/comments/{post}/{comment}/replies` في
+ * عقدته الأحدث، و`‎/accounts/{account}/interactions/{sapi_cmt}/replies` في
+ * الأقدم. يُجرّب المسار الذي نجح آخر مرّة أوّلاً، ويُعاد أيّهما أجاب — أو
+ * `null` إن لم يُجب أيٌّ منهما لهذه المنصّة.
+ */
+export async function listCommentReplies(
+  apiKey: string,
+  args: { postId: string; accountId: string; commentId: string; interactionId: string },
+  opts: { budget?: CallBudget; prefer?: RepliesPath | null },
+): Promise<{ replies: any[]; path: RepliesPath | null }> {
+  const order: RepliesPath[] = opts.prefer === 'interactions' ? ['interactions', 'inbox'] : ['inbox', 'interactions'];
+  for (const path of order) {
+    if (path === 'interactions' && (!args.interactionId || !args.accountId)) continue;
+    const url = path === 'inbox'
+      ? `${EP.postComments(args.postId)}/${encodeURIComponent(args.commentId)}/replies`
+      : `/accounts/${encodeURIComponent(args.accountId)}/interactions/${encodeURIComponent(args.interactionId)}/replies`;
     try {
-      const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
-      const cData = await sapi<any>(apiKey, 'GET', `${EP.postComments(postId)}${q}`);
-      const comments: any[] = cData?.data || cData?.comments || (Array.isArray(cData) ? cData : []);
-      for (const c of comments) {
-        const commentId = String(c.platform_id || c.id || c.comment_id || '');
-        const body = c.text || c.body || c.message || c.comment || '';
-        if (!commentId && !body) continue;
-        out.push({
-          // نُرمّز (المنشور|الحساب|التعليق) كي يتوفّر للرد/الإشراف لاحقاً كل ما يحتاجه SocialAPI
-          id: encodeCid(postId, accountId, commentId),
-          platform: String(c.platform || rowPlatform),
-          kind: 'comment',
-          authorName: c.author_name || c.author_username || c.author?.name || c.author?.username || 'مستخدم',
-          body,
-          createdAt: toIso(c.created_at || c.created || c.timestamp),
-          capabilities: (c.capabilities && typeof c.capabilities === 'object') ? c.capabilities : undefined,
-          isHidden: !!c.is_hidden,
-        });
-      }
-    } catch { /* تعذّر جلب تعليقات هذا المنشور */ }
+      const r = await sapiList(apiKey, url, { account_id: path === 'inbox' ? args.accountId || undefined : undefined, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['replies', 'comments'] });
+      if (r.exhausted) throw new BudgetExhausted();
+      return { replies: r.items, path };
+    } catch (err) {
+      if (isUnsupported(err)) continue;
+      throw err;
+    }
   }
+  return { replies: [], path: null };
+}
 
-  // المراجعات (Google Business/Facebook) — خطوتان: ملخّص لكل حساب ثم مراجعات كل حساب.
-  // نُرمّز المعرّف "rv:{accountId}:{reviewId}" لتوجيه الرد لاحقاً.
-  try {
-    const rv = await sapi<any>(apiKey, 'GET', EP.reviews);
-    const accounts: any[] = rv?.data || rv?.reviews || (Array.isArray(rv) ? rv : []);
-    for (const acc of accounts) {
-      const accountId = String(acc.account_id || acc.id || '');
-      const accPlatform = String(acc.platform || 'google');
-      if (!accountId) continue;
-      let list: any[] = [];
-      try {
-        const detail = await sapi<any>(apiKey, 'GET', EP.reviewsForAccount(accountId));
-        list = detail?.data || detail?.reviews || (Array.isArray(detail) ? detail : []);
-      } catch { list = []; }
-      for (const r of list) {
-        const stars = r.rating ?? r.star_rating ?? r.stars;
-        const body = r.text || r.comment || r.content || r.body || '';
-        const rid = String(r.id || r.review_id || r.platform_id || '');
-        // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
-        if (!body.trim()) continue;
-        if (!rid) continue;
-        const starNum = Number(stars);
-        out.push({
-          id: `rv:${accountId}:${rid}`,
-          platform: accPlatform,
-          kind: 'review',
-          // الاسم نظيف — التقييم يُخزَّن رقماً في حقل مستقل ويُعرض نجوماً في الواجهة
-          authorName: r.author_name || r.reviewer || r.name || r.author?.name || 'مراجعة',
-          body,
-          createdAt: toIso(r.created_at || r.updated_at || r.created || r.timestamp),
-          repliedBody: r.reply?.text || null,
-          rating: Number.isFinite(starNum) && starNum > 0 ? starNum : null,
-        });
-      }
-    }
-  } catch { /* لا مراجعات */ }
-
-  // نجلب الحسابات مرة واحدة للرسائل الخاصة والإشارات (كلاهما لكل حساب)
-  let accts: SocialApiAccount[] = [];
-  try { accts = await listSocialApiAccounts(apiKey); } catch { accts = []; }
-
-  // الرسائل الخاصة (DMs) — لكل حساب: GET /inbox/conversations?account_id=&platform=
-  // نُرمّز "dm:{conversationId}:{accountId}" لتوجيه الرد عبر /inbox/conversations/{id}/messages
-  for (const acc of accts) {
-    try {
-      const q = `?account_id=${encodeURIComponent(acc.id)}${acc.platform ? `&platform=${encodeURIComponent(acc.platform)}` : ''}&limit=50`;
-      const data = await sapi<any>(apiKey, 'GET', `${EP.conversations}${q}`);
-      const convos: any[] = data?.data || data?.conversations || (Array.isArray(data) ? data : []);
-      for (const cv of convos || []) {
-        const convId = String(cv.id || cv.conversation_id || '');
-        if (!convId) continue;
-        out.push({
-          id: `dm:${convId}:${acc.id}`,
-          platform: String(cv.platform || acc.platform || 'unknown'),
-          kind: 'dm',
-          authorName: cv.participant_name || cv.participant?.name || cv.from || 'مستخدم',
-          body: cv.last_message || cv.last_message_text || '',
-          createdAt: toIso(cv.last_message_at || cv.updated_at || cv.created_at),
-        });
-      }
-    } catch { /* لا محادثات لهذا الحساب أو المنصة لا تدعمها */ }
+/** أحدثُ ردٍّ من حسابنا بين ردود تعليق — نصُّه ووقته ومعرّفه على المنصة. */
+export function ownReply(replies: any[], ownerKeys: Set<string>): { text: string; at: string | null; id: string | null } | null {
+  let best: { text: string; at: string | null; id: string | null; t: number } | null = null;
+  for (const r of replies) {
+    if (!isOwnAuthor(r, ownerKeys)) continue;
+    const atRaw = r?.created_at || r?.created || r?.timestamp || null;
+    const at = atRaw ? toIso(atRaw) : null;
+    const t = at ? new Date(at).getTime() : 0;
+    if (!best || t >= best.t) best = { text: textOf(r), at, id: r?.platform_id || r?.id ? String(r.platform_id || r.id) : null, t };
   }
+  return best ? { text: best.text, at: best.at, id: best.id } : null;
+}
 
-  // الإشارات (Mentions) — تُطلب لكل حساب مع account_id (النداء العام يعيد 404).
-  // تلقائية بالكامل: نُجرّبها على كل الحسابات ونتجاهل غير الداعمة بصمت (404/501).
-  // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً.
-  for (const acc of accts) {
+/** يخرّط مراجعةً — والمعرّف بالترميز القديم نفسه «rv:{حساب}:{مراجعة}» كي لا تتكرّر. */
+export function mapReview(r: any, fallbackAccountId: string, fallbackPlatform: string): InboxItem | null {
+  const body = String(r?.text || r?.comment || (typeof r?.content === 'string' ? r.content : r?.content?.text) || r?.body || '');
+  const rid = String(r?.id || r?.review_id || r?.platform_id || '');
+  // نتجاهل التقييمات بلا نص (تقييم نجوم فقط) — نعرض ما فيه تعليق مكتوب فقط.
+  if (!body.trim() || !rid) return null;
+  const accountId = String(r?.account_id || r?.account?.id || fallbackAccountId || '');
+  const stars = Number(r?.rating ?? r?.star_rating ?? r?.stars);
+  const reply = r?.reply ?? r?.owner_reply ?? r?.business_reply ?? r?.response ?? null;
+  const replyText = typeof reply === 'string' ? reply : reply?.text || reply?.comment || r?.reply_text || null;
+  const replyAtRaw = (reply && typeof reply === 'object' ? reply.created_at || reply.updated_at || reply.timestamp : null) || r?.replied_at || r?.reply_created_at || null;
+  return {
+    id: `rv:${accountId}:${rid}`,
+    platform: String(r?.platform || fallbackPlatform || 'google'),
+    kind: 'review',
+    // الاسم نظيف — التقييم يُخزَّن رقماً في حقل مستقل ويُعرض نجوماً في الواجهة
+    authorName: r?.author_name || r?.reviewer || r?.name || r?.author?.name || 'مراجعة',
+    body,
+    createdAt: toIso(r?.created_at || r?.updated_at || r?.created || r?.timestamp),
+    repliedBody: replyText ? String(replyText) : null,
+    repliedAt: replyText && replyAtRaw ? toIso(replyAtRaw) : null,
+    rating: Number.isFinite(stars) && stars > 0 ? stars : null,
+  };
+}
+
+/**
+ * المراجعات — قائمةً مباشرة في عقد المزوّد الحالي، أو ملخّصاً لكل حساب يتبعه
+ * نداءٌ لكل حساب في العقد الأقدم. يُقرأ الشكلان.
+ */
+export async function listReviews(apiKey: string, opts: { budget?: CallBudget; maxPages: number }): Promise<{ items: InboxItem[]; complete: boolean; exhausted: boolean }> {
+  const r = await sapiList(apiKey, EP.reviews, { limit: 100 }, { budget: opts.budget, maxPages: opts.maxPages, keys: ['reviews'] });
+  const items: InboxItem[] = [];
+  let complete = r.complete;
+  let exhausted = r.exhausted;
+  for (const row of r.items) {
+    if (looksLikeReview(row)) {
+      const it = mapReview(row, '', String(row?.platform || 'google'));
+      if (it) items.push(it);
+      continue;
+    }
+    // ملخّص حساب — المراجعات في نداءٍ ثانٍ
+    const accountId = String(row?.account_id || row?.id || '');
+    if (!accountId) continue;
     try {
-      const q = `?account_id=${encodeURIComponent(acc.id)}&platform=${encodeURIComponent(acc.platform)}&limit=50`;
-      const data = await sapi<any>(apiKey, 'GET', `${EP.mentions}${q}`);
-      const mentions: any[] = data?.data || data?.mentions || (Array.isArray(data) ? data : []);
-      for (const m of mentions || []) {
-        const mid = String(m.id || m.platform_id || '');
+      const detail = await sapiList(apiKey, EP.reviewsForAccount(accountId), { limit: 100 }, { budget: opts.budget, maxPages: 1, keys: ['reviews'] });
+      if (detail.exhausted) { exhausted = true; complete = false; break; }
+      for (const d of detail.items) {
+        const it = mapReview(d, accountId, String(row?.platform || 'google'));
+        if (it) items.push(it);
+      }
+    } catch (err) {
+      if (!isUnsupported(err)) throw err;
+    }
+  }
+  return { items, complete, exhausted };
+}
+
+/** محادثةٌ خاصة كما تردّها القائمة. */
+export type SapiConversation = {
+  id: string;
+  accountId: string;
+  platform: string;
+  participant: string;
+  lastText: string;
+  /** وقت آخر رسالة إن أعلنه المزوّد — `null` إن غاب. */
+  lastAt: string | null;
+  /** اتجاه آخر رسالة إن أعلنه المزوّد — `in` منهم و`out` منّا. */
+  lastDirection: 'in' | 'out' | null;
+};
+
+export function directionOf(v: unknown): 'in' | 'out' | null {
+  const d = normKey(v);
+  if (['incoming', 'inbound', 'received', 'in'].includes(d)) return 'in';
+  if (['outgoing', 'outbound', 'sent', 'out'].includes(d)) return 'out';
+  return null;
+}
+
+export function mapConversation(cv: any, account: SocialApiAccount | null): SapiConversation | null {
+  const id = String(cv?.id || cv?.conversation_id || '');
+  if (!id) return null;
+  const last = cv?.last_message;
+  const lastObj = last && typeof last === 'object' ? last : null;
+  const fromMe = cv?.last_message_from_me ?? cv?.last_message_is_from_me ?? lastObj?.is_from_me ?? lastObj?.from_me;
+  return {
+    id,
+    accountId: String(cv?.account_id || cv?.account?.id || account?.id || ''),
+    platform: String(cv?.platform || account?.platform || 'unknown'),
+    participant: cv?.participant_name || cv?.participant?.name || cv?.participant?.username || cv?.from || 'مستخدم',
+    lastText: typeof last === 'string' ? last : String(lastObj?.text || cv?.last_message_text || cv?.snippet || ''),
+    lastAt: isoOrNull(lastObj?.created_at || cv?.last_message_at || cv?.updated_at || cv?.created_at),
+    lastDirection: directionOf(lastObj?.direction ?? cv?.last_message_direction) ?? (fromMe === true ? 'out' : fromMe === false ? 'in' : null),
+  };
+}
+
+/** منصّاتٌ يدعم المزوّد فيها الرسائل الخاصة والإشارات — وما عداها يردّ «غير مدعوم». */
+export function supportsDirectInbox(platform: string): boolean {
+  return /instagram|facebook|messenger/.test(platform.toLowerCase());
+}
+
+/**
+ * المحادثات — نداءٌ واحد لكل الحسابات إن حملت كلُّ محادثةٍ حسابَها، وإلا
+ * نداءٌ لكل حسابٍ يدعم الرسائل. والمعرّف يُبنى بالحساب كما كان يُبنى، فلا
+ * يتكرّر سجلٌّ كُتب قبل هذا.
+ */
+export async function listConversations(
+  apiKey: string,
+  accounts: SocialApiAccount[],
+  opts: { budget?: CallBudget },
+): Promise<{ conversations: SapiConversation[]; complete: boolean; exhausted: boolean }> {
+  try {
+    const all = await sapiList(apiKey, EP.conversations, { limit: 100 }, { budget: opts.budget, maxPages: 2, keys: ['conversations'] });
+    if (all.exhausted) return { conversations: [], complete: false, exhausted: true };
+    const mapped = all.items.map((cv) => mapConversation(cv, accounts.find((a) => a.id === String(cv?.account_id || '')) ?? null));
+    if (mapped.every((c) => c && c.accountId)) {
+      return { conversations: mapped.filter((c): c is SapiConversation => c !== null), complete: all.complete, exhausted: false };
+    }
+  } catch (err) {
+    if (err instanceof BudgetExhausted) return { conversations: [], complete: false, exhausted: true };
+    if (!isUnsupported(err)) throw err;
+  }
+  const out: SapiConversation[] = [];
+  for (const acc of accounts.filter((a) => supportsDirectInbox(a.platform))) {
+    try {
+      const r = await sapiList(apiKey, EP.conversations, { account_id: acc.id, platform: acc.platform, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['conversations'] });
+      if (r.exhausted) return { conversations: out, complete: false, exhausted: true };
+      for (const cv of r.items) {
+        const c = mapConversation(cv, acc);
+        if (c) out.push({ ...c, accountId: acc.id });
+      }
+    } catch (err) {
+      if (!isUnsupported(err)) throw err;
+    }
+  }
+  return { conversations: out, complete: true, exhausted: false };
+}
+
+/** أحدثُ رسالةٍ واردة وأحدثُ رسالةٍ منّا في محادثة — من رسائلها، الأحدث أوّلاً. */
+export async function conversationLatest(
+  apiKey: string,
+  conversationId: string,
+  budget?: CallBudget,
+): Promise<{ lastIn: { text: string; at: string } | null; lastOut: { text: string; at: string; id: string | null } | null }> {
+  const r = await sapiList(apiKey, EP.conversationMessages(conversationId), { limit: 20 }, { budget, maxPages: 1, keys: ['messages'] });
+  if (r.exhausted) throw new BudgetExhausted();
+  let lastIn: { text: string; at: string } | null = null;
+  let lastOut: { text: string; at: string; id: string | null } | null = null;
+  for (const m of r.items) {
+    // رسالةٌ بلا وقت لا تُرتَّب — فلا تُحسب أحدث ولا أقدم
+    const at = isoOrNull(m?.created_at || m?.timestamp || m?.sent_at);
+    if (!at) continue;
+    const dir = directionOf(m?.direction) ?? (m?.is_from_me === true || m?.from_me === true ? 'out' : m?.is_from_me === false ? 'in' : null);
+    if (dir === 'in' && (!lastIn || at > lastIn.at)) lastIn = { text: textOf(m), at };
+    if (dir === 'out' && (!lastOut || at > lastOut.at)) lastOut = { text: textOf(m), at, id: m?.id ? String(m.id) : null };
+  }
+  return { lastIn, lastOut };
+}
+
+export type MentionsPath = 'accounts' | 'inbox';
+
+/**
+ * الإشارات لحسابٍ واحد — `‎/accounts/{id}/mentions` في عقد المزوّد، و`‎/inbox/mentions`
+ * احتياطاً لمن بقي على العقد الأقدم. ولا تُطلب إلا لمنصّةٍ تدعمها.
+ */
+export async function listMentions(
+  apiKey: string,
+  account: SocialApiAccount,
+  opts: { budget?: CallBudget; prefer?: MentionsPath | null },
+): Promise<{ items: InboxItem[]; path: MentionsPath | null }> {
+  const order: MentionsPath[] = opts.prefer === 'inbox' ? ['inbox', 'accounts'] : ['accounts', 'inbox'];
+  for (const path of order) {
+    try {
+      const r = path === 'accounts'
+        ? await sapiList(apiKey, `/accounts/${encodeURIComponent(account.id)}/mentions`, { limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['mentions'] })
+        : await sapiList(apiKey, EP.mentions, { account_id: account.id, platform: account.platform, limit: 50 }, { budget: opts.budget, maxPages: 1, keys: ['mentions'] });
+      if (r.exhausted) throw new BudgetExhausted();
+      const items: InboxItem[] = [];
+      for (const m of r.items) {
+        const mid = String(m?.id || m?.platform_id || '');
         if (!mid) continue;
-        const accountId = String(m.account_id || m.account?.id || acc.id);
-        const mediaId = String(m.metadata?.media_id || m.media_id || '');
-        out.push({
+        const accountId = String(m?.account_id || m?.account?.id || account.id);
+        const mediaId = String(m?.metadata?.media_id || m?.media_id || '');
+        // نُرمّز "mn:{mentionId}:{accountId}:{mediaId}" للرد لاحقاً — الترميز القديم نفسه.
+        items.push({
           id: `mn:${mid}:${accountId}:${mediaId}`,
-          platform: String(m.platform || acc.platform),
+          platform: String(m?.platform || account.platform),
           kind: 'mention',
-          authorName: m.author?.name || m.author_name || m.username || 'مستخدم',
-          body: m.content?.text || m.text || m.caption || '',
-          createdAt: toIso(m.created_at || m.received_at || m.timestamp),
+          authorName: m?.author?.name || m?.author_name || m?.username || 'مستخدم',
+          body: String(m?.content?.text || m?.text || m?.caption || ''),
+          createdAt: toIso(m?.created_at || m?.received_at || m?.timestamp),
         });
       }
-    } catch { /* لا إشارات لهذا الحساب أو غير مدعومة */ }
+      return { items, path };
+    } catch (err) {
+      if (isUnsupported(err)) continue;
+      throw err;
+    }
   }
-
-  return out;
+  return { items: [], path: null };
 }
 
 // تشخيص: يُعيد الاستجابات الخام من SocialAPI كما هي، لتحديد أسماء الحقول الفعلية بدقّة
@@ -640,6 +866,16 @@ export async function socialApiAudience(apiKey: string): Promise<SocialApiAudien
       pickNumber(a.metrics, FOLLOWER_FIELDS) ??
       pickNumber(a.insights, FOLLOWER_FIELDS),
   }));
+}
+
+/** أهذا العنصر مراجعةٌ بعينها لا ملخّصُ حساب؟ الملخّص يحمل عدداً ومتوسطاً — والمتوسط قد يُسمّى `rating`. */
+function looksLikeReview(r: any): boolean {
+  if (!r || typeof r !== 'object') return false;
+  if (String(r.id || '').startsWith('sapi_rev_')) return true;
+  const hasText = typeof r.text === 'string' || typeof r.comment === 'string' || typeof r.content === 'string' || typeof r.content?.text === 'string';
+  const hasCount = ['total', 'count', 'total_reviews', 'review_count', 'reviews_count'].some((k) => r[k] !== null && r[k] !== undefined);
+  if (hasCount && !hasText) return false;
+  return hasText || r.rating != null || r.star_rating != null || r.stars != null || r.reviewer != null || r.author != null;
 }
 
 export type SocialApiReviewSummary = { platform: string; accountId: string; count: number | null; average: number | null };
