@@ -421,22 +421,34 @@ describe('الخطة المدفوعة واحتياطها', () => {
     expect(calls.slice(after + 1)).toEqual([]);
   });
 
-  it('ينزل إلى حصص المجانية بعد دورةٍ سقطت، ويقول ذلك في التقرير', async () => {
+  it('ينزل إلى حصص المجانية بعد دورةٍ مجدولة سقطت، ويقول ذلك في التقرير', async () => {
     route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
     env.WORKERS_PLAN = 'paid';
-    const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
-    // دورةٌ أتمّت قبل أربعين دقيقة، وأخرى بدأت قبل عشرين ولم تكتب تقريرها
-    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_report', ?)").run(JSON.stringify({ at: at(40), lastOkAt: at(40) }));
-    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_lock', ?)").run(at(20));
+    // دورةٌ مجدولة بدأت قبل عشرين دقيقة ولم تتمّ
+    db.prepare("INSERT INTO settings (key, value) VALUES ('run_open:inbox', ?)").run(new Date(Date.now() - 20 * 60_000).toISOString());
 
     const report = await syncComments(env, {});
     expect(report?.plan).toBe('paid');
     expect(report?.fallback).toBe(true);
     expect(report?.budget).toBe(40);
+    // والدورة تمّت فمحت علامتها — والتالية ما زالت في يوم الاحتياط
+    expect((db.prepare("SELECT value FROM settings WHERE key = 'run_open:inbox'").get() as { value: string }).value).toBe('');
+    expect((await syncComments(env, {}))?.fallback).toBe(true);
+  });
 
-    // والدورة التالية ما زالت في يوم الاحتياط — وإن أتمّت هذه تقريرها
-    const next = await syncComments(env, {});
-    expect(next?.fallback).toBe(true);
+  it('لا يقرأ خطّافاً تقاطع مع دورةٍ مجدولة سقوطاً', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    env.WORKERS_PLAN = 'paid';
+    const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    /* ما كان يُنزل الحصص يوماً بلا سبب: خطّافٌ بدأ بعد دورةٍ مجدولة وانتهى
+       قبلها — فالقفل أحدث من التقرير. ولا يُرصد به شيءٌ الآن. */
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_report', ?)").run(JSON.stringify({ at: at(40), lastOkAt: at(40) }));
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_sync_lock', ?)").run(at(38));
+    await syncComments(env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 });
+
+    const report = await syncComments(env, {});
+    expect(report?.fallback).toBe(false);
+    expect(report?.budget).toBe(150);
   });
 
   it('يأخذ حصّة المدفوعة حين لا سقوط', async () => {
@@ -550,5 +562,108 @@ describe('سجلّ الصندوق القديم', () => {
     await syncComments(env, { mode: 'history', budget: 40 });
     expect(await readInboxReport(env)).toEqual(regular);
     expect(JSON.parse(setting('inbox_history_report') ?? '{}').mode).toBe('history');
+  });
+});
+
+describe('ما وجدته المراجعة قبل الدمج', () => {
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+  const states = () => db.prepare('SELECT inbox_post_id FROM inbox_post_state ORDER BY inbox_post_id').all().map((r: any) => r.inbox_post_id);
+
+  it('منشورٌ يتعذّر لا يوقف الباقي — تُحفظ حالةُ ما قُرئ ويُقرأ ما بعده', async () => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [1, 2, 3].map((i) => ({ id: `post${i}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 })) },
+    }));
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(1)] } }));
+    route('GET', '/inbox/comments/post2', () => ({ status: 403, body: { error: 'forbidden' } }));
+    route('GET', '/inbox/comments/post3', () => ({ body: { data: [comment(3)] } }));
+
+    const report = await syncComments(env, { budget: 40 });
+    expect(rows().map((r) => r.provider_comment_id)).toEqual(['post1|acc_ig|c1', 'post3|acc_ig|c3']);
+    // الحالة للثلاثة: المتعذّر لا يُعاد حتى يتغيّر نشاطه
+    expect(states()).toEqual(['post1', 'post2', 'post3']);
+    expect(report?.ok).toBe(true);
+    expect(report?.kinds.comment.error).toBeTruthy();
+
+    calls.length = 0;
+    await syncComments(env, { budget: 40 });
+    expect(calls.some((c) => c.includes('/inbox/comments/post2'))).toBe(false);
+  });
+
+  it('وفي سحب السجلّ يتقدّم المؤشّر متجاوزاً المنشور المتعذّر', async () => {
+    route('GET', '/inbox/comments', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [{ id: `post${n}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }], next_cursor: n < 5 ? String(n + 1) : null } };
+    });
+    route('GET', /^\/inbox\/comments\/post[13]$/, (url) => ({ body: { data: [comment(Number(url.pathname.slice(-1)))] } }));
+    route('GET', '/inbox/comments/post2', () => ({ status: 404, body: { error: 'deleted' } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    expect((db.prepare("SELECT value FROM settings WHERE key = 'inbox_history_cursor'").get() as { value: string }).value).toBe('4');
+  });
+
+  it('كلُّ ما جُرّب تعذّر — عطلٌ يُقال لا منشورٌ شاذّ', async () => {
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }] } }));
+    route('GET', '/inbox/comments/post1', () => ({ status: 500, body: { error: 'down' } }));
+    const report = await syncComments(env, { budget: 40 });
+    expect(report?.ok).toBe(false);
+  });
+
+  it('تعليقٌ تتعذّر ردودُه لا يُسقط فحص غيره — ولا يبقى أوّلَ الدور', async () => {
+    db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', ?)").run(daysAgo(1));
+    const add = db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at)
+       VALUES (?, 'instagram', ?, 'comment', 'عميل', 'سؤال قديم', ?)`,
+    );
+    add.run('cm_a', 'postA|acc_ig|ca', daysAgo(90));
+    add.run('cm_b', 'postB|acc_ig|cb', daysAgo(80));
+    add.run('cm_c', 'postC|acc_ig|cc', daysAgo(70));
+    // الأحدث أوّلاً في الدور — وهو المتعذّر
+    route('GET', '/inbox/comments/postC/cc/replies', () => ({ status: 500, body: { error: 'down' } }));
+    route('GET', '/inbox/comments/postB/cb/replies', () => ({ body: { data: [{ id: 'rb', author: { name: 'naf.law' }, text: 'أجبناك', created_at: daysAgo(79) }] } }));
+    route('GET', '/inbox/comments/postA/ca/replies', () => ({ body: { data: [] } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    const byId = Object.fromEntries(rows().map((r) => [r.id, r]));
+    expect(byId.cm_b.reply_body).toBe('أجبناك');
+    for (const id of ['cm_a', 'cm_b', 'cm_c']) expect(byId[id].reply_checked_at).not.toBeNull();
+  });
+
+  describe('تنبيه المراجعات السلبية', () => {
+    const notifications = () => (db.prepare('SELECT COUNT(*) AS n FROM notifications').get() as { n: number }).n;
+    beforeEach(() => {
+      db.prepare("INSERT INTO users (id,name,email,password_hash,role_name) VALUES ('u1','مدير','m@naf.sa','h','general_manager')").run();
+      db.prepare("INSERT OR REPLACE INTO roles_permissions (role_name, permission_key, allowed) VALUES ('general_manager','comments.manage',1)").run();
+      route('GET', '/inbox/comments', () => ({ body: { data: [] } }));
+    });
+    const review = (id: string, at: string) => ({ id, account_id: 'acc_ig', platform: 'google', text: 'تجربة سيئة', rating: 1, created_at: at });
+
+    it('يُنبَّه للمراجعة السلبية الجديدة', async () => {
+      route('GET', '/inbox/reviews', () => ({ body: { data: [review('r_new', daysAgo(1))] } }));
+      await syncComments(env, { budget: 40 });
+      expect(notifications()).toBe(1);
+    });
+
+    it('ولا يُنبَّه لمراجعةٍ من سنواتٍ دخلت الصندوق أوّل مرّة — ولا لشيءٍ من سحب السجلّ', async () => {
+      route('GET', '/inbox/reviews', () => ({ body: { data: [review('r_2019', '2019-05-01T00:00:00Z')] } }));
+      await syncComments(env, { budget: 40 });
+      expect(notifications()).toBe(0);
+
+      route('GET', '/inbox/reviews', () => ({ body: { data: [review('r_hist', daysAgo(2))] } }));
+      await syncComments(env, { mode: 'history', budget: 40 });
+      expect(notifications()).toBe(0);
+    });
+  });
+
+  it('«جلب الآن» يستأنف المنشور من آخر صفحةٍ بلغها — فيبلغ أحدث تعليقاته', async () => {
+    db.prepare(
+      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at, tail_cursor, needs_more)
+       VALUES ('post1', 'acc_ig', 'instagram', '600|', ?, ?, 'p12', 0)`,
+    ).run(daysAgo(1), daysAgo(1));
+    route('GET', '/inbox/comments', () => ({ body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 601 }] } }));
+    route('GET', '/inbox/comments/post1', () => ({ body: { data: [comment(601)], next_cursor: null } }));
+
+    await syncComments(env, { mode: 'full', budget: 40 });
+    const first = calls.find((c) => c.startsWith('GET /inbox/comments/post1'));
+    expect(first).toContain('cursor=p12');
   });
 });

@@ -8,13 +8,15 @@ import type { Env } from '../types';
    وهذا هو الاحتياط:
 
    ١) الحدّ الفعلي ألفُ استعلامٍ لـD1 لا عشرةُ آلاف طلب: كل نداءٍ لمزوّد النشر
-      يجرّ ثلاثة استعلاماتٍ أو أربعة. فمئةٌ وخمسون نداءً تبقى دون ستمئة.
+      يجرّ استعلامين إلى خمسة — قيست: من ٢٧٦ إلى ٦٦٠ لمئةٍ وثمانية وثلاثين
+      نداءً بحسب ازدحام المنشورات. فمئةٌ وخمسون تبقى دون الألف في المعتاد،
+      والنادر الذي يتجاوزه يسقط فيُنزل الحصص كما في (٤).
    ٢) لكل دورةٍ سقفٌ من الوقت تقف عنده: الخطّاف يعمل بعد الردّ على المزوّد
       وله ثلاثون ثانيةً لا أكثر، والسحب اليدوي ينتظره المستخدم، والمجدولة
       تنتهي قبل أن تبدأ المهمة التي تليها في جدول `cron.ts`.
    ٣) المزوّد إن طلب التمهّل (٤٢٩) وقفت الدورة وأكملت التي بعدها — لا تُلحّ.
-   ٤) الخطة تُقرأ من `WORKERS_PLAN`، وبغيابها تُفترض المجانية. ودورةٌ بدأت ولم
-      تكتب تقريرها بعد خمس عشرة دقيقة أسقطها حدٌّ ما — فتعود الحصص إلى
+   ٤) الخطة تُقرأ من `WORKERS_PLAN`، وبغيابها تُفترض المجانية. ودورةٌ مجدولة
+      بدأت ولم تتمّ بعد خمس عشرة دقيقة أسقطها حدٌّ ما — فتعود الحصص إلى
       المجانية يوماً كاملاً ثم تُجرَّب المدفوعة من جديد. */
 
 export type Plan = 'free' | 'paid';
@@ -70,19 +72,29 @@ export async function runLimits(env: Env, trigger: Trigger): Promise<RunLimits> 
 }
 
 /**
- * دورةٌ بدأت (قفلها بعد تقريرها الأخير) ولم تكتب تقريرها بعد خمس عشرة دقيقة:
- * أسقطها حدٌّ ما — وأكثرُه حدُّ استعلامات D1، وهو يمنع حتى كتابة التقرير. فلا
- * تعرف الدورةُ الساقطة أنها سقطت، وتعرفه التي بعدها: فتنزل الحصص إلى
- * المجانية يوماً. يُنادى قبل أن تكتب الدورة الجديدة قفلها.
+ * بدءُ دورةٍ مجدولة: علامةٌ تمحوها الدورة حين تتمّ (`endScheduledRun`). وعلامةٌ
+ * باقيةٌ بعد خمس عشرة دقيقة دورةٌ سقطت — أسقطها حدٌّ ما، وأكثرُه حدُّ استعلامات
+ * D1، وهو يمنعها حتى من محو علامتها. فلا تعرف الساقطةُ أنها سقطت، وتعرفه التي
+ * بعدها: فتنزل الحصص إلى المجانية يوماً، وهذه الدورة أوّلُ ما ينزل.
+ *
+ * والمجدولة وحدها تُراقَب، ولكلّ مهمةٍ علامتها. كان الرصد بقفلٍ وتقريرٍ
+ * مشتركين، فخطّافٌ أو سحبٌ يدويّ يبدأ بعد دورةٍ مجدولة وينتهي قبلها يترك القفل
+ * أحدثَ من التقرير — فيُقرأ سقوطاً وتنزل الحصص يوماً بلا سبب. والخطّاف واليدوي
+ * يُقطعان كذلك لأسبابٍ لا صلة لها بالحدود: طلبٌ أُغلق، أو عملٌ جاوز ثلاثين
+ * ثانيةً بعد الردّ.
  */
-export async function noteDeadRun(env: Env, lockAt: string | null, reportAt: string | null): Promise<boolean> {
-  if (!lockAt) return false;
-  const started = Date.parse(lockAt);
-  if (!Number.isFinite(started)) return false;
-  const reported = reportAt ? Date.parse(reportAt) : 0;
-  if (started <= reported + 1000) return false;
-  if (Date.now() - started < MAX_RUN_MS) return false;
-  if (declaredPlan(env) !== 'paid') return false;
-  await setSetting(env, FALLBACK_KEY, new Date(Date.now() + 86_400_000).toISOString());
-  return true;
+export async function beginScheduledRun(env: Env, job: string): Promise<string> {
+  const key = `run_open:${job}`;
+  const open = await getSetting(env, key);
+  if (open && Date.now() - Date.parse(open) >= MAX_RUN_MS && declaredPlan(env) === 'paid') {
+    await setSetting(env, FALLBACK_KEY, new Date(Date.now() + 86_400_000).toISOString());
+  }
+  const mark = new Date().toISOString();
+  await setSetting(env, key, mark);
+  return mark;
+}
+
+/** تمامُ الدورة المجدولة: تمحو علامتها — إن بقيت علامتها هي. */
+export async function endScheduledRun(env: Env, job: string, mark: string): Promise<void> {
+  await env.DB.prepare("UPDATE settings SET value = '' WHERE key = ? AND value = ?").bind(`run_open:${job}`, mark).run();
 }

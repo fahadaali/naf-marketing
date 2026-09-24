@@ -9,7 +9,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { notifyUsers, usersWithPermission } from './notify';
-import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
+import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 
 /* ============================================================
    مزامنة صندوق التعليقات والرسائل.
@@ -43,7 +43,7 @@ import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
 
 /**
  * `incremental` الدورة المجدولة والخطّاف: الجديد وما تغيّر. `full` «جلب الآن»:
- * صفحاتٌ أكثر وكل منشورٍ من أوّله. `history` سحبُ السجلّ: منشوراتٌ قديمة لم
+ * صفحاتٌ أكثر وكل منشور. `history` سحبُ السجلّ: منشوراتٌ قديمة لم
  * تُقرأ قطّ، وردودُنا على التعليقات القديمة، والمراجعات والرسائل والإشارات
  * إلى آخرها مرّةً في اليوم — بتقريرٍ وقفلٍ غير تقرير الصندوق وقفله.
  */
@@ -179,7 +179,7 @@ async function takeLock(env: Env, key: string, withinMs: number): Promise<boolea
 /**
  * يجلب التعليقات/الرسائل الجديدة ويخزّنها — يختار المسار حسب المزوّد.
  *
- * `full` للجلب اليدوي: يقرأ صفحاتٍ أكثر ويبدأ كل منشورٍ من أوّله. و`incremental`
+ * `full` للجلب اليدوي: يقرأ صفحاتٍ أكثر ويشمل كل منشور. و`incremental`
  * للدورة الآلية والخطّاف. ويعود بتقرير الدورة، أو `null` إن تخطّاها القفل.
  */
 export async function syncComments(
@@ -188,36 +188,41 @@ export async function syncComments(
 ): Promise<InboxSyncReport | null> {
   const mode = opts.mode ?? 'incremental';
   const history = mode === 'history';
+  const trigger: Trigger = opts.trigger ?? (mode === 'full' ? 'manual' : history ? 'history' : 'cron');
   const reportKey = history ? HISTORY_REPORT_KEY : REPORT_KEY;
   const lockKey = history ? HISTORY_LOCK_KEY : LOCK_KEY;
-  const prev = await readReport(env, reportKey);
-  // قبل أن تكتب الدورة قفلها: هل سقطت التي قبلها؟
-  const lastLock = await getSetting(env, lockKey);
   if (opts.skipIfRunningWithinMs) {
     if (!(await takeLock(env, lockKey, opts.skipIfRunningWithinMs))) return null;
   } else {
     await setSetting(env, lockKey, nowIso());
   }
-  await noteDeadRun(env, lastLock, prev?.at ?? null);
 
-  const limits = await runLimits(env, opts.trigger ?? (mode === 'full' ? 'manual' : history ? 'history' : 'cron'));
-  const provider = await providerName(env);
-  const report = newReport(mode, provider, opts.budget ?? limits.calls, prev, history ? await readInboxReport(env) : prev);
-  report.plan = limits.plan;
-  report.fallback = limits.fallback;
-
+  // المجدولة وحدها يُرصد سقوطها، وقبل أن تُقرأ حصّتها — انظر `limits.ts`
+  const job = history ? 'inbox-history' : 'inbox';
+  const mark = trigger === 'cron' || trigger === 'history' ? await beginScheduledRun(env, job) : null;
   try {
-    if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
-    // المزوّدون الآخرون يُقرأ صندوقهم كلُّه في كل دورة — لا سجلّ له مستقلّ
-    else if (!history) await syncPerPost(env, report);
-  } catch (err) {
-    report.errors.push(errorText(err));
-  }
+    const prev = await readReport(env, reportKey);
+    const limits = await runLimits(env, trigger);
+    const provider = await providerName(env);
+    const report = newReport(mode, provider, opts.budget ?? limits.calls, prev, history ? await readInboxReport(env) : prev);
+    report.plan = limits.plan;
+    report.fallback = limits.fallback;
 
-  report.ok = report.errors.length === 0;
-  if (report.ok) report.lastOkAt = report.at;
-  await setSetting(env, reportKey, JSON.stringify(report));
-  return report;
+    try {
+      if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
+      // المزوّدون الآخرون يُقرأ صندوقهم كلُّه في كل دورة — لا سجلّ له مستقلّ
+      else if (!history) await syncPerPost(env, report);
+    } catch (err) {
+      report.errors.push(errorText(err));
+    }
+
+    report.ok = report.errors.length === 0;
+    if (report.ok) report.lastOkAt = report.at;
+    await setSetting(env, reportKey, JSON.stringify(report));
+    return report;
+  } finally {
+    if (mark) await endScheduledRun(env, job, mark);
+  }
 }
 
 /* ============================================================
@@ -319,7 +324,11 @@ async function syncSocialApiInbox(env: Env, report: InboxSyncReport, deadline: n
   report.calls = budget.used;
   report.stoppedBy = budget.stoppedBy;
   if (budget.stoppedBy) report.complete = false;
-  const negative = fresh.filter((it) => it.rating != null && it.rating <= 2);
+  /* التنبيه لما جدّ لا لما قُرئ أوّل مرّة: قراءةُ الصفحات إلى آخرها تُدخل
+     الصندوقَ مراجعاتِ سنواتٍ مضت، ولكلّ سلبيةٍ منها بريدٌ لكل مسؤول. فلا يُنبَّه
+     إلا لمراجعة الأسبوع الأخير، ولا شيء من سحب السجلّ. */
+  const since = Date.now() - 7 * DAY;
+  const negative = history ? [] : fresh.filter((it) => it.rating != null && it.rating <= 2 && Date.parse(it.createdAt) >= since);
   if (negative.length) await notifyNegative(env, negative);
 }
 
@@ -586,23 +595,43 @@ async function syncCommentThreads(
   let processed = 0;
   let unfinished = 0;
 
+  const stateOf = (p: InboxPost, resume: string | null, needsMore: boolean) =>
+    env.DB.prepare(
+      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at, tail_cursor, needs_more)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET
+         platform = excluded.platform, signature = excluded.signature, seen_at = excluded.seen_at,
+         synced_at = excluded.synced_at, tail_cursor = excluded.tail_cursor, needs_more = excluded.needs_more`,
+    ).bind(p.postId, p.accountId, p.platform, p.signature, stamp, stamp, resume, needsMore ? 1 : 0);
+  let failed = 0;
+  let firstError: string | null = null;
+
   for (const { p, st } of ranked) {
     // يُترك للردود ثلاثةُ نداءاتٍ على الأقل، وللأنواع الأخرى حصّتها
     if (budget.left <= reserve + 3) {
       report.complete = false;
       break;
     }
-    const r = await syncOnePost(env, token, budget, report, owners, p, st, replyQueue);
+    let r;
+    try {
+      r = await syncOnePost(env, token, budget, report, owners, p, st, replyQueue);
+    } catch (err) {
+      if (err instanceof BudgetExhausted) {
+        report.complete = false;
+        break;
+      }
+      /* منشورٌ واحد يتعذّر — حُذف على المنصّة أو مُنع عنه الحساب — لا يوقف
+         الباقي. وكان خطؤه يُسقط الحلقة كلَّها: لا تُكتب حالةُ ما قُرئ قبله ولا
+         يُقرأ ما بعده، وهو أوّل القائمة في كل دورة لأنه لم يُقرأ قطّ. فيُعطى
+         حالةً ببصمته الحالية — لا يُعاد حتى يتغيّر نشاطه — ويُمضى إلى غيره. */
+      failed++;
+      firstError ??= errorText(err);
+      stateWrites.push(stateOf(p, st?.tail_cursor ?? null, false));
+      processed++;
+      continue;
+    }
     seen += r.seen;
-    stateWrites.push(
-      env.DB.prepare(
-        `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at, tail_cursor, needs_more)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET
-           platform = excluded.platform, signature = excluded.signature, seen_at = excluded.seen_at,
-           synced_at = excluded.synced_at, tail_cursor = excluded.tail_cursor, needs_more = excluded.needs_more`,
-      ).bind(p.postId, p.accountId, p.platform, p.signature, stamp, stamp, r.resume, r.complete ? 0 : 1),
-    );
+    stateWrites.push(stateOf(p, r.resume, !r.complete));
     if (r.exhausted) {
       report.complete = false;
       break;
@@ -612,6 +641,14 @@ async function syncCommentThreads(
   }
   await runBatch(env, stateWrites);
   report.kinds.comment.items = seen;
+  if (failed) {
+    report.kinds.comment.error = firstError ?? undefined;
+    // كلُّ ما جُرّب تعذّر — عطلٌ يُقال، لا منشورٌ شاذّ
+    if (failed === processed) {
+      report.kinds.comment.ok = false;
+      report.errors.push(firstError ?? '');
+    }
+  }
 
   /* لا يتقدّم مؤشّر السجلّ إلا وقد قُرئت منشورات صفحاته كلُّها إلى آخر
      تعليقاتها — وإلا تخطّى منشوراتٍ لم تُقرأ أو بقي منها شيء، ولا تبلغها
@@ -639,8 +676,12 @@ async function syncOnePost(
   st: PostState | null,
   replyQueue: ReplyCheck[],
 ): Promise<{ seen: number; complete: boolean; exhausted: boolean; resume: string | null }> {
+  /* كل نمطٍ يستأنف المنشور من آخر صفحةٍ بلغها: التعليقات من الأقدم إلى
+     الأحدث، فالبدء من أوّله في «جلب الآن» كان يقرأ أقدم خمسمئةٍ على منشورٍ
+     كبير ولا يبلغ أحدثها — ثم يعيد مؤشّره إلى الصفحة السادسة فتعيد الدورات
+     قراءة ما قُرئ. واليدوي يزيد الصفحات ويشمل كل منشور. */
   const full = report.mode === 'full';
-  const startCursor = full ? null : st?.tail_cursor ?? null;
+  const startCursor = st?.tail_cursor ?? null;
   const maxPages = full || report.mode === 'history' ? 5 : 3;
   let res;
   try {
@@ -785,7 +826,11 @@ async function checkReplies(
         report.complete = false;
         break;
       }
-      throw err;
+      /* تعليقٌ تتعذّر ردودُه لا يُسقط ما فُحص قبله ولا ما بعده — وكان يُسقطهما
+         ويبقى أوّلَ الدور في كل دورة. فيُختم وقتُ فحصه كغيره ويُمضى. */
+      report.kinds.comment.error ??= errorText(err);
+      checked.push(q.rowKey);
+      continue;
     }
     checked.push(q.rowKey);
     if (res.path) {

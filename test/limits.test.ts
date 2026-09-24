@@ -13,7 +13,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
   DatabaseSync: new (path: string) => any;
 };
 
-import { runLimits, noteDeadRun, declaredPlan } from '../src/services/limits';
+import { runLimits, beginScheduledRun, endScheduledRun, declaredPlan } from '../src/services/limits';
 import { BudgetExhausted, CallBudget } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -84,11 +84,14 @@ describe('الحصص بحسب الخطة', () => {
   });
 });
 
-describe('الاحتياط: دورةٌ سقطت تُنزل الحصص يوماً', () => {
-  it('ينزل إلى حصص المجانية بعد دورةٍ بدأت ولم تكتب تقريرها', async () => {
+describe('الاحتياط: دورةٌ مجدولة سقطت تُنزل الحصص يوماً', () => {
+  const leaveMark = (job: string, minutesAgo: number) =>
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(`run_open:${job}`, ago(minutesAgo));
+
+  it('ينزل إلى حصص المجانية بعد دورةٍ بدأت ولم تتمّ — وهذه الدورة أوّلُ ما ينزل', async () => {
     const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
-    // بدأت قبل عشرين دقيقة، وآخر تقريرٍ كُتب قبل أربعين
-    expect(await noteDeadRun(env, ago(20), ago(40))).toBe(true);
+    leaveMark('inbox', 20);
+    await beginScheduledRun(env, 'inbox');
     const l = await runLimits(env, 'cron');
     expect(l.calls).toBe(40);
     expect(l.plan).toBe('paid');
@@ -97,7 +100,8 @@ describe('الاحتياط: دورةٌ سقطت تُنزل الحصص يوماً
 
   it('يعود إلى المدفوعة بعد يومٍ كامل', async () => {
     const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
-    await noteDeadRun(env, ago(20), ago(40));
+    leaveMark('inbox', 20);
+    await beginScheduledRun(env, 'inbox');
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 25 * 3_600_000);
     const l = await runLimits(env, 'cron');
@@ -105,19 +109,45 @@ describe('الاحتياط: دورةٌ سقطت تُنزل الحصص يوماً
     expect(l.fallback).toBe(false);
   });
 
-  it('لا تُنزلها دورةٌ أتمّت تقريرها، ولا دورةٌ ما زالت تجري، ولا قفلٌ غائب', async () => {
+  it('دورةٌ تمّت تمحو علامتها، فلا تُقرأ سقوطاً بعد ساعات', async () => {
     const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
-    // التقرير بعد القفل: أتمّت
-    expect(await noteDeadRun(env, ago(40), ago(39))).toBe(false);
-    // بدأت قبل خمس دقائق: قد تكون جاريةً بعد
-    expect(await noteDeadRun(env, ago(5), ago(40))).toBe(false);
-    expect(await noteDeadRun(env, null, ago(40))).toBe(false);
+    const mark = await beginScheduledRun(env, 'inbox');
+    await endScheduledRun(env, 'inbox', mark);
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 3 * 3_600_000);
+    await beginScheduledRun(env, 'inbox');
+    expect((await runLimits(env, 'cron')).fallback).toBe(false);
+  });
+
+  it('لا تُنزلها علامةٌ حديثة — دورةٌ قد تكون جاريةً بعد', async () => {
+    const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
+    leaveMark('inbox', 5);
+    await beginScheduledRun(env, 'inbox');
+    expect((await runLimits(env, 'cron')).fallback).toBe(false);
+  });
+
+  it('تمحو الدورة علامتها وحدها — لا علامةَ دورةٍ بدأت بعدها', async () => {
+    const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
+    const first = await beginScheduledRun(env, 'inbox');
+    // دورةٌ بدأت بعدها فكتبت علامتها فوق علامتها
+    const newer = new Date(Date.now() + 60_000).toISOString();
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'run_open:inbox'").run(newer);
+    await endScheduledRun(env, 'inbox', first);
+    expect((db.prepare("SELECT value FROM settings WHERE key = 'run_open:inbox'").get() as { value: string }).value).toBe(newer);
+  });
+
+  it('لكل مهمةٍ علامتها — سقوطُ الصندوق لا يُقرأ من علامة التحليلات', async () => {
+    const env: any = { DB: d1(db), WORKERS_PLAN: 'paid' };
+    leaveMark('analytics', 5);
+    await beginScheduledRun(env, 'inbox');
     expect((await runLimits(env, 'cron')).fallback).toBe(false);
   });
 
   it('لا يسجّل احتياطاً في المجانية — حصصها هي الاحتياط', async () => {
     const env: any = { DB: d1(db) };
-    expect(await noteDeadRun(env, ago(20), ago(40))).toBe(false);
+    leaveMark('inbox', 20);
+    await beginScheduledRun(env, 'inbox');
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'plan_fallback_until'").get()).toBeUndefined();
   });
 });
 

@@ -6,7 +6,7 @@ import {
   listSocialApiAccountsDetailed, listSocialApiPostsPaged, mapMetrics, syncYouTubePosts,
   type AccountPost, type SocialApiAccount,
 } from '../adapters/socialapi';
-import { noteDeadRun, runLimits, type Plan, type Trigger } from './limits';
+import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 import { newId, nowIso } from '../util';
 
 /* ============================================================
@@ -148,10 +148,7 @@ export type AnalyticsSyncReport = {
 export type AnalyticsMode = 'regular' | 'history';
 
 const REPORT_KEY = 'analytics_sync_report';
-/** بدءُ السحب — ما بعد تقريره الأخير بلا تقرير سحبٌ سقط. */
-const LOCK_KEY = 'analytics_sync_lock';
 const HISTORY_REPORT_KEY = 'analytics_history_report';
-const HISTORY_LOCK_KEY = 'analytics_history_lock';
 const DAY = 86_400_000;
 
 async function getSetting(env: Env, key: string): Promise<string | null> {
@@ -194,13 +191,24 @@ export async function pullAnalytics(
 ): Promise<number> {
   const history = opts.mode === 'history';
   const reportKey = history ? HISTORY_REPORT_KEY : REPORT_KEY;
-  const lockKey = history ? HISTORY_LOCK_KEY : LOCK_KEY;
+  const trigger: Trigger = opts.trigger ?? (history ? 'history' : 'cron');
+  // المجدولة وحدها يُرصد سقوطها، وقبل أن تُقرأ حصّتها — انظر `limits.ts`
+  const job = history ? 'analytics-history' : 'analytics';
+  const mark = trigger === 'cron' || trigger === 'history' ? await beginScheduledRun(env, job) : null;
+  try {
+    return await pullWithLimits(env, { trigger, budget: opts.budget, history, reportKey });
+  } finally {
+    if (mark) await endScheduledRun(env, job, mark);
+  }
+}
+
+async function pullWithLimits(
+  env: Env,
+  opts: { trigger: Trigger; budget?: number; history: boolean; reportKey: string },
+): Promise<number> {
+  const { trigger, history, reportKey } = opts;
   const providerName = ((await getSetting(env, 'provider_name')) || env.PROVIDER_NAME || 'mock').toLowerCase();
   const prev = await readReport(env, reportKey);
-  // قبل أن يكتب السحب بدأه: هل سقط الذي قبله؟
-  await noteDeadRun(env, await getSetting(env, lockKey), prev?.at ?? null);
-  await setSetting(env, lockKey, nowIso());
-  const trigger = opts.trigger ?? (history ? 'history' : 'cron');
   const limits = await runLimits(env, trigger);
   const report: AnalyticsSyncReport = {
     at: nowIso(),
@@ -436,11 +444,14 @@ async function ingestAccountPosts(
 ): Promise<number> {
   if (!items.length) return 0;
   report.accountPosts += items.length;
-  const oldest = items.reduce((m, h) => (h.sentAt && (!m || h.sentAt < m) ? h.sentAt : m), '' as string);
+  const oldest = items.reduce((m, h) => {
+    const t = h.sentAt ? Date.parse(h.sentAt) : NaN;
+    return Number.isFinite(t) && t < m ? t : m;
+  }, Number.POSITIVE_INFINITY);
   const { results: candidates } = await env.DB.prepare(
     `SELECT ${SNAP_COLUMNS} FROM analytics_snapshots WHERE platform = ? AND (sent_at IS NULL OR sent_at >= ?)`,
   )
-    .bind(platform, oldest ? new Date(Date.parse(oldest) - DAY).toISOString() : '1970-01-01T00:00:00Z')
+    .bind(platform, Number.isFinite(oldest) ? new Date(oldest - DAY).toISOString() : '1970-01-01T00:00:00Z')
     .all<Snapshot>();
 
   const writes: D1PreparedStatement[] = [];
@@ -514,13 +525,22 @@ async function refreshLiveMetrics(
       report.complete = false;
       break;
     }
+    const stampChecked = env.DB.prepare(
+      "UPDATE analytics_snapshots SET metrics_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_uuid = ?",
+    ).bind(uuid);
     let entries;
     try {
       entries = await fetchPostMetrics(token, uuid, budget);
     } catch (err) {
-      if (isUnsupported(err)) continue;
-      stop(err);
-      if (err instanceof BudgetExhausted) break;
+      if (err instanceof BudgetExhausted) {
+        report.complete = false;
+        break;
+      }
+      /* منشورٌ لا يُجيب المزوّد عن أرقامه — مجدولٌ لم يُنشر، أو فشل نشره، أو
+         حُذف — يُختم وقتُ طلبه كغيره. وإلا بقي أوّلَ القائمة في كل سحبٍ يأكل
+         حصّتها، ولا يبلغ الحيَّ منها شيء. */
+      if (!isUnsupported(err)) stop(err);
+      await stampChecked.run();
       continue;
     }
     const { results: rows } = await env.DB.prepare(
@@ -547,9 +567,7 @@ async function refreshLiveMetrics(
     }
     /* وقتُ الطلب يُختم أجاب المزوّد بأرقامٍ أم لم يُجب — وإلا بقي منشورٌ لا
        تُردّ أرقامه أوّلَ القائمة في كل سحب يأكل حصّتها. */
-    writes.push(env.DB.prepare(
-      "UPDATE analytics_snapshots SET metrics_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_uuid = ?",
-    ).bind(uuid));
+    writes.push(stampChecked);
     await runBatch(env, writes);
     report.refreshed++;
   }
@@ -663,17 +681,15 @@ async function pullAllSocialApi(
       break;
     }
     const state = opts.history ? await readHistoryState(env, acc.id) : null;
-    if (state?.doneAt && Date.now() - Date.parse(state.doneAt) < 30 * DAY) {
-      report.historyDone = (report.historyDone ?? 0) + 1;
-      continue;
-    }
+    if (state?.doneAt && Date.now() - Date.parse(state.doneAt) < 30 * DAY) continue;
     let page;
     try {
       page = await listAccountPosts(token, acc, { budget, maxPages: opts.history ? 4 : 1, startCursor: state?.cursor ?? null });
     } catch (err) {
       if (isUnsupported(err)) {
-        // مؤشّرٌ لم يعد يقبله المزوّد — يُبدأ السجلّ من أحدثه في السحب التالي
-        if (state?.cursor) await writeHistoryState(env, acc.id, { cursor: null, doneAt: null });
+        /* مؤشّرٌ لم يعد يقبله المزوّد — يُبدأ السجلّ من أحدثه في السحب التالي.
+           وحسابٌ لا سجلّ له عند المزوّد أصلاً لا شيء يُقرأ منه: مقروءٌ. */
+        if (state) await writeHistoryState(env, acc.id, state.cursor ? { cursor: null, doneAt: null } : { cursor: null, doneAt: nowIso() });
         continue;
       }
       stop(err);
@@ -683,12 +699,22 @@ async function pullAllSocialApi(
     captured += await ingestAccountPosts(env, report, page.posts, platformOf(acc.id, acc.platform), schedMap);
     if (opts.history) {
       await writeHistoryState(env, acc.id, page.complete ? { cursor: null, doneAt: nowIso() } : { cursor: page.resume, doneAt: null });
-      if (page.complete) report.historyDone = (report.historyDone ?? 0) + 1;
     }
     if (page.exhausted) {
       report.complete = false;
       break;
     }
+  }
+
+  /* كم حساباً قُرئ سجلّه إلى آخره — من حالته المحفوظة لا مما مرّ به هذا السحب:
+     ما بعد حدّ الحصّة لم يُمرّ به، وهو مقروءٌ أو غير مقروء كما كان. */
+  if (opts.history) {
+    let done = 0;
+    for (const acc of withHistory) {
+      const st = await readHistoryState(env, acc.id);
+      if (st.doneAt && Date.now() - Date.parse(st.doneAt) < 30 * DAY) done++;
+    }
+    report.historyDone = done;
   }
 
   // ٤) الأرقام الحيّة — أقدمُها تحديثاً أوّلاً

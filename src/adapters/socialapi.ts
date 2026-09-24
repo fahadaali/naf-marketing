@@ -337,7 +337,8 @@ export function mapPublishedPost(p: any): SocialApiPost[] {
       platform: String(t.platform || ''),
       accountId: String(t.account_id || ''),
       title,
-      sentAt: t.published_at || p.published_at || p.created_at || null,
+      // وقتٌ يُقرأ أو لا شيء — رقمٌ خامٌ يُسقط كل مقارنةٍ بعده (`isoOrNull`)
+      sentAt: isoOrNull(t.published_at || p.published_at || p.created_at),
       reach: mapped.reach,
       impressions: mapped.impressions,
       engagement: mapped.engagement,
@@ -415,7 +416,7 @@ export function mapAccountPost(p: any, account: SocialApiAccount): AccountPost |
     platform,
     accountId: account.id,
     title: String(p?.text || p?.caption || p?.title || p?.message || '').slice(0, 140),
-    sentAt: p?.published_at || p?.timestamp || p?.created_at || p?.created_time || null,
+    sentAt: isoOrNull(p?.published_at || p?.timestamp || p?.created_at || p?.created_time),
     externalUrl: p?.permalink || p?.url || p?.link || buildPermalink(platform, id),
     metrics: mapMetrics(source),
   };

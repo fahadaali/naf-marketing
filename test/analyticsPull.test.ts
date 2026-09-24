@@ -360,3 +360,77 @@ describe('سجلّ المنشورات القديم', () => {
     expect(hist.historyDone).toBe(1);
   });
 });
+
+describe('ما وجدته المراجعة قبل الدمج', () => {
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+
+  it('منشورٌ لا يُجيب المزوّد عن أرقامه لا يبقى أوّلَ القائمة — ويبلغ الحيُّ دوره', async () => {
+    route('GET', '/posts', () => ({ body: { data: [] } }));
+    const ins = db.prepare(
+      `INSERT INTO analytics_snapshots (id, platform, provider_post_id, title, sent_at, provider_uuid, metrics_at, reach, impressions, engagement, source)
+       VALUES (?, 'linkedin', ?, 't', ?, ?, NULL, NULL, NULL, NULL, 'posts')`,
+    );
+    // ستّون منشوراً مجدولاً أو محذوفاً لا يُجيب، ثم منشورٌ حيّ
+    for (let i = 0; i < 60; i++) ins.run(`s_dead${i}`, `urn:dead:${i}`, daysAgo(3), `sp_dead${i}`);
+    ins.run('s_live', 'urn:li:share:live', daysAgo(2), 'sp_live');
+    route('GET', /^\/posts\/sp_dead\d+\/metrics$/, () => ({ status: 404, body: { error: 'not found' } }));
+    route('GET', '/posts/sp_live/metrics', () => ({
+      body: { data: [{ platform: 'linkedin', account_id: 'acc_li', platform_post_id: 'urn:li:share:live', likes: 5, comments: 1, metrics_synced_at: daysAgo(0) }] },
+    }));
+
+    // سحبان بحصّةٍ لا تتّسع للواحد والستّين معاً
+    await pullAnalytics(env, { budget: 40 });
+    await pullAnalytics(env, { budget: 40 });
+    expect(snaps().find((s) => s.id === 's_live')?.engagement).toBe(6);
+    const stamped = db.prepare("SELECT COUNT(*) AS n FROM analytics_snapshots WHERE id LIKE 's_dead%' AND metrics_checked_at IS NOT NULL").get() as { n: number };
+    expect(stamped.n).toBe(60);
+  });
+
+  it('وقتٌ يُعلنه المزوّد رقماً أو نصّاً لا يُقرأ لا يُسقط السحب', async () => {
+    route('GET', '/posts', () => ({ body: { data: [] } }));
+    route('GET', '/accounts/acc_li/posts', () => ({
+      body: {
+        data: [
+          { id: 'urn:li:share:e1', text: 'بتوقيتٍ رقمي', published_at: 1758700800, likes: 3 },
+          { id: 'urn:li:share:e2', text: 'بتوقيتٍ لا يُقرأ', published_at: 'ليس تاريخاً', likes: 2 },
+        ],
+      },
+    }));
+
+    await pullAnalytics(env, { budget: 40 });
+    const report = await readAnalyticsReport(env);
+    expect(report?.ok).toBe(true);
+    const byId = Object.fromEntries(snaps().map((s) => [s.provider_post_id, s.sent_at]));
+    expect(byId['urn:li:share:e1']).toBe('2025-09-24T08:00:00.000Z');
+    expect(byId['urn:li:share:e2']).toBeNull();
+  });
+
+  it('حسابٌ لا سجلّ له عند المزوّد مقروءٌ — فلا تبقى اللوحة «اكتمل n-1 من n» أبداً', async () => {
+    route('GET', '/accounts', () => ({
+      body: { data: [{ id: 'acc_li', platform: 'linkedin', name: 'NAF' }, { id: 'acc_x', platform: 'x', name: 'NAF' }] },
+    }));
+    route('GET', '/posts', () => ({ body: { data: [] } }));
+    route('GET', '/accounts/acc_li/posts', () => ({ body: { data: [], next_cursor: null } }));
+    route('GET', '/accounts/acc_x/posts', () => ({ status: 404, body: { error: 'unsupported' } }));
+
+    await pullAnalytics(env, { mode: 'history', budget: 40 });
+    const hist = JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'analytics_history_report'").get() as { value: string }).value);
+    expect(hist.historyAccounts).toBe(2);
+    expect(hist.historyDone).toBe(2);
+  });
+
+  it('يعدّ المقروء من حالته المحفوظة — لا مما مرّ به هذا السحب قبل حدّ حصّته', async () => {
+    route('GET', '/accounts', () => ({
+      body: { data: [{ id: 'acc_li', platform: 'linkedin', name: 'NAF' }, { id: 'acc_ig', platform: 'instagram', name: 'NAF' }] },
+    }));
+    route('GET', '/posts', () => ({ body: { data: [] } }));
+    // الثاني قُرئ سجلّه في سحبٍ سابق
+    db.prepare("INSERT INTO settings (key, value) VALUES ('account_history:acc_ig', ?)").run(JSON.stringify({ cursor: null, doneAt: daysAgo(2) }));
+    // والحصّة لا تبلغ إلا الحسابات والصفحة الأولى من سجلّ الأول
+    route('GET', '/accounts/acc_li/posts', () => ({ body: { data: [], next_cursor: 'more' } }));
+
+    await pullAnalytics(env, { mode: 'history', budget: 8 });
+    const hist = JSON.parse((db.prepare("SELECT value FROM settings WHERE key = 'analytics_history_report'").get() as { value: string }).value);
+    expect(hist.historyDone).toBe(1);
+  });
+});
