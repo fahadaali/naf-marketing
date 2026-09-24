@@ -49,8 +49,63 @@ function toIso(v: unknown): string {
 
 export type SocialApiAccount = { id: string; platform: string; name: string };
 
+/* ═══ ميزانيةُ النداءات ═══
+
+   عاملُ كلاودفلير يُحدّ بعدد الطلبات الخارجية في الاستدعاء الواحد: خمسون
+   في الخطة المجانية. والمزامنة كانت تنادي منشوراً منشوراً بلا حدّ، فإذا
+   بلغ الاستدعاء حدّه سقط كل نداءٍ بعده بخطأ «Too many subrequests» —
+   وكلُّها محاطةٌ بـ`catch` صامت. فيصل من الصندوق ما سبق الحدّ ويغيب ما بعده،
+   ويتبدّل الغائب من ساعةٍ إلى ساعة بحسب ما سبقه من مهام: تعليقاتٌ لا تظهر
+   أبداً، وأرقامٌ تظهر مرّةً وتغيب أخرى.
+
+   فكل دورة تحمل ميزانيةً معلومة، وتقف عندها واقفةً لا ساقطة: تحفظ ما جمعت
+   وتقول إنها لم تكمل، وتُكمل الدورةُ التالية من حيث بلغت. */
+
+/** نفدت ميزانية الدورة — ليس عطلاً في المزوّد، فلا يُعرض خطأً. */
+export class BudgetExhausted extends Error {
+  constructor() {
+    super('budget_exhausted');
+    this.name = 'BudgetExhausted';
+  }
+}
+
+/** عدّادُ نداءات الدورة الواحدة. */
+export class CallBudget {
+  used = 0;
+  constructor(readonly max: number) {}
+  get left(): number {
+    return Math.max(this.max - this.used, 0);
+  }
+  spend(): void {
+    if (this.used >= this.max) throw new BudgetExhausted();
+    this.used++;
+  }
+}
+
+/** خطأ المزوّد بحالته — كي يُفرَّق «غير مدعوم» (404/405/501) عن العطل. */
+export class SocialApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'SocialApiError';
+  }
+}
+
+/**
+ * مسارٌ لا تدعمه هذه المنصّة أو هذا الحساب — غيابٌ معلوم لا عطل. ويشمل
+ * ٤٠٠ و٤٢٢ لأنه يُستعمل حين تُجرَّب صيغتان لنداءٍ واحد ويُقبل ما أجاب.
+ */
+export function isUnsupported(err: unknown): boolean {
+  return err instanceof SocialApiError && [400, 404, 405, 422, 501].includes(err.status);
+}
+
+/** المسار غير موجودٍ أو غير مدعوم أصلاً — أضيق من `isUnsupported`: طلبٌ مرفوضٌ بمحتواه عطلٌ يُقال. */
+export function isNotFound(err: unknown): boolean {
+  return err instanceof SocialApiError && [404, 405, 501].includes(err.status);
+}
+
 // منفّذ REST مشترك
-async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown): Promise<T> {
+async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown, budget?: CallBudget): Promise<T> {
+  budget?.spend();
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
@@ -63,21 +118,121 @@ async function sapi<T = any>(apiKey: string, method: string, path: string, body?
   let data: any = null;
   try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
   if (res.status === 401 || res.status === 403) {
-    throw new Error(`رمز SocialAPI مرفوض (${res.status}) — تأكد من صحة المفتاح.`);
+    throw new SocialApiError(`رمز SocialAPI مرفوض (${res.status}) — تأكد من صحة المفتاح.`, res.status);
   }
-  if (!res.ok) throw new Error(`SocialAPI ${method} ${path} → ${res.status}: ${data?.message || data?.error || text.slice(0, 160)}`);
+  if (!res.ok) {
+    const detail = data?.message || data?.error?.message || data?.error || text.slice(0, 160);
+    throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status);
+  }
   return data as T;
 }
 
+/* ═══ القوائم صفحاتٌ لا ردٌّ واحد ═══
+
+   كل قائمةٍ في SocialAPI تُردّ صفحةً: `{ data: [...], next_cursor }`، أو
+   `{ data, pagination: { next_cursor } }` في قائمة المنشورات. وتعليقات
+   المنشور تُرتَّب من الأقدم إلى الأحدث بخمسٍ وعشرين في الصفحة — فقراءةُ
+   الصفحة الأولى وحدها، كما كانت، تقرأ أقدم التعليقات وتترك أحدثها أبداً
+   على كل منشورٍ تجاوز الخمسة والعشرين. */
+
+/** مؤشّر الصفحة التالية بأيّ الشكلين جاء — وإلا `null`. */
+export function nextCursor(page: any): string | null {
+  const c = page?.next_cursor ?? page?.pagination?.next_cursor ?? page?.meta?.next_cursor ?? page?.paging?.next_cursor ?? null;
+  return typeof c === 'string' && c.trim() ? c : null;
+}
+
+/** عناصر الصفحة — `data` أولاً ثم الأسماء البديلة، أو الردّ نفسه إن كان مصفوفة. */
+export function itemsOf(page: any, ...keys: string[]): any[] {
+  if (Array.isArray(page)) return page;
+  for (const k of ['data', ...keys]) {
+    const v = page?.[k];
+    if (Array.isArray(v)) return v;
+  }
+  return [];
+}
+
+export type ListResult = {
+  items: any[];
+  /** قُرئت القائمة إلى آخرها — لا حدّ صفحاتٍ ولا ميزانية أوقفها. */
+  complete: boolean;
+  /** وقفت لأن الميزانية نفدت. */
+  exhausted: boolean;
+  /**
+   * من أين تبدأ القراءة التالية: مؤشّرُ آخر صفحةٍ قُرئت إن اكتملت القائمة
+   * (فتُعاد وحدها ويُلحق بها ما جدّ)، أو مؤشّرُ الصفحة التي لم تُقرأ بعدُ
+   * إن وقفت دونها. `null` = من البداية.
+   */
+  resume: string | null;
+};
+
+/** يقرأ قائمةً صفحةً صفحة حتى تنفد أو يبلغ الحدّ — ويحفظ ما جمع إن وقف. */
+export async function sapiList(
+  apiKey: string,
+  path: string,
+  params: Record<string, string | number | undefined | null>,
+  opts: { budget?: CallBudget; maxPages: number; keys?: string[]; startCursor?: string | null },
+): Promise<ListResult> {
+  const items: any[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = opts.startCursor || null;
+  for (let page = 0; page < opts.maxPages; page++) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+    }
+    if (cursor) q.set('cursor', cursor);
+    const qs = q.toString();
+    let data: any;
+    try {
+      data = await sapi<any>(apiKey, 'GET', `${path}${qs ? `?${qs}` : ''}`, undefined, opts.budget);
+    } catch (err) {
+      if (err instanceof BudgetExhausted) return { items, complete: false, exhausted: true, resume: cursor };
+      throw err;
+    }
+    items.push(...itemsOf(data, ...(opts.keys ?? [])));
+    const next = nextCursor(data);
+    // مؤشّرٌ يتكرّر حلقةٌ لا صفحة — تُقطع
+    if (!next || seen.has(next) || next === cursor) return { items, complete: true, exhausted: false, resume: cursor };
+    seen.add(next);
+    cursor = next;
+  }
+  return { items, complete: false, exhausted: false, resume: cursor };
+}
+
 // جلب الحسابات المربوطة (للربط بمنصات المنصة)
-export async function listSocialApiAccounts(apiKey: string): Promise<SocialApiAccount[]> {
-  const data = await sapi<any>(apiKey, 'GET', EP.accounts);
+export async function listSocialApiAccounts(apiKey: string, budget?: CallBudget): Promise<SocialApiAccount[]> {
+  return (await listSocialApiAccountsDetailed(apiKey, budget)).map(({ id, platform, name }) => ({ id, platform, name }));
+}
+
+/** الحساب ومعه ما يُعرف به صاحبه على منصّته — لتمييز ردودنا عن ردود الناس. */
+export type SocialApiOwnedAccount = SocialApiAccount & { ownerKeys: string[] };
+
+/** يوحّد معرّفاً أو اسماً للمقارنة: بلا مسافاتٍ طرفية ولا «@» ولا فرق حروف. */
+export function normKey(v: unknown): string {
+  return String(v ?? '').trim().toLowerCase().replace(/^@/, '');
+}
+
+export async function listSocialApiAccountsDetailed(apiKey: string, budget?: CallBudget): Promise<SocialApiOwnedAccount[]> {
+  const data = await sapi<any>(apiKey, 'GET', EP.accounts, undefined, budget);
   const list: any[] = data?.accounts || data?.data || (Array.isArray(data) ? data : []);
-  return list.map((a) => ({
-    id: String(a.id || a.account_id || a.accountId),
-    platform: String(a.platform || a.network || a.service || ''),
-    name: String(a.name || a.username || a.display_name || a.handle || a.id),
-  }));
+  return list.map((a) => {
+    const meta = a?.metadata && typeof a.metadata === 'object' ? a.metadata : {};
+    /* ما يُعرف به الحساب على منصّته: معرّفُه هناك واسمُه ومعرّفُ صفحته أو
+       قناته. والاسم الظاهر وحده لا يُقبل إن قصُر — «ناف» تطابق من ليس نحن. */
+    const keys = [
+      a.platform_user_id, a.platform_account_id, a.platform_id, a.external_id, a.user_id, a.page_id,
+      a.username, a.handle, a.name, a.display_name,
+      meta.username, meta.name, meta.page_id, meta.page_name, meta.user_id, meta.channel_id, meta.channel_title, meta.ig_user_id,
+    ]
+      .map(normKey)
+      .filter((k) => k.length >= 3);
+    return {
+      id: String(a.id || a.account_id || a.accountId),
+      platform: String(a.platform || a.network || a.service || ''),
+      name: String(a.name || a.username || a.display_name || a.handle || a.id),
+      ownerKeys: [...new Set(keys)],
+    };
+  });
 }
 
 // منشور SocialAPI مع مقاييسه — سطر لكل وجهة نشر (target) لأن المنشور الواحد قد يُنشر لعدّة منصات
