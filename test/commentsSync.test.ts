@@ -736,6 +736,27 @@ describe('تشخيص الصندوق', () => {
     expect(inbox?.replies[1].author['author.name']?.ours).toBe(false);
   });
 
+  it('يجرّب أوّلاً ما عليه تعليقات، ويعرض عدد كل منشور كما يعلنه المزوّد', async () => {
+    // الأحدث أوّلاً في القائمة، وهو بلا تعليق — وتجربتُه وحده لا تدلّ على شيء
+    route('GET', '/inbox/comments', (url) =>
+      url.searchParams.get('min_comments') === '1'
+        ? { body: { data: [{ id: 'old3', account_id: 'acc_ig', platform: 'instagram', comment_count: 3 }] } }
+        : {
+            body: {
+              data: [
+                { id: 'new0', account_id: 'acc_ig', platform: 'instagram', comment_count: 0 },
+                { id: 'old3', account_id: 'acc_ig', platform: 'instagram', comment_count: 3 },
+              ],
+            },
+          });
+    route('GET', '/inbox/comments/old3', () => ({ body: { data: [comment(1)] } }));
+
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.inbox.posts?.map((p) => [p.id, p.comments])).toEqual([['new0', 0], ['old3', 3]]);
+    expect(d.withComments.parsed).toBe(1);
+    expect(d.posts[0].tries.map((t) => [t.value, t.parsed])).toEqual([['old3', 1]]);
+  });
+
   it('لا يُخرج نصَّ تعليقٍ ولا ردٍّ ولا اسمَ كاتب', async () => {
     const out = JSON.stringify(await diagnoseInbox('sapi_key_test'));
     for (const secret of ['سؤال رقم', 'عميل', 'شكراً لتواصلك', 'ما زلت أنتظر', 'u1', '555']) {

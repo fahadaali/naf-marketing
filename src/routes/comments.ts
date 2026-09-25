@@ -91,7 +91,8 @@ commentRoutes.post('/refresh', async (c) => {
 commentRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {
   const key = providerKey(c.env, 'socialapi');
   if (!key) return c.json({ error: 'مفتاح SocialAPI غير مضبوط' }, 400);
-  return c.json(await diagnoseInbox(key));
+  // يُفتح في المتصفح لا في الواجهة، وبعض متصفحات الجوال تقرأ JSON بلا ترميزٍ معلَن لاتينياً
+  return c.json(await diagnoseInbox(key), 200, { 'Content-Type': 'application/json; charset=utf-8' });
 });
 
 // تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية

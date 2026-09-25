@@ -1087,14 +1087,24 @@ function maskedAuthor(r: any, ownerKeys: Set<string>): Record<string, { hint: st
 }
 
 type DiagTry = { field: string; value: string; error?: string; shape?: unknown; parsed: number };
+type DiagPost = { id: string; platform: string; comments: unknown; updated: unknown };
+
+const diagPost = (r: any): DiagPost => ({
+  id: String(r?.id ?? r?.post_id ?? ''),
+  platform: String(r?.platform || r?.account?.platform || ''),
+  comments: r?.comment_count ?? r?.comments_count ?? null,
+  updated: r?.updated_at ?? r?.last_comment_at ?? null,
+});
 type DiagReply = { own: boolean; author: Record<string, { hint: string; ours: boolean }> };
 
 export type InboxDiagnosis = {
   at: string;
   calls: number;
   accounts: { id: string; platform: string; ownerKeys: string[] }[] | { error: string };
-  /** `parsed` ما يقرؤه المحلّل نفسه الذي تقرأ به المزامنة. */
-  inbox: { error?: string; shape?: unknown; parsed: number };
+  /** `parsed` ما يقرؤه المحلّل نفسه الذي تقرأ به المزامنة، و`posts` عددُ تعليقات كلٍّ كما يعلنه المزوّد. */
+  inbox: { error?: string; shape?: unknown; parsed: number; posts?: DiagPost[] };
+  /** ما عليه تعليقٌ واحدٌ على الأقل بمرشّح المزوّد نفسه (`min_comments=1`) — لا بعدّنا. */
+  withComments: { error?: string; parsed: number; posts?: DiagPost[] };
   posts: { platform: string; accountId: string; tries: DiagTry[] }[];
   replies: {
     comment: string;
@@ -1111,7 +1121,9 @@ export type InboxDiagnosis = {
 export async function diagnoseInbox(apiKey: string): Promise<InboxDiagnosis> {
   const budget = new CallBudget(24);
   const errorOf = (e: unknown) => String((e as Error)?.message || e).slice(0, 300);
-  const out: InboxDiagnosis = { at: new Date().toISOString(), calls: 0, accounts: [], inbox: { parsed: 0 }, posts: [], replies: null };
+  const out: InboxDiagnosis = {
+    at: new Date().toISOString(), calls: 0, accounts: [], inbox: { parsed: 0 }, withComments: { parsed: 0 }, posts: [], replies: null,
+  };
 
   let accounts: SocialApiOwnedAccount[] = [];
   try {
@@ -1125,15 +1137,27 @@ export async function diagnoseInbox(apiKey: string): Promise<InboxDiagnosis> {
   try {
     const data = await sapi<any>(apiKey, 'GET', `${EP.comments}?limit=25`, undefined, budget);
     rows = itemsOf(data, 'posts', 'comments');
-    out.inbox = { shape: shapeOf(data), parsed: rows.length };
+    out.inbox = { shape: shapeOf(data), parsed: rows.length, posts: rows.map(diagPost) };
   } catch (e) {
     out.inbox = { error: errorOf(e), parsed: 0 };
   }
 
-  // منشورٌ من كل منصّة، ثلاثةٌ على الأكثر — فما يخصّ منصّةً لا يُحسب على غيرها
+  let withComments: any[] = [];
+  try {
+    const data = await sapi<any>(apiKey, 'GET', `${EP.comments}?min_comments=1&limit=25`, undefined, budget);
+    withComments = itemsOf(data, 'posts', 'comments');
+    out.withComments = { parsed: withComments.length, posts: withComments.map(diagPost) };
+  } catch (e) {
+    out.withComments = { error: errorOf(e), parsed: 0 };
+  }
+
+  /* منشورٌ من كل منصّة، ثلاثةٌ على الأكثر — فما يخصّ منصّةً لا يُحسب على غيرها.
+     وما عليه تعليقات أوّلاً: منشورٌ بلا تعليقٍ يعيد قائمةً فارغة ولا يدلّ على شيء. */
+  const count = (r: any) => Number(r?.comment_count ?? r?.comments_count ?? 0) || 0;
+  const ordered = [...withComments, ...[...rows].sort((a, b) => count(b) - count(a))];
   const picked: any[] = [];
   const platforms = new Set<string>();
-  for (const r of rows) {
+  for (const r of ordered) {
     const p = String(r?.platform || r?.account?.platform || '');
     if (platforms.has(p)) continue;
     platforms.add(p);
