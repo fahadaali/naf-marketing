@@ -608,6 +608,37 @@ describe('ما وجدته المراجعة قبل الدمج', () => {
     expect(report?.ok).toBe(false);
   });
 
+  /* ما جرى في الإنتاج: عملت المزامنة على قاعدةٍ ينقصها عمود، فتعذّر كل منشور.
+     وحالةٌ تُكتب لمنشورٍ لم تُحفظ تعليقاته تعلّمه مقروءاً، فلا يُعاد حتى يتغيّر
+     نشاطه — وتضيع تعليقاته بصمت. */
+  it('عطلٌ عامّ لا يعلّم المنشورات مقروءة — تُعاد حين يزول فتُحفظ تعليقاتها', async () => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [1, 2].map((i) => ({ id: `post${i}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 })) },
+    }));
+    route('GET', /^\/inbox\/comments\/post[12]$/, (url) => ({ body: { data: [comment(Number(url.pathname.slice(-1)))] } }));
+    db.exec('ALTER TABLE platform_comments DROP COLUMN provider_interaction_id');
+
+    await syncComments(env, { budget: 40 });
+    expect(states()).toEqual([]);
+
+    db.exec('ALTER TABLE platform_comments ADD COLUMN provider_interaction_id TEXT');
+    await syncComments(env, { budget: 40 });
+    expect(rows().map((r) => r.provider_comment_id)).toEqual(['post1|acc_ig|c1', 'post2|acc_ig|c2']);
+  });
+
+  it('ولا يتقدّم مؤشّر السجلّ فوق منشوراتٍ لم تُقرأ لعطلٍ عامّ', async () => {
+    route('GET', '/inbox/comments', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [{ id: `post${n}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }], next_cursor: n < 5 ? String(n + 1) : null } };
+    });
+    route('GET', /^\/inbox\/comments\/post\d$/, () => ({ status: 503, body: { error: 'down' } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    const cursor = db.prepare("SELECT value FROM settings WHERE key = 'inbox_history_cursor'").get() as { value: string } | undefined;
+    expect(cursor?.value ?? '').toBe('');
+    expect(states()).toEqual([]);
+  });
+
   it('تعليقٌ تتعذّر ردودُه لا يُسقط فحص غيره — ولا يبقى أوّلَ الدور', async () => {
     db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', ?)").run(daysAgo(1));
     const add = db.prepare(
