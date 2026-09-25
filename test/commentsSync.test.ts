@@ -14,7 +14,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 };
 
 import { syncComments, readInboxReport, postPriority } from '../src/services/commentsSync';
-import { mapComment, isOwnAuthor, nextCursor } from '../src/adapters/socialapi';
+import { mapComment, isOwnAuthor, nextCursor, diagnoseInbox } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -696,5 +696,50 @@ describe('ما وجدته المراجعة قبل الدمج', () => {
     await syncComments(env, { mode: 'full', budget: 40 });
     const first = calls.find((c) => c.startsWith('GET /inbox/comments/post1'));
     expect(first).toContain('cursor=p12');
+  });
+});
+
+/* التعليقات لا تُحفظ ولا يظهر خطأ، وسببُه في شكل جواب المزوّد. والتشخيص يعيد
+   البنية لا القيم: يُصوَّر ويُرسل، فلا يخرج فيه نصُّ عميلٍ ولا اسمُه. */
+describe('تشخيص الصندوق', () => {
+  beforeEach(() => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [{ id: 'post1', inbox_post_id: 'ibx1', account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }] },
+    }));
+    route('GET', '/inbox/comments/ibx1', () => ({ body: { data: [comment(1, { reply_count: 2 })] } }));
+    route('GET', '/inbox/comments/ibx1/c1/replies', () => ({
+      body: {
+        data: [
+          { id: 'r1', author: { id: '999', username: 'naf.law' }, text: 'شكراً لتواصلك معنا' },
+          { id: 'r2', author: { id: '555', name: 'عميل خامس' }, text: 'ما زلت أنتظر' },
+        ],
+      },
+    }));
+  });
+
+  it('يجرّب كل معرّفٍ للمنشور ويقول أيّها أعاد التعليقات', async () => {
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.inbox.parsed).toBe(1);
+    const tries = d.posts[0].tries;
+    expect(tries.map((t) => [t.field, t.value, t.parsed])).toEqual([['id', 'post1', 0], ['inbox_post_id', 'ibx1', 1]]);
+    expect(tries[0].error).toContain('404');
+    // البنية تُظهر المعرّفات والأعداد
+    expect(JSON.stringify(tries[1].shape)).toContain('"reply_count":2');
+  });
+
+  it('يقول أيُّ ردٍّ منّا، ويقنّع الكاتب', async () => {
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.replies?.comment).toBe('c1');
+    const inbox = d.replies?.tries.find((t) => t.path === 'inbox');
+    expect(inbox?.replies.map((r) => r.own)).toEqual([true, false]);
+    expect(inbox?.replies[0].author['author.username']).toEqual({ hint: 'naf…(7)', ours: true });
+    expect(inbox?.replies[1].author['author.name']?.ours).toBe(false);
+  });
+
+  it('لا يُخرج نصَّ تعليقٍ ولا ردٍّ ولا اسمَ كاتب', async () => {
+    const out = JSON.stringify(await diagnoseInbox('sapi_key_test'));
+    for (const secret of ['سؤال رقم', 'عميل', 'شكراً لتواصلك', 'ما زلت أنتظر', 'u1', '555']) {
+      expect(out).not.toContain(secret);
+    }
   });
 });

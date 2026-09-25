@@ -5,6 +5,8 @@ import {
   syncComments, readInboxReport, replyToComment, moderateComment, privateReplyToComment, editReply, deleteReply,
 } from '../services/commentsSync';
 import type { ModerateAction } from '../adapters/provider';
+import { providerKey } from '../adapters';
+import { diagnoseInbox } from '../adapters/socialapi';
 import { suggestReplies } from '../services/claude';
 import { htmlToText } from '../util';
 
@@ -81,6 +83,15 @@ commentRoutes.post('/refresh', async (c) => {
     return c.json({ error: `تعذّر السحب. ${report.errors[0] ?? ''}`.trim(), report }, 502);
   }
   return c.json({ ok: true, added: report?.added ?? 0, report });
+});
+
+/* تشخيص الصندوق: بنية ردود المزوّد لا قيمُها — انظر `diagnoseInbox`. يُفتح
+   في المتصفح بالجلسة نفسها، ولمدير الإعدادات وحده: فيه معرّفات الحسابات
+   ومفاتيحها. وليس `‎/debug` المحذوف أدناه، فذاك كان يعيد الجواب خاماً. */
+commentRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {
+  const key = providerKey(c.env, 'socialapi');
+  if (!key) return c.json({ error: 'مفتاح SocialAPI غير مضبوط' }, 400);
+  return c.json(await diagnoseInbox(key));
 });
 
 // تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية
