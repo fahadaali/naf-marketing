@@ -4,7 +4,7 @@ import { getProvider, providerKey } from '../adapters';
 import {
   BudgetExhausted, CallBudget, conversationLatest, isNotFound, isOwnAuthor, isUnsupported, listCommentReplies,
   listConversations, listInboxPosts, listMentions, listPostComments, listReviews,
-  listSocialApiAccountsDetailed, ownReply, supportsDirectInbox,
+  listSocialApiAccountsDetailed, ownReply, SocialApiError, supportsDirectInbox,
   type InboxItem, type InboxPost, type MentionsPath, type RepliesPath, type SocialApiOwnedAccount,
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
@@ -162,6 +162,15 @@ function newReport(
 
 function errorText(err: unknown): string {
   return String((err as Error)?.message || err).slice(0, 240);
+}
+
+/**
+ * رفضٌ يخصّ منشوراً بعينه: ٤xx من المزوّد بعد أن قُبلت قائمة المنشورات نفسها —
+ * حُذف المنشور، أو مُنع عنه الحساب، أو رُدّ الطلب بمحتواه. وليس منه ٤٠١ (الرمز
+ * كلّه)، ولا ٤٠٨ و٤٢٩ (مهلةٌ وتمهّل). وما سواه عطلٌ عامّ لا ذنب للمنشور فيه.
+ */
+function rejectedPost(err: unknown): boolean {
+  return err instanceof SocialApiError && err.status >= 400 && err.status < 500 && ![401, 408, 429].includes(err.status);
 }
 
 /**
@@ -604,6 +613,8 @@ async function syncCommentThreads(
          synced_at = excluded.synced_at, tail_cursor = excluded.tail_cursor, needs_more = excluded.needs_more`,
     ).bind(p.postId, p.accountId, p.platform, p.signature, stamp, stamp, resume, needsMore ? 1 : 0);
   let failed = 0;
+  /** ما تعذّر لعطلٍ عامّ — لم يُقرأ ولا حالة له. */
+  let unread = 0;
   let firstError: string | null = null;
 
   for (const { p, st } of ranked) {
@@ -623,10 +634,15 @@ async function syncCommentThreads(
       /* منشورٌ واحد يتعذّر — حُذف على المنصّة أو مُنع عنه الحساب — لا يوقف
          الباقي. وكان خطؤه يُسقط الحلقة كلَّها: لا تُكتب حالةُ ما قُرئ قبله ولا
          يُقرأ ما بعده، وهو أوّل القائمة في كل دورة لأنه لم يُقرأ قطّ. فيُعطى
-         حالةً ببصمته الحالية — لا يُعاد حتى يتغيّر نشاطه — ويُمضى إلى غيره. */
+         حالةً ببصمته الحالية — لا يُعاد حتى يتغيّر نشاطه — ويُمضى إلى غيره.
+
+         وذلك للمنشور الذي رفضه المزوّد وحده. أما العطل العامّ — مزوّدٌ متوقّف،
+         أو شبكة، أو قاعدةٌ ينقصها عمود — فحالتُه تعلّم المنشور مقروءاً ولم
+         تُحفظ تعليقاته، فتضيع بصمت. فلا حالة له: يُعاد في السحب التالي. */
       failed++;
       firstError ??= errorText(err);
-      stateWrites.push(stateOf(p, st?.tail_cursor ?? null, false));
+      if (rejectedPost(err)) stateWrites.push(stateOf(p, st?.tail_cursor ?? null, false));
+      else unread++;
       processed++;
       continue;
     }
@@ -653,8 +669,9 @@ async function syncCommentThreads(
   /* لا يتقدّم مؤشّر السجلّ إلا وقد قُرئت منشورات صفحاته كلُّها إلى آخر
      تعليقاتها — وإلا تخطّى منشوراتٍ لم تُقرأ أو بقي منها شيء، ولا تبلغها
      الدورة المعتادة لأنها في أعماق القائمة. وما اكتمل منها له حالةٌ الآن، فلا
-     يُعاد في السحب التالي، وما بقي منه يُستأنف من آخر صفحةٍ بلغها. */
-  if (mode === 'history' && processed === ranked.length && !unfinished && !listing.exhausted) {
+     يُعاد في السحب التالي، وما بقي منه يُستأنف من آخر صفحةٍ بلغها. وما تعذّر
+     لعطلٍ عامّ لم يُقرأ ولا حالة له، فالمؤشّر يقف عنده كما يقف عند ما بقي. */
+  if (mode === 'history' && processed === ranked.length && !unfinished && !unread && !listing.exhausted) {
     if (listing.complete) {
       await setSetting(env, HISTORY_DONE_KEY, stamp);
       await setSetting(env, HISTORY_CURSOR_KEY, '');

@@ -14,7 +14,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 };
 
 import { syncComments, readInboxReport, postPriority } from '../src/services/commentsSync';
-import { mapComment, isOwnAuthor, nextCursor } from '../src/adapters/socialapi';
+import { mapComment, isOwnAuthor, nextCursor, diagnoseInbox } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -608,6 +608,37 @@ describe('ما وجدته المراجعة قبل الدمج', () => {
     expect(report?.ok).toBe(false);
   });
 
+  /* ما جرى في الإنتاج: عملت المزامنة على قاعدةٍ ينقصها عمود، فتعذّر كل منشور.
+     وحالةٌ تُكتب لمنشورٍ لم تُحفظ تعليقاته تعلّمه مقروءاً، فلا يُعاد حتى يتغيّر
+     نشاطه — وتضيع تعليقاته بصمت. */
+  it('عطلٌ عامّ لا يعلّم المنشورات مقروءة — تُعاد حين يزول فتُحفظ تعليقاتها', async () => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [1, 2].map((i) => ({ id: `post${i}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 })) },
+    }));
+    route('GET', /^\/inbox\/comments\/post[12]$/, (url) => ({ body: { data: [comment(Number(url.pathname.slice(-1)))] } }));
+    db.exec('ALTER TABLE platform_comments DROP COLUMN provider_interaction_id');
+
+    await syncComments(env, { budget: 40 });
+    expect(states()).toEqual([]);
+
+    db.exec('ALTER TABLE platform_comments ADD COLUMN provider_interaction_id TEXT');
+    await syncComments(env, { budget: 40 });
+    expect(rows().map((r) => r.provider_comment_id)).toEqual(['post1|acc_ig|c1', 'post2|acc_ig|c2']);
+  });
+
+  it('ولا يتقدّم مؤشّر السجلّ فوق منشوراتٍ لم تُقرأ لعطلٍ عامّ', async () => {
+    route('GET', '/inbox/comments', (url) => {
+      const n = Number(url.searchParams.get('cursor') || 1);
+      return { body: { data: [{ id: `post${n}`, account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }], next_cursor: n < 5 ? String(n + 1) : null } };
+    });
+    route('GET', /^\/inbox\/comments\/post\d$/, () => ({ status: 503, body: { error: 'down' } }));
+
+    await syncComments(env, { mode: 'history', budget: 40 });
+    const cursor = db.prepare("SELECT value FROM settings WHERE key = 'inbox_history_cursor'").get() as { value: string } | undefined;
+    expect(cursor?.value ?? '').toBe('');
+    expect(states()).toEqual([]);
+  });
+
   it('تعليقٌ تتعذّر ردودُه لا يُسقط فحص غيره — ولا يبقى أوّلَ الدور', async () => {
     db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', ?)").run(daysAgo(1));
     const add = db.prepare(
@@ -665,5 +696,71 @@ describe('ما وجدته المراجعة قبل الدمج', () => {
     await syncComments(env, { mode: 'full', budget: 40 });
     const first = calls.find((c) => c.startsWith('GET /inbox/comments/post1'));
     expect(first).toContain('cursor=p12');
+  });
+});
+
+/* التعليقات لا تُحفظ ولا يظهر خطأ، وسببُه في شكل جواب المزوّد. والتشخيص يعيد
+   البنية لا القيم: يُصوَّر ويُرسل، فلا يخرج فيه نصُّ عميلٍ ولا اسمُه. */
+describe('تشخيص الصندوق', () => {
+  beforeEach(() => {
+    route('GET', '/inbox/comments', () => ({
+      body: { data: [{ id: 'post1', inbox_post_id: 'ibx1', account_id: 'acc_ig', platform: 'instagram', comment_count: 1 }] },
+    }));
+    route('GET', '/inbox/comments/ibx1', () => ({ body: { data: [comment(1, { reply_count: 2 })] } }));
+    route('GET', '/inbox/comments/ibx1/c1/replies', () => ({
+      body: {
+        data: [
+          { id: 'r1', author: { id: '999', username: 'naf.law' }, text: 'شكراً لتواصلك معنا' },
+          { id: 'r2', author: { id: '555', name: 'عميل خامس' }, text: 'ما زلت أنتظر' },
+        ],
+      },
+    }));
+  });
+
+  it('يجرّب كل معرّفٍ للمنشور ويقول أيّها أعاد التعليقات', async () => {
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.inbox.parsed).toBe(1);
+    const tries = d.posts[0].tries;
+    expect(tries.map((t) => [t.field, t.value, t.parsed])).toEqual([['id', 'post1', 0], ['inbox_post_id', 'ibx1', 1]]);
+    expect(tries[0].error).toContain('404');
+    // البنية تُظهر المعرّفات والأعداد
+    expect(JSON.stringify(tries[1].shape)).toContain('"reply_count":2');
+  });
+
+  it('يقول أيُّ ردٍّ منّا، ويقنّع الكاتب', async () => {
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.replies?.comment).toBe('c1');
+    const inbox = d.replies?.tries.find((t) => t.path === 'inbox');
+    expect(inbox?.replies.map((r) => r.own)).toEqual([true, false]);
+    expect(inbox?.replies[0].author['author.username']).toEqual({ hint: 'naf…(7)', ours: true });
+    expect(inbox?.replies[1].author['author.name']?.ours).toBe(false);
+  });
+
+  it('يجرّب أوّلاً ما عليه تعليقات، ويعرض عدد كل منشور كما يعلنه المزوّد', async () => {
+    // الأحدث أوّلاً في القائمة، وهو بلا تعليق — وتجربتُه وحده لا تدلّ على شيء
+    route('GET', '/inbox/comments', (url) =>
+      url.searchParams.get('min_comments') === '1'
+        ? { body: { data: [{ id: 'old3', account_id: 'acc_ig', platform: 'instagram', comment_count: 3 }] } }
+        : {
+            body: {
+              data: [
+                { id: 'new0', account_id: 'acc_ig', platform: 'instagram', comment_count: 0 },
+                { id: 'old3', account_id: 'acc_ig', platform: 'instagram', comment_count: 3 },
+              ],
+            },
+          });
+    route('GET', '/inbox/comments/old3', () => ({ body: { data: [comment(1)] } }));
+
+    const d = await diagnoseInbox('sapi_key_test');
+    expect(d.inbox.posts?.map((p) => [p.id, p.comments])).toEqual([['new0', 0], ['old3', 3]]);
+    expect(d.withComments.parsed).toBe(1);
+    expect(d.posts[0].tries.map((t) => [t.value, t.parsed])).toEqual([['old3', 1]]);
+  });
+
+  it('لا يُخرج نصَّ تعليقٍ ولا ردٍّ ولا اسمَ كاتب', async () => {
+    const out = JSON.stringify(await diagnoseInbox('sapi_key_test'));
+    for (const secret of ['سؤال رقم', 'عميل', 'شكراً لتواصلك', 'ما زلت أنتظر', 'u1', '555']) {
+      expect(out).not.toContain(secret);
+    }
   });
 });

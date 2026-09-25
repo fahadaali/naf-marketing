@@ -1032,6 +1032,195 @@ export async function debugSocialApi(apiKey: string): Promise<any> {
   return out;
 }
 
+/* ═══ تشخيص الصندوق ═══
+
+   التعليقات لا تُحفظ ولا يظهر خطأ: المزوّد يجيب ولا يُقرأ من جوابه شيء. وسببُه
+   في شكل الجواب — أين قائمته، وبأيّ معرّفٍ يُطلب المنشور — ولا يُعرف إلا منه.
+   فهذا يطلب ما تطلبه المزامنة، ويعيد بنية كل جوابٍ لا قيمَه: مفاتيحَ كل مستوى
+   وأنواعَها وأطوال القوائم، ومعها المعرّفات والأعداد وحدها. وما تحت كاتبٍ أو
+   مُرسِلٍ يُطوى إلى نوعه، والنصوص كذلك: التشخيص يُفتح في المتصفح ويُصوَّر
+   ويُرسل، وتعليقُ عميلٍ واسمُه لا يخرجان في صورة.
+
+   وليس هو `debugSocialApi` أعلاه: ذاك يعيد الجواب خاماً بنصوصه وأسمائه. */
+
+/** مفاتيح تُعرض قيمُها — معرّفاتٌ وأعدادٌ لا تكشف أحداً. */
+const DIAG_VALUES = new Set([
+  'id', 'post_id', 'inbox_post_id', 'platform_post_id', 'platform_id', 'account_id', 'platform', 'interaction_id', 'parent_id',
+  'comment_count', 'comments_count', 'reply_count', 'replies_count', 'count', 'total', 'has_more', 'next_cursor', 'cursor', 'status',
+]);
+/** ما تحتها شخصٌ لا منشور — لا تُعرض منها قيمة ولو كانت معرّفاً. */
+const DIAG_PERSONAL = new Set(['author', 'from', 'user', 'sender', 'recipient', 'commenter', 'owner', 'profile']);
+
+/** بنية قيمةٍ بلا محتواها: الكائن مفاتيحُه، والقائمة طولُها وبنيةُ أوّلها، والباقي نوعُه. */
+export function shapeOf(v: unknown, key = '', depth = 0, personal = false): unknown {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v.length ? [`${v.length}×`, shapeOf(v[0], key, depth + 1, personal)] : ['0×'];
+  if (typeof v === 'object') {
+    if (depth >= 5) return '{…}';
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shapeOf(x, k, depth + 1, personal || DIAG_PERSONAL.has(k))]),
+    );
+  }
+  return !personal && DIAG_VALUES.has(key) ? v : typeof v;
+}
+
+/** أوّل ثلاثة أحرفٍ وطولُ الباقي — تكفي لمقارنة كاتبٍ بحسابنا، ولا تكشف اسم عميل. */
+function maskKey(v: unknown): string {
+  const s = normKey(v);
+  return s.length <= 3 ? '•'.repeat(s.length) : `${s.slice(0, 3)}…(${s.length})`;
+}
+
+/** حقول الكاتب التي يقارنها `isOwnAuthor`، مقنّعةً، ومع كلٍّ منها: أهو من مفاتيح حسابنا؟ */
+function maskedAuthor(r: any, ownerKeys: Set<string>): Record<string, { hint: string; ours: boolean }> {
+  const a = r?.author && typeof r.author === 'object' ? r.author : {};
+  const fields: Record<string, unknown> = {
+    'author.id': a.id, 'author.platform_id': a.platform_id, 'author.username': a.username, 'author.handle': a.handle,
+    'author.name': a.name, author_id: r?.author_id, author_username: r?.author_username, author_name: r?.author_name,
+    username: r?.username, 'from.id': r?.from?.id, 'from.name': r?.from?.name,
+  };
+  const out: Record<string, { hint: string; ours: boolean }> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined || v === null || v === '') continue;
+    out[k] = { hint: maskKey(v), ours: ownerKeys.has(normKey(v)) };
+  }
+  return out;
+}
+
+type DiagTry = { field: string; value: string; error?: string; shape?: unknown; parsed: number };
+type DiagPost = { id: string; platform: string; comments: unknown; updated: unknown };
+
+const diagPost = (r: any): DiagPost => ({
+  id: String(r?.id ?? r?.post_id ?? ''),
+  platform: String(r?.platform || r?.account?.platform || ''),
+  comments: r?.comment_count ?? r?.comments_count ?? null,
+  updated: r?.updated_at ?? r?.last_comment_at ?? null,
+});
+type DiagReply = { own: boolean; author: Record<string, { hint: string; ours: boolean }> };
+
+export type InboxDiagnosis = {
+  at: string;
+  calls: number;
+  accounts: { id: string; platform: string; ownerKeys: string[] }[] | { error: string };
+  /** `parsed` ما يقرؤه المحلّل نفسه الذي تقرأ به المزامنة، و`posts` عددُ تعليقات كلٍّ كما يعلنه المزوّد. */
+  inbox: { error?: string; shape?: unknown; parsed: number; posts?: DiagPost[] };
+  /** ما عليه تعليقٌ واحدٌ على الأقل بمرشّح المزوّد نفسه (`min_comments=1`) — لا بعدّنا. */
+  withComments: { error?: string; parsed: number; posts?: DiagPost[] };
+  posts: { platform: string; accountId: string; tries: DiagTry[] }[];
+  replies: {
+    comment: string;
+    embedded: DiagReply[] | null;
+    tries: { path: RepliesPath; error?: string; shape?: unknown; replies: DiagReply[] }[];
+  } | null;
+};
+
+/**
+ * يطلب ما تطلبه المزامنة ويعيد بنيته: الحسابات ومفاتيحها، وقائمة الصندوق،
+ * وتعليقات منشورٍ من كل منصّة بكل معرّفٍ محتمل له، وردود تعليقٍ واحد بمساريها.
+ * أربعةٌ وعشرون نداءً على الأكثر.
+ */
+export async function diagnoseInbox(apiKey: string): Promise<InboxDiagnosis> {
+  const budget = new CallBudget(24);
+  const errorOf = (e: unknown) => String((e as Error)?.message || e).slice(0, 300);
+  const out: InboxDiagnosis = {
+    at: new Date().toISOString(), calls: 0, accounts: [], inbox: { parsed: 0 }, withComments: { parsed: 0 }, posts: [], replies: null,
+  };
+
+  let accounts: SocialApiOwnedAccount[] = [];
+  try {
+    accounts = await listSocialApiAccountsDetailed(apiKey, budget);
+    out.accounts = accounts.map((a) => ({ id: a.id, platform: a.platform, ownerKeys: a.ownerKeys }));
+  } catch (e) {
+    out.accounts = { error: errorOf(e) };
+  }
+
+  let rows: any[] = [];
+  try {
+    const data = await sapi<any>(apiKey, 'GET', `${EP.comments}?limit=25`, undefined, budget);
+    rows = itemsOf(data, 'posts', 'comments');
+    out.inbox = { shape: shapeOf(data), parsed: rows.length, posts: rows.map(diagPost) };
+  } catch (e) {
+    out.inbox = { error: errorOf(e), parsed: 0 };
+  }
+
+  let withComments: any[] = [];
+  try {
+    const data = await sapi<any>(apiKey, 'GET', `${EP.comments}?min_comments=1&limit=25`, undefined, budget);
+    withComments = itemsOf(data, 'posts', 'comments');
+    out.withComments = { parsed: withComments.length, posts: withComments.map(diagPost) };
+  } catch (e) {
+    out.withComments = { error: errorOf(e), parsed: 0 };
+  }
+
+  /* منشورٌ من كل منصّة، ثلاثةٌ على الأكثر — فما يخصّ منصّةً لا يُحسب على غيرها.
+     وما عليه تعليقات أوّلاً: منشورٌ بلا تعليقٍ يعيد قائمةً فارغة ولا يدلّ على شيء. */
+  const count = (r: any) => Number(r?.comment_count ?? r?.comments_count ?? 0) || 0;
+  const ordered = [...withComments, ...[...rows].sort((a, b) => count(b) - count(a))];
+  const picked: any[] = [];
+  const platforms = new Set<string>();
+  for (const r of ordered) {
+    const p = String(r?.platform || r?.account?.platform || '');
+    if (platforms.has(p)) continue;
+    platforms.add(p);
+    picked.push(r);
+    if (picked.length === 3) break;
+  }
+
+  let sample: { postId: string; accountId: string; comment: any } | null = null;
+  for (const r of picked) {
+    const accountId = String(r?.account_id || r?.account?.id || '');
+    const entry = { platform: String(r?.platform || r?.account?.platform || ''), accountId, tries: [] as DiagTry[] };
+    // كل معرّفٍ محتمل للمنشور مرّةً واحدة — أيّها يُعيد التعليقات هو الجواب
+    const ids = new Map<string, string>();
+    for (const field of ['id', 'inbox_post_id', 'post_id', 'platform_post_id']) {
+      const v = r?.[field];
+      if (v !== undefined && v !== null && v !== '' && !ids.has(String(v))) ids.set(String(v), field);
+    }
+    for (const [value, field] of ids) {
+      if (budget.left <= 3) break;
+      try {
+        const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : '';
+        const data = await sapi<any>(apiKey, 'GET', `${EP.postComments(value)}${q}`, undefined, budget);
+        const list = itemsOf(data, 'comments');
+        entry.tries.push({ field, value, shape: shapeOf(data), parsed: list.length });
+        if (!sample && list.length) {
+          const withReplies = list.find((x) => Number(x?.reply_count ?? x?.replies_count ?? 0) > 0);
+          sample = { postId: value, accountId, comment: withReplies ?? list[0] };
+        }
+      } catch (e) {
+        entry.tries.push({ field, value, error: errorOf(e), parsed: 0 });
+      }
+    }
+    out.posts.push(entry);
+  }
+
+  if (sample) {
+    const s = sample;
+    const m = mapComment(s.comment);
+    const keys = new Set(accounts.find((a) => a.id === s.accountId)?.ownerKeys ?? accounts.flatMap((a) => a.ownerKeys));
+    const describe = (list: any[]): DiagReply[] => list.slice(0, 5).map((r) => ({ own: isOwnAuthor(r, keys), author: maskedAuthor(r, keys) }));
+    out.replies = { comment: m.commentId, embedded: m.replies ? describe(m.replies) : null, tries: [] };
+    for (const path of ['inbox', 'interactions'] as RepliesPath[]) {
+      if (path === 'interactions' && !m.interactionId) {
+        out.replies.tries.push({ path, error: 'لا معرّف sapi_cmt_ للتعليق', replies: [] });
+        continue;
+      }
+      if (budget.left <= 0) break;
+      const url = path === 'inbox'
+        ? `${EP.postComments(s.postId)}/${encodeURIComponent(m.commentId)}/replies${s.accountId ? `?account_id=${encodeURIComponent(s.accountId)}` : ''}`
+        : `/accounts/${encodeURIComponent(s.accountId)}/interactions/${encodeURIComponent(m.interactionId)}/replies`;
+      try {
+        const data = await sapi<any>(apiKey, 'GET', url, undefined, budget);
+        out.replies.tries.push({ path, shape: shapeOf(data), replies: describe(itemsOf(data, 'replies', 'comments')) });
+      } catch (e) {
+        out.replies.tries.push({ path, error: errorOf(e), replies: [] });
+      }
+    }
+  }
+
+  out.calls = budget.used;
+  return out;
+}
+
 // تصدير التحليلات (Analytics Export) — مهمة غير متزامنة لحساب مربوط تُرجع فيديوهاته مع مقاييسها.
 // خاضعة لحدود الخطة (المجانية: تصديران/شهر، ≤٣٠ فيديو، تهدئة ٧ أيام). أساساً ليوتيوب/تيك توك.
 export type ExportJob = { id: string; status: string; accountId?: string; platform?: string; progress?: number; videoCount?: number; createdAt?: string };
