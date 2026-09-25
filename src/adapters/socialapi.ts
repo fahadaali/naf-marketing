@@ -1111,18 +1111,25 @@ export type InboxDiagnosis = {
     embedded: DiagReply[] | null;
     tries: { path: RepliesPath; error?: string; shape?: unknown; replies: DiagReply[] }[];
   } | null;
+  /** كل حسابٍ لا منشور له في القائمة العامة: صندوقُه باسمه، وإشاراتُه إن كان من X. */
+  byAccount: {
+    id: string;
+    platform: string;
+    inbox: { error?: string; parsed: number; posts?: DiagPost[] };
+    mentions?: { path: MentionsPath; error?: string; shape?: unknown; parsed: number }[];
+  }[];
 };
 
 /**
  * يطلب ما تطلبه المزامنة ويعيد بنيته: الحسابات ومفاتيحها، وقائمة الصندوق،
- * وتعليقات منشورٍ من كل منصّة بكل معرّفٍ محتمل له، وردود تعليقٍ واحد بمساريها.
- * أربعةٌ وعشرون نداءً على الأكثر.
+ * وتعليقات منشورٍ من كل منصّة بكل معرّفٍ محتمل له، وردود تعليقٍ واحد بمساريها،
+ * وصندوق كل حسابٍ غاب عن القائمة وإشارات X. اثنان وثلاثون نداءً على الأكثر.
  */
 export async function diagnoseInbox(apiKey: string): Promise<InboxDiagnosis> {
-  const budget = new CallBudget(24);
+  const budget = new CallBudget(32);
   const errorOf = (e: unknown) => String((e as Error)?.message || e).slice(0, 300);
   const out: InboxDiagnosis = {
-    at: new Date().toISOString(), calls: 0, accounts: [], inbox: { parsed: 0 }, withComments: { parsed: 0 }, posts: [], replies: null,
+    at: new Date().toISOString(), calls: 0, accounts: [], inbox: { parsed: 0 }, withComments: { parsed: 0 }, posts: [], replies: null, byAccount: [],
   };
 
   let accounts: SocialApiOwnedAccount[] = [];
@@ -1215,6 +1222,40 @@ export async function diagnoseInbox(apiKey: string): Promise<InboxDiagnosis> {
         out.replies.tries.push({ path, error: errorOf(e), replies: [] });
       }
     }
+  }
+
+  /* حسابٌ لا منشور له في القائمة العامة: أهي خالية منه عند المزوّد، أم لا
+     تشمله إلا إن طُلب باسمه؟ والردّ على تغريدةٍ في X إشارةٌ إلى الحساب لا
+     تعليقٌ على منشور — فيُسأل عن إشاراته بالمسارين، ووثائق المزوّد تحصرها في
+     إنستغرام وفيسبوك وموقعُه يعدّ X في صندوقه. */
+  const listed = new Set(rows.map((r) => String(r?.account_id || r?.account?.id || '')));
+  for (const a of accounts) {
+    if (listed.has(a.id)) continue;
+    if (budget.left <= 0) break;
+    const entry: InboxDiagnosis['byAccount'][number] = { id: a.id, platform: a.platform, inbox: { parsed: 0 } };
+    try {
+      const data = await sapi<any>(apiKey, 'GET', `${EP.comments}?account_id=${encodeURIComponent(a.id)}&limit=10`, undefined, budget);
+      const list = itemsOf(data, 'posts', 'comments');
+      entry.inbox = { parsed: list.length, posts: list.map(diagPost) };
+    } catch (e) {
+      entry.inbox = { error: errorOf(e), parsed: 0 };
+    }
+    if (/twitter|^x$/i.test(a.platform)) {
+      entry.mentions = [];
+      for (const path of ['accounts', 'inbox'] as MentionsPath[]) {
+        if (budget.left <= 0) break;
+        const url = path === 'accounts'
+          ? `/accounts/${encodeURIComponent(a.id)}/mentions?limit=10`
+          : `${EP.mentions}?account_id=${encodeURIComponent(a.id)}&platform=${encodeURIComponent(a.platform)}&limit=10`;
+        try {
+          const data = await sapi<any>(apiKey, 'GET', url, undefined, budget);
+          entry.mentions.push({ path, shape: shapeOf(data), parsed: itemsOf(data, 'mentions').length });
+        } catch (e) {
+          entry.mentions.push({ path, error: errorOf(e), parsed: 0 });
+        }
+      }
+    }
+    out.byAccount.push(entry);
   }
 
   out.calls = budget.used;

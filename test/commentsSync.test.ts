@@ -757,6 +757,30 @@ describe('تشخيص الصندوق', () => {
     expect(d.posts[0].tries.map((t) => [t.value, t.parsed])).toEqual([['old3', 1]]);
   });
 
+  it('يسأل عن كل حسابٍ غاب عن القائمة باسمه، وعن إشارات X بالمسارين', async () => {
+    const X = { id: 'acc_x', platform: 'twitter', name: 'ناف القانونية', username: 'naflawsa' };
+    route('GET', '/accounts', () => ({ body: { data: [ACCOUNT, X] } }));
+    route('GET', '/inbox/comments', (url) =>
+      url.searchParams.get('account_id') === 'acc_x'
+        ? { body: { data: [{ id: 'tw1', account_id: 'acc_x', platform: 'twitter', comment_count: 4 }] } }
+        : { body: { data: [{ id: 'post1', account_id: 'acc_ig', platform: 'instagram', comment_count: 0 }] } });
+    route('GET', '/accounts/acc_x/mentions', () => ({ status: 501, body: { error: 'not supported' } }));
+    route('GET', '/inbox/mentions', () => ({
+      body: { data: [{ id: 'sapi_mnt_1', author: { id: '77', name: 'عميل سابع' }, text: 'ردٌّ على تغريدتكم' }] },
+    }));
+
+    const d = await diagnoseInbox('sapi_key_test');
+    // حساب إنستغرام في القائمة العامة فلا يُسأل عنه ثانيةً
+    expect(d.byAccount.map((a) => a.id)).toEqual(['acc_x']);
+    const x = d.byAccount[0];
+    expect(x.inbox.posts).toEqual([{ id: 'tw1', platform: 'twitter', comments: 4, updated: null }]);
+    expect(x.mentions?.map((m) => [m.path, m.parsed])).toEqual([['accounts', 0], ['inbox', 1]]);
+    expect(x.mentions?.[0].error).toContain('501');
+    const out = JSON.stringify(d);
+    expect(out).not.toContain('ردٌّ على تغريدتكم');
+    expect(out).not.toContain('عميل سابع');
+  });
+
   it('لا يُخرج نصَّ تعليقٍ ولا ردٍّ ولا اسمَ كاتب', async () => {
     const out = JSON.stringify(await diagnoseInbox('sapi_key_test'));
     for (const secret of ['سؤال رقم', 'عميل', 'شكراً لتواصلك', 'ما زلت أنتظر', 'u1', '555']) {
