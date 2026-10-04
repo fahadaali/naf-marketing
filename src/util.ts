@@ -40,6 +40,11 @@ export function htmlToText(html: string): string {
   if (!/<[a-z!/]/i.test(html)) return html.trim();
   let s = html;
   s = s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ''); // محتوى غير مرئي
+  /* بطاقة الوسيط في المحرر (`mediaEmbedHtml`) تحمل اسم الملف ووصفه نصّاً:
+     «VIDdownload-….mp4 فيديو • اضغط للاستعراض». وكان يُنشر مع المنشور كأنه
+     من كلامه. والوسيط نفسه يُرفق من معرّفه لا من هذا النص، فيُحذف بأصنافه —
+     لا بشكل البطاقة كلّها، كي لا يتعلّق بترتيب السمات. */
+  s = s.replace(/<(span|div)\b[^>]*\bclass="[^"]*\bmedia-(?:cap|sub|ic)\b[^"]*"[^>]*>[\s\S]*?<\/\1>/gi, '');
   s = s.replace(/<br\s*\/?>/gi, '\n');
   s = s.replace(/<\/(p|div|li|h[1-6]|figure|figcaption|blockquote|tr)>/gi, '\n');
   s = s.replace(/<li[^>]*>/gi, '• ');

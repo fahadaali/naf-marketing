@@ -31,6 +31,23 @@ describe('htmlToText', () => {
     expect(htmlToText('<p>أ</p><p></p><p></p><p>ب</p>')).toBe('أ\n\nب');
   });
 
+  it('يحذف اسم الوسيط ووصفه من بطاقة المحرر — المقطع والصورة', () => {
+    // كما يبنيها `mediaEmbedHtml` في web/src/mediaEmbed.ts
+    const video =
+      '<div class="media-embed media-card k-video" contenteditable="false" data-media-id="media_1" data-media-url="/api/media/media_1">' +
+      '<span class="media-ic">VID</span>' +
+      '<span class="media-meta"><span class="media-cap">VIDdownload-1789181641218.mp4</span>' +
+      '<span class="media-sub">فيديو • اضغط للاستعراض</span></span></div>';
+    const image =
+      '<div class="media-embed media-img" contenteditable="false" data-media-id="media_2">' +
+      '<img class="media-thumb" src="/api/media/media_2" alt="CD29D019.png" loading="lazy"/>' +
+      '<div class="media-cap">CD29D019.png</div></div>';
+    expect(htmlToText(`<p>هذا المحتوى تجريبي ٢</p>${video}`)).toBe('هذا المحتوى تجريبي ٢');
+    expect(htmlToText(`<p>نص</p>${image}<p>بعدها</p>`)).toBe('نص\n\nبعدها');
+    // والوسيط ما زال يُعرف من معرّفه
+    expect(extractMediaIds(video)).toEqual(['media_1']);
+  });
+
   it('يتعامل مع الفارغ بأمان', () => {
     expect(htmlToText('')).toBe('');
   });
