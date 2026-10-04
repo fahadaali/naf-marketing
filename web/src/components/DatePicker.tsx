@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronRight, ChevronLeft, Calendar, Clock } from 'lucide-react';
 import { Popover } from './Popover';
 import { formatDate, formatMonth, formatDateTime } from '../lib/format';
+import { parseTime24, toLatinDigits } from '../lib/digits';
 
 // منتقي تواريخ عصري (شبكة تقويم) — نطاق «من/إلى» ومنتقي تاريخ+وقت.
 // التنقّل: النقر على العنوان يفتح شبكة الأشهر، ثم شبكة السنوات، للوصول السريع.
@@ -145,6 +146,42 @@ export function DateRangePicker({
   );
 }
 
+/* حقل الوقت نصّاً لا `type="time"`: ذاك لا يقبل الأرقام الهندية، ويعرض
+   ١٢ ساعة بحسب لغة الجهاز. وما يُكتب يُحوَّل إلى الغربية في الحقل نفسه وهو
+   يُكتب، ويُعتمد متى صار وقتاً صحيحاً؛ وما لا يصير وقتاً يرجع عند الخروج من
+   الحقل إلى آخر وقتٍ صحيح. */
+function TimeInput({ value, onChange }: { value: string; onChange: (t: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <input
+      className="input"
+      style={{ width: 130 }}
+      type="text"
+      inputMode="numeric"
+      dir="ltr"
+      autoComplete="off"
+      placeholder="14:30"
+      value={text}
+      onChange={(e) => {
+        const typed = toLatinDigits(e.target.value);
+        setText(typed);
+        const t = parseTime24(typed);
+        if (t && /^\d{1,2}[:.]\d{2}$/.test(typed.trim())) onChange(t);
+      }}
+      onBlur={() => {
+        const t = parseTime24(text);
+        if (t) {
+          setText(t);
+          if (t !== value) onChange(t);
+        } else {
+          setText(value);
+        }
+      }}
+    />
+  );
+}
+
 // ===== منتقي تاريخ + وقت (للجدولة) =====
 export function DateTimePicker({
   value,
@@ -166,7 +203,7 @@ export function DateTimePicker({
         <label style={{ fontSize: 'var(--text-xs)', color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 }}>الوقت</label>
         <div className="row" style={{ gap: 8 }}>
           <Clock size={16} />
-          <input className="input" style={{ width: 130 }} type="time" value={timePart} onChange={(e) => onChange(`${datePart || ymd(new Date())}T${e.target.value}`)} />
+          <TimeInput value={timePart} onChange={(t) => onChange(`${datePart || ymd(new Date())}T${t}`)} />
         </div>
       </div>
     </>
