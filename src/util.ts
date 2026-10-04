@@ -5,6 +5,13 @@ export function newId(prefix = ''): string {
   return prefix ? `${prefix}_${id}` : id;
 }
 
+/**
+ * أكبر وسيطٍ يُرفع إلى المكتبة ويُنشر: ١٠٠ ميغابايت — وهو كذلك حدّ جسم الطلب
+ * في كلاودفلير للخطّتين المجانية والاحترافية، فلا يُقبل هنا ما تردّه الحافة.
+ * ومزوّد النشر قد يقبل أقلّ منه: حدُّه على خادمه لا هنا.
+ */
+export const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
+
 export function nowIso(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }

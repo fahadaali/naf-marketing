@@ -21,7 +21,7 @@ scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), 
     return c.json({ error: 'لا يمكن النشر الآن إلا لمحتوى معتمد أو مجدول' }, 400);
   }
   const result = await publishPostNow(c.env, post_id);
-  if (result.published === 0 && result.failed === 0) {
+  if (result.published === 0 && result.failed === 0 && result.pending === 0) {
     return c.json({ error: 'لا توجد جداول قابلة للنشر لهذا المنشور' }, 400);
   }
   c.executionCtx.waitUntil(syncPostSafe(c.env, post_id));
@@ -62,7 +62,17 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
   const when = new Date(scheduled_at);
   if (isNaN(when.getTime())) return c.json({ error: 'موعد غير صالح' }, 400);
 
-  for (const platform of platforms) {
+  /* إعادة الجدولة تنقل الموعد القائم ولا تضيف موعداً بجانبه. وكانت كل جدولةٍ
+     تُدرج صفّاً جديداً، فمن غيّر الموعد بقي له موعدان على المنصة نفسها،
+     فيُنشر المحتوى مرّتين — وترفض إكس الثانية لأنها مكرّرة فتظهر «فاشل». */
+  for (const platform of new Set(platforms)) {
+    const moved = await c.env.DB.prepare(
+      `UPDATE schedules SET scheduled_at = ?, status = 'pending', error = NULL
+       WHERE post_id = ? AND platform = ? AND status IN ('pending','failed')`,
+    )
+      .bind(when.toISOString(), post_id, platform)
+      .run();
+    if (moved.meta.changes > 0) continue;
     await c.env.DB.prepare(
       `INSERT INTO schedules (id, post_id, platform, scheduled_at, status) VALUES (?, ?, ?, ?, 'pending')`,
     )

@@ -218,9 +218,20 @@ export default function Editor() {
     setErr(''); setMsg('');
     try {
       const d = await api.post('/schedules/publish-now', { post_id: postId });
+      // الحالة من الخادم لا من الضغط: منشورٌ رُفض على كل منصاته لم يُنشر
       await loadPost(postId);
-      setStatus('published');
-      setMsg(`تم النشر الآن (${isolate(d.published)} منصة)` + (d.early ? ' — قبل الموعد' : ''));
+      if (d.published > 0) {
+        setMsg(`تم النشر الآن (${isolate(d.published)} منصة)` + (d.early ? ' — قبل الموعد' : ''));
+      }
+      /* وما رُفض يُقال بمنصّته وسببه. وكان الرفض يُعرض «تم النشر الآن (0
+         منصة)» والحالة «منشور»، فلا يعرف أحدٌ أن شيئاً لم يُنشر حتى يُفتح الحساب. */
+      if (d.failed > 0) {
+        setErr(
+          (d.errors || [])
+            .map((e: { platform: string; error: string }) => `${platformLabel(e.platform, platLabels)}: ${e.error}`)
+            .join(' · '),
+        );
+      }
     } catch (e: any) {
       setErr(e.message);
     }
@@ -488,29 +499,36 @@ export default function Editor() {
             <div className="card" style={{ marginBottom: 14 }}>
               <h4 style={{ marginTop: 0 }}>مواعيد النشر</h4>
               {schedules.map((s) => {
-                const late = ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now();
+                // «متأخر» للمعلّق وحده: الفاشل فات موعده دائماً، وكان يُعرض «متأخراً» فيخفي أنه رُفض
+                const late = s.status === 'pending' && new Date(s.scheduled_at).getTime() < Date.now();
                 return (
-                  <div key={s.id} className="row" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
-                    <PlatformIcon platform={s.platform} size={16} />
-                    <span>{platformLabel(s.platform, platLabels)}</span>
-                    <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
-                    <div className="spacer" />
-                    <span
-                      className={`badge ${
-                        s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : late ? 'red' : 'gray'
-                      }`}
-                    >
-                      {late && s.status !== 'published' ? 'متأخر' : SCHED_STATUS[s.status]}
-                    </span>
-                    {/* الإلغاء متاح للمعلّق والفاشل فقط — المنشور فعلاً لا يُلغى من هنا */}
-                    {['pending', 'failed'].includes(s.status) && can('content.schedule') && (
-                      <button
-                        className="btn sm ghost"
-                        title="إلغاء هذا الموعد"
-                        onClick={() => setConfirming({ kind: 'cancelSchedule', id: s.id })}
+                  <div key={s.id} style={{ marginBottom: 8 }}>
+                    <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
+                      <PlatformIcon platform={s.platform} size={16} />
+                      <span>{platformLabel(s.platform, platLabels)}</span>
+                      <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
+                      <div className="spacer" />
+                      <span
+                        className={`badge ${
+                          s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : late ? 'red' : 'gray'
+                        }`}
                       >
-                        <Trash2 size={20} />
-                      </button>
+                        {late ? 'متأخر' : SCHED_STATUS[s.status]}
+                      </span>
+                      {/* الإلغاء متاح للمعلّق والفاشل فقط — المنشور فعلاً لا يُلغى من هنا */}
+                      {['pending', 'failed'].includes(s.status) && can('content.schedule') && (
+                        <button
+                          className="btn sm ghost"
+                          title="إلغاء هذا الموعد"
+                          onClick={() => setConfirming({ kind: 'cancelSchedule', id: s.id })}
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
+                    {/* سبب الفشل كما ردّه المزوّد أو المنصة — كان يُحفظ ولا يُعرض في أي موضع */}
+                    {s.status === 'failed' && s.error && (
+                      <p className="err" style={{ fontSize: 'var(--text-xs)', margin: 0 }}><bdi>{s.error}</bdi></p>
                     )}
                   </div>
                 );
@@ -1192,6 +1210,8 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
     try {
       // الموعد يُدخل بتوقيت الرياض (UTC+3، بلا توقيت صيفي) بصرف النظر عن توقيت جهاز المستخدم.
       // نثبّت الإزاحة +03:00 ثم نحوّل إلى UTC ISO كي لا ينشر قبل وقته.
+      // ووقتٌ مُسح من حقله يترك «2026-10-04T» فيرمي التحويل «Invalid time value».
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) return setErr('هذا الحقل مطلوب');
       const iso = new Date(`${when}:00+03:00`).toISOString();
       await api.post('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
       onDone();
