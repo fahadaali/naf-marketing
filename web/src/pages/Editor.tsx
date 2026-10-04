@@ -526,8 +526,8 @@ export default function Editor() {
                         </button>
                       )}
                     </div>
-                    {/* سبب الفشل كما ردّه المزوّد أو المنصة — كان يُحفظ ولا يُعرض في أي موضع */}
-                    {s.status === 'failed' && s.error && (
+                    {/* سبب الفشل كما ردّه المزوّد أو المنصة، وما سترفضه المنصة إن فُحص عند الجدولة */}
+                    {['failed', 'pending'].includes(s.status) && s.error && (
                       <p className="err" style={{ fontSize: 'var(--text-xs)', margin: 0 }}><bdi>{s.error}</bdi></p>
                     )}
                   </div>
@@ -657,7 +657,14 @@ export default function Editor() {
           postId={postId}
           platforms={platforms}
           onClose={() => setShowSchedule(false)}
-          onDone={async () => { setShowSchedule(false); await loadPost(postId); setStatus('scheduled'); }}
+          onDone={async (issues) => {
+            setShowSchedule(false);
+            await loadPost(postId);
+            setStatus('scheduled');
+            /* ما سترفضه المنصات يُقال الآن — بمنصّته وسببه، كما يُقال رفض «نشر الآن» —
+               ويبقى مكتوباً تحت موعده حتى يُصلَح المحتوى وتُعاد الجدولة. */
+            setErr(issues.map((e) => `${platformLabel(e.platform, platLabels)}: ${e.error}`).join(' · '));
+          }}
         />
       )}
 
@@ -1196,7 +1203,9 @@ function RejectModal({ onClose, onReject }: { onClose: () => void; onReject: (re
   );
 }
 
-function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string; platforms: string[]; onClose: () => void; onDone: () => void }) {
+type ScheduleIssue = { platform: string; error: string };
+
+function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string; platforms: string[]; onClose: () => void; onDone: (issues: ScheduleIssue[]) => void }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [when, setWhen] = useState('');
   const [err, setErr] = useState('');
@@ -1213,8 +1222,8 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
       // ووقتٌ مُسح من حقله يترك «2026-10-04T» فيرمي التحويل «Invalid time value».
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) return setErr('هذا الحقل مطلوب');
       const iso = new Date(`${when}:00+03:00`).toISOString();
-      await api.post('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
-      onDone();
+      const d = await api.post<{ issues?: ScheduleIssue[] }>('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
+      onDone(d.issues || []);
     } catch (e: any) {
       setErr(e.message);
     }
