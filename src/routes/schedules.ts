@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
-import { publishPostNow } from '../services/publish';
+import { publishPostNow, preflightSchedules } from '../services/publish';
 import { syncPostSafe } from '../services/basecampSync';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -94,7 +94,10 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
 
   // تحديث بطاقة بيسكامب: النقل إلى «مجدول» وضبط تاريخ الاستحقاق = تاريخ النشر
   c.executionCtx.waitUntil(syncPostSafe(c.env, post_id));
-  return c.json({ ok: true });
+
+  // ما سترفضه المنصات يُعرف الآن لا في الموعد — ويُكتب على كل موعدٍ تحته
+  const issues = await preflightSchedules(c.env, post_id, [...new Set(platforms)]).catch(() => []);
+  return c.json({ ok: true, issues });
 });
 
 // إلغاء جدولة معلّقة
