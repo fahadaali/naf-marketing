@@ -1543,6 +1543,15 @@ async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuff
 /** مستوى «عامّ للجميع» بتسمية تيك توك. */
 const TIKTOK_PUBLIC = 'PUBLIC_TO_EVERYONE';
 
+/**
+ * عنوان مقطع يوتيوب: مئة حرفٍ أقصاه، ولا يقبل «<» ولا «>». والغائب يُؤخذ من
+ * أوّل سطرٍ في النص، فإن غابا معاً فالفراغ — ويقول يوتيوب ما ينقص.
+ */
+export function youtubeTitle(title: string | undefined, text: string): string {
+  const source = (title || '').trim() || (text || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
+  return [...source.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 100).join('');
+}
+
 /** نوع منشور إنستغرام من وسائطه: أكثر من وسيطٍ دوّارة، والمقطع الواحد ريلز، والصورة منشور. */
 export function instagramContentType(kinds: string[]): 'feed' | 'reel' | 'carousel' {
   if (kinds.length > 1) return 'carousel';
@@ -1737,6 +1746,11 @@ export class SocialApiProvider implements PublishingProvider {
       body.media = media;
     }
     if (input.firstComment?.trim()) body.first_comment = input.firstComment.trim();
+    /* يوتيوب يرفض المقطع بلا عنوان: «Required field is missing: title». والعنوان
+       عنوان المحتوى في المنصة، وإن غاب فأوّل سطرٍ من نصّه. ولا يُرسل لغير
+       يوتيوب: لينكدإن وGoogle يستعملانه أيضاً، وتغييرُ ما يُنشر عليهما بلا طلبٍ
+       ليس من هذا الإصلاح. */
+    if (input.platforms.includes('youtube')) body.title = youtubeTitle(input.title, input.text);
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
     else body.publish_now = true;
 

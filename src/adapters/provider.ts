@@ -22,6 +22,8 @@ export interface PublishMedia {
 export interface PublishInput {
   platforms: string[];
   text: string;
+  /** عنوان المحتوى — يوتيوب يشترطه للمقطع، ومنشورات المنصات الأخرى بلا عنوان. */
+  title?: string;
   media?: PublishMedia[];
   firstComment?: string; // أول تعليق يُنشر بعد المنشور (روابط/وسوم)
   scheduleAt?: string; // ISO 8601, UTC
