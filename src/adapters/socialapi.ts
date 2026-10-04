@@ -141,6 +141,26 @@ function plainText(text: string): string {
   return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/* رفضُ التحقّق يقول «fix the listed issues» والقائمة في `error.meta` لا في
+   الرسالة — فكان السبب يُكتب بلا ما يُصلَح. وتُقرأ بأسمائها المحتملة:
+   مصفوفةُ `ValidationIssue` ({platform, field, message}) أو نصوص. */
+export function validationIssues(data: any): string {
+  const meta = data?.error?.meta;
+  const lists = [meta?.errors, meta?.issues, meta?.validation_errors, meta?.details, data?.errors, data?.error?.details];
+  const list = lists.find((l) => Array.isArray(l) && l.length) as any[] | undefined;
+  if (!list) return '';
+  return list
+    .map((i) => {
+      if (typeof i === 'string') return i;
+      const where = [i?.platform, i?.field].filter(Boolean).join('.');
+      const msg = String(i?.message || i?.code || '');
+      return where && msg ? `${where}: ${msg}` : msg || where;
+    })
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(' · ');
+}
+
 // منفّذ REST مشترك
 async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown, budget?: CallBudget): Promise<T> {
   budget?.spend();
@@ -175,7 +195,12 @@ async function sapi<T = any>(apiKey: string, method: string, path: string, body?
   }
   if (!res.ok) {
     const detail = data?.message || data?.error?.message || data?.error || plainText(text).slice(0, 160);
-    throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status, data);
+    const issues = validationIssues(data);
+    throw new SocialApiError(
+      `SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}${issues ? ` — ${issues}` : ''}`,
+      res.status,
+      data,
+    );
   }
   return data as T;
 }
