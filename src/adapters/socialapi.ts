@@ -133,6 +133,11 @@ export function isNotFound(err: unknown): boolean {
   return err instanceof SocialApiError && [404, 405, 501].includes(err.status);
 }
 
+/** نصّ ردٍّ قد يكون صفحة HTML من خادم الويب — بلا وسومٍ ولا فراغاتٍ مكرّرة. */
+function plainText(text: string): string {
+  return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 // منفّذ REST مشترك
 async function sapi<T = any>(apiKey: string, method: string, path: string, body?: unknown, budget?: CallBudget): Promise<T> {
   budget?.spend();
@@ -166,7 +171,7 @@ async function sapi<T = any>(apiKey: string, method: string, path: string, body?
     throw new SocialApiError(`رمز SocialAPI مرفوض (${res.status}) — تأكد من صحة المفتاح.`, res.status);
   }
   if (!res.ok) {
-    const detail = data?.message || data?.error?.message || data?.error || text.slice(0, 160);
+    const detail = data?.message || data?.error?.message || data?.error || plainText(text).slice(0, 160);
     throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status, data);
   }
   return data as T;
@@ -1530,7 +1535,16 @@ export class SocialApiProvider implements PublishingProvider {
         if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
         return String(id);
       }
-      last = `فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${data?.error?.message || data?.message || text.slice(0, 140)}`;
+      /* ٤١٣ يردّه خادم الويب أمام الواجهة صفحةَ HTML، وكانت تُلصق في سبب
+         الفشل كما هي — «<html><head><title>413…» — فلا يُقرأ منها أن الملف
+         كبير ولا كم حجمه ولا ما العمل. */
+      if (res.status === 413) {
+        const mb = (m.data.byteLength / 1048576).toFixed(1);
+        last = `حجم الوسيط «${m.filename}» (${mb} ميغابايت) أكبر مما يقبله مزوّد النشر. صغّر الصورة أو اضغطها، ثم ضعها مكان القديمة في المحتوى وأعد النشر`;
+      } else {
+        const detail = data?.error?.message || data?.message || plainText(text).slice(0, 140);
+        last = `فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${detail}`;
+      }
       if (![404, 405].includes(res.status)) break;
     }
     throw new Error(last);

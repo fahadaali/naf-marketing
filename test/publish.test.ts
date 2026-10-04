@@ -176,6 +176,21 @@ describe('النشر عبر SocialAPI', () => {
     expect(row(db, 'sch_p5_linkedin').status).toBe('published');
   });
 
+  it('الملف الكبير يُقال بحجمه وما العمل، لا بصفحة HTML من خادم الويب', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_3', 'k/3.png', 'image/png', 'CD29D019.png')").run();
+    env.MEDIA._put('k/3.png');
+    post(db, 'p11', '<p>نص</p><img src="/api/media/med_3">', ['x']);
+    const html = '<html> <head><title>413 Request Entity Too Large</title></head> <body> <center><h1>413 Request Entity Too Large</h1></center>';
+    replies['POST /media/upload'] = () => ({ status: 413, body: html });
+    replies['POST /media'] = () => ({ status: 413, body: html });
+    await runDuePublishes(env);
+    const error = row(db, 'sch_p11_x').error;
+    expect(error).toMatch(/حجم الوسيط «CD29D019\.png» \(0\.0 ميغابايت\) أكبر مما يقبله مزوّد النشر/);
+    expect(error).not.toMatch(/<html>/);
+    // ٤١٣ ليس «غير موجود» — لا يُجرَّب المسار الآخر، ولا يُرسل طلب النشر
+    expect(calls).toEqual(['POST /media/upload']);
+  });
+
   it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {
     post(db, 'p6', '<p>نص</p>', ['x']);
     replies['POST /posts'] = () => ({
