@@ -1,9 +1,16 @@
-import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem, ModerateAction } from './provider';
+import type {
+  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishState, AnalyticsResult, CommentItem, ModerateAction,
+} from './provider';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
 // ملاحظة: المسارات أدناه ثوابت في مكان واحد ليسهل تصحيحها فور تأكيدها من توثيق SocialAPI.ai الحيّ.
 const BASE = 'https://api.social-api.ai/v1';
+
+/* وكيلُ المستخدم صريحٌ في كل نداء: أمام الواجهة جدارُ كلاودفلير، وعملاءُ
+   آخرون لها أبلغوا أنه يردّ طلباً بلا وكيلٍ يُعرف بـ ٤٠٣ «error code: 1010»
+   — وهي تُقرأ كأن المفتاح مرفوض والمفتاح سليم. والتصريح به لا يضرّ شيئاً. */
+const USER_AGENT = 'naf-marketing/1.0 (+https://naflaw.sa)';
 
 // نقاط النهاية — مؤكّدة من توثيق SocialAPI.ai الرسمي:
 const EP = {
@@ -22,7 +29,8 @@ const EP = {
   conversationMessages: (id: string) => `/inbox/conversations/${id}/messages`, // POST إرسال رسالة
   mentions: '/inbox/mentions', // GET الإشارات
   replyMention: (id: string) => `/inbox/mentions/${id}/reply`, // POST رد على إشارة
-  media: '/media', // POST رفع وسيط من الخادم، GET سرد
+  media: '/media', // GET سرد — والرفع القديم POST إليه احتياطاً
+  mediaUpload: '/media/upload', // POST رفع وسيط من الخادم (multipart، حقل file)
   exports: '/exports', // GET سرد، POST إنشاء تصدير تحليلات
   exportItem: (id: string) => `/exports/${id}`, // GET حالة/نتيجة تصدير
   exportVideos: (id: string) => `/exports/${id}/videos`, // GET فيديوهات تصدير مكتمل مع المقاييس
@@ -106,7 +114,7 @@ function isPlatformCap(err: unknown): boolean {
 
 /** خطأ المزوّد بحالته — كي يُفرَّق «غير مدعوم» (404/405/501) عن العطل. */
 export class SocialApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly body: unknown = null) {
     super(message);
     this.name = 'SocialApiError';
   }
@@ -134,6 +142,7 @@ async function sapi<T = any>(apiKey: string, method: string, path: string, body?
       method,
       headers: {
         authorization: `Bearer ${apiKey.trim()}`,
+        'user-agent': USER_AGENT,
         ...(body ? { 'content-type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -158,7 +167,7 @@ async function sapi<T = any>(apiKey: string, method: string, path: string, body?
   }
   if (!res.ok) {
     const detail = data?.message || data?.error?.message || data?.error || text.slice(0, 160);
-    throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status);
+    throw new SocialApiError(`SocialAPI ${method} ${path} → ${res.status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, res.status, data);
   }
   return data as T;
 }
@@ -1415,30 +1424,116 @@ export async function deleteSocialApiWebhook(apiKey: string, id: string): Promis
   try { await sapi(apiKey, 'DELETE', `/webhooks/${id}`); } catch { /* غير حرِج */ }
 }
 
+/* ═══ حالُ النشر ═══
+
+   طلب النشر يُقبل ثم يُنفَّذ: SocialAPI يردّ بالمنشور وحالُه في الغالب
+   «publishing»، ثم يرفعه إلى المنصة وحده، فتقبله أو ترفضه بسببٍ على
+   الوجهة نفسها. وكانت المنصة تكتب «منشور» عند القبول، فما ترفضه المنصّة
+   بعدها لا يظهر في أي موضع.
+
+   والوجهات تأتي مصفوفةً `targets` أو خريطةً `platforms` باسم المنصة —
+   يُقرأ الشكلان. والحالات بأسمائها المختلفة تُردّ إلى ثلاث. */
+
+const FAILED_STATES = new Set(['failed', 'failure', 'error', 'errored', 'rejected', 'cancelled', 'canceled']);
+const PENDING_STATES = new Set([
+  'publishing', 'processing', 'queued', 'pending', 'scheduled', 'in_progress', 'accepted', 'submitted', 'uploading', 'created',
+]);
+const DONE_STATES = new Set(['published', 'success', 'succeeded', 'completed', 'complete', 'posted', 'sent', 'live', 'done']);
+
+function stateOf(v: unknown): PublishState | null {
+  const k = String(v ?? '').trim().toLowerCase();
+  if (FAILED_STATES.has(k)) return 'failed';
+  if (PENDING_STATES.has(k)) return 'pending';
+  if (DONE_STATES.has(k)) return 'published';
+  return null;
+}
+
+function errorText(v: any): string {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  return String(v.message || v.detail || v.reason || v.code || '');
+}
+
+/** المنشور من الردّ — مغلّفاً في `data` أو مكشوفاً. */
+export function unwrapPost(data: any): any {
+  const inner = data?.data;
+  if (inner && typeof inner === 'object' && !Array.isArray(inner) && (inner.id || inner.targets || inner.platforms || inner.status)) {
+    return inner;
+  }
+  return data;
+}
+
+/**
+ * حالُ النشر من ردّ المزوّد — رُفض إن رُفضت وجهة، وينتظر إن انتظرت، ومنشورٌ
+ * إن نُشرت كلّها. `null` = الردّ لا يُعلن حالاً يُقرأ.
+ */
+export function publishOutcome(data: any): PublishCheck | null {
+  if (!data || typeof data !== 'object') return null;
+  const post = unwrapPost(data);
+  const targets: any[] = Array.isArray(post?.targets)
+    ? post.targets
+    : post?.platforms && typeof post.platforms === 'object' && !Array.isArray(post.platforms)
+      ? Object.entries(post.platforms).map(([platform, t]) => ({ platform, ...(t as object) }))
+      : [];
+
+  const states = targets.map((t) => ({
+    state: stateOf(t?.status ?? t?.state) ?? (t?.error || t?.error_message ? 'failed' as const : null),
+    error: errorText(t?.error) || errorText(t?.error_message) || errorText(t?.failure_reason),
+  }));
+  const failed = states.filter((t) => t.state === 'failed');
+  if (failed.length) {
+    const error = failed.map((t) => t.error).filter(Boolean).join(' · ') || errorText(post?.error) || errorText(data?.error);
+    return { state: 'failed', error: error || undefined };
+  }
+  if (states.some((t) => t.state === 'pending')) return { state: 'pending' };
+  if (states.length && states.every((t) => t.state === 'published')) return { state: 'published' };
+
+  // لا وجهات تُقرأ — حالُ المنشور نفسه
+  const top = stateOf(post?.status ?? post?.state);
+  if (top === 'failed') return { state: 'failed', error: errorText(post?.error) || errorText(data?.error) || undefined };
+  if (top) return { state: top };
+  // «partial» بلا وجهاتٍ تقول أيّها رُفض: رفضٌ بلا سبب معلوم
+  if (String(post?.status || '').toLowerCase() === 'partial') return { state: 'failed', error: errorText(post?.error) || undefined };
+  return null;
+}
+
 export class SocialApiProvider implements PublishingProvider {
   private key: string;
   constructor(apiKey: string, private accounts: Record<string, string>) {
     this.key = (apiKey || '').trim();
   }
 
-  // يرفع وسيطاً إلى SocialAPI ويُعيد media_id (التوثيق: الرابط العام الخام داخل media_ids يُتجاهل،
-  // فالرفع أولاً إلزامي). نستخدم multipart لأن المسار يقبل ملفاً مباشرة من الخادم.
+  // يرفع وسيطاً إلى SocialAPI ويُعيد media_id (الرابط العام الخام داخل media_ids يُتجاهل،
+  // فالرفع أولاً إلزامي). multipart لأن المسار يقبل الملف مباشرةً من الخادم.
+  //
+  // كان الرفع إلى `/media` وحده، وهو مسار السرد؛ وعملاءُ الواجهة المنشورون
+  // يرفعون إلى `/media/upload`. فإن لم يقبل الأوّلُ الرفع رُدّ كل منشورٍ فيه
+  // صورةٌ أو مقطع قبل أن يصل طلب النشر نفسه. فيُجرَّب `/media/upload` أوّلاً،
+  // ويبقى `/media` احتياطاً إن ردّ «غير موجود» — فلا يتوقّف ما كان يعمل.
   private async uploadMedia(m: { data?: ArrayBuffer; mimeType: string; filename: string }): Promise<string> {
     if (!m.data) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
-    const form = new FormData();
-    form.append('file', new Blob([m.data], { type: m.mimeType || 'application/octet-stream' }), m.filename || 'media');
-    const res = await fetch(`${BASE}${EP.media}`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.key}` }, // بلا content-type — يضبطه FormData مع الحدود
-      body: form,
-    });
-    const text = await res.text();
-    let data: any = null;
-    try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
-    if (!res.ok) throw new Error(`فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${data?.error?.message || data?.message || text.slice(0, 140)}`);
-    const id = data?.id || data?.media_id || data?.data?.id;
-    if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
-    return String(id);
+    let last = '';
+    for (const path of [EP.mediaUpload, EP.media]) {
+      const form = new FormData();
+      form.append('file', new Blob([m.data], { type: m.mimeType || 'application/octet-stream' }), m.filename || 'media');
+      const res = await fetch(`${BASE}${path}`, {
+        method: 'POST',
+        // بلا content-type — يضبطه FormData مع الحدود
+        headers: { authorization: `Bearer ${this.key}`, 'user-agent': USER_AGENT },
+        body: form,
+      });
+      const text = await res.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
+      if (res.ok) {
+        const id = data?.media_id || data?.id || data?.data?.media_id || data?.data?.id;
+        if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
+        return String(id);
+      }
+      last = `فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${data?.error?.message || data?.message || text.slice(0, 140)}`;
+      if (![404, 405].includes(res.status)) break;
+    }
+    throw new Error(last);
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
@@ -1446,7 +1541,7 @@ export class SocialApiProvider implements PublishingProvider {
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
-    // جسم النشر وفق التوثيق: { text, targets:[{account_id}], media_ids?, scheduled_at? }
+    // جسم النشر: { text, targets:[{account_id}], media_ids?, scheduled_at? }
     // والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
     if (input.media?.length) {
@@ -1457,9 +1552,35 @@ export class SocialApiProvider implements PublishingProvider {
     if (input.firstComment?.trim()) body.first_comment = input.firstComment.trim();
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
     else body.publish_now = true;
-    const data = await sapi<any>(this.key, 'POST', EP.posts, body);
-    const id = data?.id || data?.post_id || data?.data?.id;
-    return { providerPostId: String(id || ''), status: input.scheduleAt ? 'scheduled' : (data?.status || 'published') };
+
+    /* ٢٠٧ (رُفضت بعض الوجهات) و٤٢٢ (رُفضت كلّها) يحملان المنشور ووجهاته
+       بسبب كلٍّ منها — فيُقرأ السبب من الوجهة لا من رسالة الطلب العامة. */
+    let data: any;
+    try {
+      data = await sapi<any>(this.key, 'POST', EP.posts, body);
+    } catch (err) {
+      const outcome = err instanceof SocialApiError ? publishOutcome(err.body) : null;
+      if (outcome?.state === 'failed' && outcome.error) throw new Error(`فشل النشر عبر SocialAPI: ${outcome.error}`);
+      throw err;
+    }
+    const post = unwrapPost(data);
+    const outcome = publishOutcome(data);
+    if (outcome?.state === 'failed') {
+      throw new Error(`فشل النشر عبر SocialAPI: ${outcome.error || 'رفضت المنصة المنشور'}`);
+    }
+    const id = String(post?.id || post?.post_id || '');
+    // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
+    const state = id && outcome ? outcome.state : 'published';
+    return { providerPostId: id, status: input.scheduleAt ? 'scheduled' : String(post?.status || 'published'), state };
+  }
+
+  async getPublishStatus(providerPostId: string): Promise<PublishCheck | null> {
+    try {
+      return publishOutcome(await sapi<any>(this.key, 'GET', EP.post(providerPostId)));
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
   }
 
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {

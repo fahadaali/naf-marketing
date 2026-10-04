@@ -1,0 +1,243 @@
+// النشر المجدول على قاعدةٍ حقيقية ومزوّدٍ مخنوق.
+//
+// يُثبَّت هنا ما جعل المجدول يفشل على كل المنصات ولا يقول لماذا: الرفع إلى
+// مسار السرد، والقبول يُكتب «منشوراً»، والرفض داخل الوجهة يُقرأ نجاحاً،
+// والمزوّد غير المضبوط يترك كل موعدٍ «متأخراً» صامتاً، والجدول الذي انقطع
+// عاملُه يبقى «قيد النشر» إلى الأبد.
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: new (path: string) => any;
+};
+
+vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () => {}) }));
+
+import {
+  runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, CONFIRM_WITHIN_MS,
+} from '../src/services/publish';
+import { publishOutcome } from '../src/adapters/socialapi';
+
+const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
+
+function d1(db: any) {
+  const stmt = (sql: string, binds: unknown[] = []): any => ({
+    sql,
+    binds,
+    bind: (...args: unknown[]) => stmt(sql, args),
+    all: async () => ({ results: db.prepare(sql).all(...binds) }),
+    first: async () => db.prepare(sql).get(...binds) ?? null,
+    run: async () => {
+      const r = db.prepare(sql).run(...binds);
+      return { meta: { changes: r.changes } };
+    },
+  });
+  return {
+    prepare: (sql: string) => stmt(sql),
+    batch: async (stmts: any[]) => stmts.map((s) => ({ meta: { changes: db.prepare(s.sql).run(...s.binds).changes } })),
+  };
+}
+
+const PAST = '2026-01-01T09:00:00Z';
+
+function build(provider = 'socialapi'): any {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const f of readdirSync(MIGRATIONS).filter((f) => /^0\d+.*\.sql$/.test(f)).sort()) {
+    db.exec(readFileSync(join(MIGRATIONS, f), 'utf8'));
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', ?)").run(provider);
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('socialapi_profiles', ?)")
+    .run(JSON.stringify({ linkedin: 'acc_li', instagram: 'acc_ig', x: 'acc_x' }));
+  db.prepare("INSERT INTO users (id, name, email, password_hash, role_name) VALUES ('u1', 'فهد', 'f@naf.sa', 'h', 'general_manager')").run();
+  return db;
+}
+
+function post(db: any, id: string, body: string, platforms: string[]): void {
+  db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'عنوان', ?, 'scheduled', 'u1')").run(id, body);
+  for (const p of platforms) {
+    db.prepare("INSERT INTO schedules (id, post_id, platform, scheduled_at, status) VALUES (?, ?, ?, ?, 'pending')")
+      .run(`sch_${id}_${p}`, id, p, PAST);
+  }
+}
+
+const row = (db: any, id: string) => db.prepare('SELECT * FROM schedules WHERE id = ?').get(id);
+
+type Reply = { status?: number; body: unknown };
+let replies: Record<string, (url: URL, init?: RequestInit) => Reply>;
+let calls: string[];
+let db: any;
+let env: any;
+
+beforeEach(() => {
+  db = build();
+  const media = new Map<string, ArrayBuffer>();
+  env = {
+    DB: d1(db),
+    SOCIALAPI_API_KEY: 'sapi_key_test',
+    MEDIA: { get: async (k: string) => (media.has(k) ? { arrayBuffer: async () => media.get(k)! } : null), _put: (k: string) => media.set(k, new ArrayBuffer(8)) },
+  };
+  replies = {};
+  calls = [];
+  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const key = `${(init?.method || 'GET').toUpperCase()} ${url.pathname.replace(/^\/v1/, '')}`;
+    calls.push(key);
+    const r = replies[key]?.(url, init) ?? { status: 404, body: { error: { message: 'not found' } } };
+    return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('حال النشر من ردّ المزوّد', () => {
+  it('يقرأ رفض الوجهة وسببه من المصفوفة ومن الخريطة', () => {
+    expect(publishOutcome({ id: 'p', status: 'partial', targets: [{ status: 'failed', error: { message: 'Duplicate content' } }] }))
+      .toEqual({ state: 'failed', error: 'Duplicate content' });
+    expect(publishOutcome({ data: { id: 'p', platforms: { x: { status: 'failed', error: 'too long' } } } }))
+      .toEqual({ state: 'failed', error: 'too long' });
+  });
+
+  it('القبول انتظارٌ لا نشر، والغياب لا يُخترع حالاً', () => {
+    expect(publishOutcome({ id: 'p', status: 'publishing', targets: [{ status: 'publishing' }] })).toEqual({ state: 'pending' });
+    expect(publishOutcome({ id: 'p', platforms: { threads: { status: 'published' } } })).toEqual({ state: 'published' });
+    expect(publishOutcome({ id: 'p' })).toBeNull();
+  });
+});
+
+describe('ما ترفضه المنصة قبل أن يصلها', () => {
+  it('إنستغرام بلا وسيط، ويوتيوب بلا فيديو، والمنشور الفارغ', () => {
+    expect(missingRequirement('instagram', 'نص', [])).toMatch(/بلا صورة أو فيديو/);
+    expect(missingRequirement('youtube', 'نص', [{ mimeType: 'image/png', filename: 'a.png' }])).toMatch(/إلا فيديو/);
+    expect(missingRequirement('linkedin', '', [])).toMatch(/فارغ/);
+    expect(missingRequirement('linkedin', 'نص', [])).toBeNull();
+  });
+
+  it('يُكتب السبب على الجدول ولا يُرسل شيء', async () => {
+    post(db, 'p1', '<p>نص بلا صورة</p>', ['instagram']);
+    const r = await runDuePublishes(env);
+    expect(r.failed).toBe(1);
+    expect(row(db, 'sch_p1_instagram')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_p1_instagram').error).toMatch(/بلا صورة أو فيديو/);
+    expect(calls).toEqual([]);
+  });
+
+  it('وسيطٌ في المحتوى لم يعد موجوداً يُقال ولا يُتخطّى', async () => {
+    post(db, 'p2', '<p>نص</p><img src="/api/media/med_gone">', ['linkedin']);
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p2_linkedin').error).toMatch(/لم يعد موجوداً/);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('المزوّد غير المضبوط', () => {
+  it('يكتب سببه على كل موعد بدل أن يتركه معلّقاً صامتاً', async () => {
+    env.SOCIALAPI_API_KEY = '';
+    post(db, 'p3', '<p>نص</p>', ['linkedin', 'x']);
+    const r = await runDuePublishes(env);
+    expect(r.failed).toBe(2);
+    expect(row(db, 'sch_p3_linkedin')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_p3_x').error).toMatch(/مفتاح SocialAPI/);
+  });
+});
+
+describe('النشر عبر SocialAPI', () => {
+  it('يرفع الوسيط إلى مسار الرفع ثم ينشر بمعرّفه', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_1', 'k/1.png', 'image/png', '1.png')").run();
+    env.MEDIA._put('k/1.png');
+    post(db, 'p4', '<p>نص</p><img src="/api/media/med_1">', ['instagram']);
+    let sent: any = null;
+    replies['POST /media/upload'] = () => ({ body: { media_id: 'sapi_med_1' } });
+    replies['POST /posts'] = (_u, init) => {
+      sent = JSON.parse(String(init?.body));
+      return { status: 201, body: { id: 'post_1', status: 'published', targets: [{ account_id: 'acc_ig', status: 'published' }] } };
+    };
+    const r = await runDuePublishes(env);
+    expect(r.published).toBe(1);
+    expect(sent.media_ids).toEqual(['sapi_med_1']);
+    expect(sent.targets).toEqual([{ account_id: 'acc_ig' }]);
+    expect(row(db, 'sch_p4_instagram')).toMatchObject({ status: 'published', provider_post_id: 'post_1' });
+    expect(db.prepare("SELECT status FROM content_posts WHERE id = 'p4'").get().status).toBe('published');
+  });
+
+  it('يعود إلى المسار القديم إن لم يوجد مسار الرفع', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_2', 'k/2.png', 'image/png', '2.png')").run();
+    env.MEDIA._put('k/2.png');
+    post(db, 'p5', '<p>نص</p><img src="/api/media/med_2">', ['linkedin']);
+    replies['POST /media'] = () => ({ body: { id: 'sapi_med_2' } });
+    replies['POST /posts'] = () => ({ body: { id: 'post_2', status: 'published' } });
+    await runDuePublishes(env);
+    expect(calls).toEqual(['POST /media/upload', 'POST /media', 'POST /posts']);
+    expect(row(db, 'sch_p5_linkedin').status).toBe('published');
+  });
+
+  it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {
+    post(db, 'p6', '<p>نص</p>', ['x']);
+    replies['POST /posts'] = () => ({
+      status: 422,
+      body: { id: 'post_3', status: 'failed', targets: [{ account_id: 'acc_x', status: 'failed', error: { message: 'Text exceeds 280 characters' } }] },
+    });
+    const r = await publishPostNow(env, 'p6');
+    expect(r.failed).toBe(1);
+    expect(r.errors).toEqual([{ platform: 'x', error: 'فشل النشر عبر SocialAPI: Text exceeds 280 characters' }]);
+    expect(db.prepare("SELECT status FROM content_posts WHERE id = 'p6'").get().status).toBe('scheduled');
+  });
+
+  it('القبول يبقى «قيد النشر» حتى يؤكّده المزوّد أو يرفضه', async () => {
+    post(db, 'p7', '<p>نص</p>', ['linkedin', 'x']);
+    replies['POST /posts'] = (_u, init) => {
+      const acc = JSON.parse(String(init?.body)).targets[0].account_id;
+      return { status: 201, body: { id: `post_${acc}`, status: 'publishing', targets: [{ account_id: acc, status: 'publishing' }] } };
+    };
+    const r = await runDuePublishes(env);
+    expect(r).toMatchObject({ published: 0, failed: 0, pending: 2 });
+    expect(row(db, 'sch_p7_linkedin')).toMatchObject({ status: 'processing', provider_post_id: 'post_acc_li' });
+
+    replies['GET /posts/post_acc_li'] = () => ({ body: { id: 'post_acc_li', targets: [{ status: 'published' }] } });
+    replies['GET /posts/post_acc_x'] = () => ({ body: { id: 'post_acc_x', targets: [{ status: 'failed', error: { message: 'Duplicate content' } }] } });
+    const c = await reconcilePublishing(env);
+    expect(c).toEqual({ published: 1, failed: 1 });
+    expect(row(db, 'sch_p7_linkedin').status).toBe('published');
+    expect(row(db, 'sch_p7_x')).toMatchObject({ status: 'failed', error: 'فشل النشر عبر المزوّد: Duplicate content' });
+    // منصةٌ رُفضت فلا يصير المحتوى «منشوراً»
+    expect(db.prepare("SELECT status FROM content_posts WHERE id = 'p7'").get().status).toBe('scheduled');
+  });
+
+  it('ما لم يؤكّده المزوّد خلال ساعة يُعدّ فاشلاً بسببٍ يطلب التحقق', async () => {
+    post(db, 'p8', '<p>نص</p>', ['linkedin']);
+    const old = new Date(Date.now() - CONFIRM_WITHIN_MS - 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    db.prepare("UPDATE schedules SET status = 'processing', provider_post_id = 'post_slow', published_at = ? WHERE id = 'sch_p8_linkedin'").run(old);
+    replies['GET /posts/post_slow'] = () => ({ body: { id: 'post_slow', status: 'publishing' } });
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_p8_linkedin')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_p8_linkedin').error).toMatch(/لم يؤكّد المزوّد/);
+  });
+
+  it('مزوّدٌ لا يُعلن حالاً يُعدّ منشوره منشوراً كما كان', async () => {
+    post(db, 'p9', '<p>نص</p>', ['linkedin']);
+    db.prepare("UPDATE schedules SET status = 'processing', provider_post_id = 'post_old', published_at = ? WHERE id = 'sch_p9_linkedin'").run(PAST);
+    // GET /posts/post_old → 404 من المخنوق
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_p9_linkedin').status).toBe('published');
+  });
+});
+
+describe('الجدول الذي انقطع عامله', () => {
+  it('يُعدّ فاشلاً فيُعاد أو يُلغى، والحديث منه لا يُمسّ', async () => {
+    post(db, 'p10', '<p>نص</p>', ['linkedin', 'x']);
+    db.prepare("UPDATE schedules SET status = 'processing', published_at = NULL WHERE id = 'sch_p10_linkedin'").run();
+    db.prepare("UPDATE schedules SET status = 'processing', published_at = ? WHERE id = 'sch_p10_x'")
+      .run(new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'));
+    const r = await reconcilePublishing(env);
+    expect(r.failed).toBe(1);
+    expect(row(db, 'sch_p10_linkedin')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_p10_linkedin').error).toMatch(/انقطع النشر/);
+    expect(row(db, 'sch_p10_x').status).toBe('processing');
+    expect(calls).toEqual([]);
+  });
+});

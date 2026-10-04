@@ -15,7 +15,7 @@ vi.mock('../src/services/report', () => ({ uploadWeeklyReport: track('weekly'), 
 vi.mock('../src/services/commentsSync', () => ({ syncComments: track('inbox') }));
 vi.mock('../src/services/alerts', () => ({ checkStaleContent: track('stale') }));
 vi.mock('../src/services/basecampSync', () => ({ syncCardCommentsSafe: track('basecamp') }));
-vi.mock('../src/services/publish', () => ({ runDuePublishes: track('publish') }));
+vi.mock('../src/services/publish', () => ({ runDuePublishes: track('publish'), reconcilePublishing: track('reconcile') }));
 vi.mock('../src/services/newsletterSend', () => ({
   queueDueNewsletters: track('queue'), sendQueuedBatch: track('newsletter'), syncNewsletterAnalytics: track('nl-analytics'),
 }));
@@ -69,11 +69,12 @@ describe('جدول المهام', () => {
     expect(called).toContain('publish');
     expect(called).not.toContain('basecamp');
     expect(called).not.toContain('newsletter');
+    expect(called).not.toContain('reconcile');
   });
 
   it('الدورة الخفيفة تجري فيها بيسكامب ودفعة النشرة', async () => {
     await tick('2026-09-24T10:12:00Z');
-    expect(called).toEqual(expect.arrayContaining(['publish', 'queue', 'newsletter', 'basecamp']));
+    expect(called).toEqual(expect.arrayContaining(['publish', 'queue', 'newsletter', 'basecamp', 'reconcile']));
     expect(called).not.toContain('inbox');
     expect(called).not.toContain('analytics');
   });

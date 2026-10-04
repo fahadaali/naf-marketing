@@ -18,9 +18,25 @@ export interface PublishInput {
   scheduleAt?: string; // ISO 8601, UTC
 }
 
+/**
+ * حالُ المنشور لدى المزوّد: نُشر، أو قُبل ولم يُنشر بعد، أو رُفض.
+ *
+ * والقبول ليس نشراً: SocialAPI يردّ على طلب النشر فوراً بأنه استلمه، ثم
+ * يرفعه إلى المنصة وحده، وقد ترفضه المنصة بعد ذلك. وكان الاستلام يُكتب
+ * «منشور» فلا يظهر الرفض في أي موضع.
+ */
+export type PublishState = 'published' | 'pending' | 'failed';
+
 export interface PublishResult {
   providerPostId: string;
   status: string;
+  /** غيابه = «منشور» — سلوك المزوّدين الذين لا يُعلنون غيره. */
+  state?: PublishState;
+}
+
+export interface PublishCheck {
+  state: PublishState;
+  error?: string;
 }
 
 export interface AnalyticsResult {
@@ -47,6 +63,11 @@ export interface PublishingProvider {
   publish(input: PublishInput): Promise<PublishResult>;
   getAnalytics(providerPostId: string): Promise<AnalyticsResult>;
   deletePost(providerPostId: string): Promise<void>;
+  /**
+   * حالُ منشورٍ قبله المزوّد ولم يؤكّد نشره — اختيارية. `null` = المزوّد لا
+   * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
+   */
+  getPublishStatus?(providerPostId: string): Promise<PublishCheck | null>;
   // إدارة التعليقات/الرسائل — اختيارية؛ المزوّدون غير الداعمين يتجاوزونها بأمان.
   // يعيد replyComment معرّف الرد على المنصة (إن توفّر) لتمكين تعديله/حذفه لاحقاً.
   getComments?(providerPostId: string): Promise<CommentItem[]>;

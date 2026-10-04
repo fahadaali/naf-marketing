@@ -5,7 +5,7 @@ import { uploadWeeklyReport, uploadMonthlyReport } from './services/report';
 import { syncComments } from './services/commentsSync';
 import { checkStaleContent } from './services/alerts';
 import { syncCardCommentsSafe } from './services/basecampSync';
-import { runDuePublishes } from './services/publish';
+import { runDuePublishes, reconcilePublishing } from './services/publish';
 import { queueDueNewsletters, sendQueuedBatch, syncNewsletterAnalytics } from './services/newsletterSend';
 import { syncAllSources } from './services/metricSync';
 import { syncCrm } from './services/crmSync';
@@ -48,6 +48,7 @@ async function runMetricsFor(env: Env, kind: PeriodKind): Promise<void> {
    | متى (UTC)                    | ماذا                                          |
    |------------------------------|-----------------------------------------------|
    | كل دورة                      | نشر المستحقّ · دفعة النشرة · بطاقات بيسكامب     |
+   |                              | · تأكيدُ ما قبله المزوّد (الخفيفة وحدها)         |
    | :00 كل ساعة                  | الأخبار · تنبيهات التأخّر · تحليلات النشرة        |
    | :02 كل ساعة                  | لقطات المنشورات من مزوّد النشر                 |
    | :04 و:24 و:44                | صندوق التعليقات والرسائل                       |
@@ -95,10 +96,15 @@ export async function handleScheduled(event: ScheduledController, env: Env): Pro
      في الدورات الخفيفة وحدها — تنتظران دقيقتين حين تجري مهمةٌ ثقيلة.
 
      queueDueNewsletters قبل sendQueuedBatch مقصود: النشرة التي حان موعدها
-     تدخل الطابور ثم تُرسل أول دفعة منها في الدورة نفسها، لا بعد دقيقتين. */
+     تدخل الطابور ثم تُرسل أول دفعة منها في الدورة نفسها، لا بعد دقيقتين.
+
+     وتأكيدُ ما قبله المزوّد ولم يُنشر بعد (`reconcilePublishing`) في الدورات
+     الخفيفة كذلك: يسأل المزوّد عن كل منشورٍ ينتظر، فله نصيبٌ من الحصّة. */
   await Promise.allSettled([
     runDuePublishes(env),
-    ...(job ? [] : [queueDueNewsletters(env).then(() => sendQueuedBatch(env)), syncCardCommentsSafe(env)]),
+    ...(job
+      ? []
+      : [queueDueNewsletters(env).then(() => sendQueuedBatch(env)), syncCardCommentsSafe(env), reconcilePublishing(env)]),
   ]);
 
   switch (job) {
