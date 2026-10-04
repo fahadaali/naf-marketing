@@ -243,6 +243,24 @@ describe('النشر عبر SocialAPI', () => {
     expect(calls).toEqual(['GET /media/upload-url', 'PUT /put/m5']);
   });
 
+  it('رفضُ التحقّق يُكتب بقائمة ما يُصلَح لا بالرسالة العامة وحدها', async () => {
+    post(db, 'p14', '<p>نص</p>', ['linkedin']);
+    replies['POST /posts'] = () => ({
+      status: 400,
+      body: {
+        error: {
+          code: 'validation.failed',
+          message: 'post failed validation; fix the listed issues or set skip_validation',
+          meta: { errors: [{ platform: 'tiktok', field: 'platform_data.tiktok.privacy_level', message: 'privacy_level is required' }] },
+        },
+      },
+    });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p14_linkedin').error).toMatch(
+      /post failed validation; fix the listed issues or set skip_validation — tiktok\.platform_data\.tiktok\.privacy_level: privacy_level is required/,
+    );
+  });
+
   it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {
     post(db, 'p6', '<p>نص</p>', ['x']);
     replies['POST /posts'] = () => ({
