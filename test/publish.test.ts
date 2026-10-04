@@ -78,7 +78,11 @@ beforeEach(() => {
   env = {
     DB: d1(db),
     SOCIALAPI_API_KEY: 'sapi_key_test',
-    MEDIA: { get: async (k: string) => (media.has(k) ? { arrayBuffer: async () => media.get(k)! } : null), _put: (k: string) => media.set(k, new ArrayBuffer(8)) },
+    MEDIA: {
+      head: async (k: string) => (media.has(k) ? { size: media.get(k)!.byteLength } : null),
+      get: async (k: string) => (media.has(k) ? { body: new Blob([media.get(k)!]).stream() } : null),
+      _put: (k: string) => media.set(k, new TextEncoder().encode('PNGDATA!').buffer),
+    },
   };
   replies = {};
   calls = [];
@@ -86,6 +90,10 @@ beforeEach(() => {
     const url = new URL(String(input));
     const key = `${(init?.method || 'GET').toUpperCase()} ${url.pathname.replace(/^\/v1/, '')}`;
     calls.push(key);
+    // الجسم التدفّقي يُقرأ هنا كما يقرؤه الخادم
+    if (init?.body instanceof ReadableStream) {
+      init = { ...init, body: await new Response(init.body).text() };
+    }
     const r = replies[key]?.(url, init) ?? { status: 404, body: { error: { message: 'not found' } } };
     return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
   });
@@ -152,7 +160,11 @@ describe('النشر عبر SocialAPI', () => {
     env.MEDIA._put('k/1.png');
     post(db, 'p4', '<p>نص</p><img src="/api/media/med_1">', ['instagram']);
     let sent: any = null;
-    replies['POST /media/upload'] = () => ({ body: { media_id: 'sapi_med_1' } });
+    let upload: { type: string; body: string } | null = null;
+    replies['POST /media/upload'] = (_u, init) => {
+      upload = { type: new Headers(init?.headers).get('content-type') || '', body: String(init?.body) };
+      return { body: { media_id: 'sapi_med_1' } };
+    };
     replies['POST /posts'] = (_u, init) => {
       sent = JSON.parse(String(init?.body));
       return { status: 201, body: { id: 'post_1', status: 'published', targets: [{ account_id: 'acc_ig', status: 'published' }] } };
@@ -160,6 +172,12 @@ describe('النشر عبر SocialAPI', () => {
     const r = await runDuePublishes(env);
     expect(r.published).toBe(1);
     expect(sent.media_ids).toEqual(['sapi_med_1']);
+    // جزءٌ واحد باسم file، فيه الملف كما هو بين الرأس والخاتمة
+    const boundary = /boundary=(\S+)/.exec(upload!.type)![1];
+    expect(upload!.body).toBe(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="1.png"\r\n` +
+      `Content-Type: image/png\r\n\r\nPNGDATA!\r\n--${boundary}--\r\n`,
+    );
     expect(sent.targets).toEqual([{ account_id: 'acc_ig' }]);
     expect(row(db, 'sch_p4_instagram')).toMatchObject({ status: 'published', provider_post_id: 'post_1' });
     expect(db.prepare("SELECT status FROM content_posts WHERE id = 'p4'").get().status).toBe('published');

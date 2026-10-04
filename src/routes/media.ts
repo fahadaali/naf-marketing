@@ -4,6 +4,7 @@ import { requireAuth, requirePermission } from '../middleware';
 import { newId } from '../util';
 import { generateFromMedia } from '../services/claude';
 import { generateImageAsset, startVideoJob, pollVideoJob } from '../services/mediaGen';
+import { MAX_MEDIA_BYTES } from '../util';
 
 export const mediaRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -47,6 +48,9 @@ mediaRoutes.post('/', requirePermission('media.upload'), async (c) => {
   const entry = form.get('file');
   if (!entry || typeof entry === 'string') return c.json({ error: 'لم يُرفق ملف' }, 400);
   const file = entry as unknown as File;
+  /* الحدّ مكتوبٌ هنا صريحاً، وكان غائباً فيحكم ما يقبله كلاودفلير وحده
+     ويُردّ ما فوقه بصفحة خطأٍ من الحافة لا برسالة. */
+  if (file.size > MAX_MEDIA_BYTES) return c.json({ error: 'حجم الملف يتجاوز الحد المسموح' }, 413);
 
   const id = newId('media');
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();

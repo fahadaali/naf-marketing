@@ -1,5 +1,6 @@
 import type {
-  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishState, AnalyticsResult, CommentItem, ModerateAction,
+  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishState, PublishMedia, AnalyticsResult, CommentItem,
+  ModerateAction,
 } from './provider';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
@@ -1429,6 +1430,58 @@ export async function deleteSocialApiWebhook(apiKey: string, id: string): Promis
   try { await sapi(apiKey, 'DELETE', `/webhooks/${id}`); } catch { /* غير حرِج */ }
 }
 
+/* ═══ جسمُ الرفع تدفّقاً ═══
+
+   كان الملف يُقرأ كاملاً في الذاكرة ثم يُنسخ في `FormData` — نسختان من
+   الملف في عاملٍ ذاكرته ١٢٨ ميغابايت، فمقطعٌ بخمسين يُسقطه. والآن يُبنى
+   الجسم يدوياً: رأس الجزء، ثم الملف تدفّقاً من التخزين، ثم الخاتمة — والطول
+   معلومٌ سلفاً فيُرسل `content-length` لا ترميزاً مقطّعاً قد يرفضه الخادم. */
+
+/** اسم الملف داخل ترويسة الجزء — بلا علامات تنصيص ولا فواصل أسطر تكسرها. */
+function partFilename(name: string): string {
+  return (name || 'media').replace(/["\\\r\n]/g, '_');
+}
+
+export async function multipartBody(
+  m: PublishMedia,
+  size: number,
+): Promise<{ stream: ReadableStream<Uint8Array>; length: number; contentType: string } | null> {
+  const source: ReadableStream<Uint8Array> | null = m.data
+    ? new Blob([m.data]).stream()
+    : m.open ? await m.open() : null;
+  if (!source) return null;
+
+  const boundary = `naf${crypto.randomUUID().replace(/-/g, '')}`;
+  const enc = new TextEncoder();
+  const head = enc.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${partFilename(m.filename)}"\r\n` +
+    `Content-Type: ${m.mimeType || 'application/octet-stream'}\r\n\r\n`,
+  );
+  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
+  const length = head.byteLength + size + tail.byteLength;
+
+  // FixedLengthStream في عامل كلاودفلير يُرسل الطول المعلن `content-length`؛ وفي غيره تيارٌ عادي
+  const Fixed = (globalThis as any).FixedLengthStream;
+  const { readable, writable } = Fixed ? new Fixed(length) : new TransformStream<Uint8Array, Uint8Array>();
+  const writer = (writable as WritableStream<Uint8Array>).getWriter();
+  (async () => {
+    try {
+      await writer.write(head);
+      const reader = source.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writer.write(value);
+      }
+      await writer.write(tail);
+      await writer.close();
+    } catch (err) {
+      await writer.abort(err).catch(() => {});
+    }
+  })();
+  return { stream: readable as ReadableStream<Uint8Array>, length, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 /* ═══ حالُ النشر ═══
 
    طلب النشر يُقبل ثم يُنفَّذ: SocialAPI يردّ بالمنشور وحالُه في الغالب
@@ -1515,17 +1568,23 @@ export class SocialApiProvider implements PublishingProvider {
   // يرفعون إلى `/media/upload`. فإن لم يقبل الأوّلُ الرفع رُدّ كل منشورٍ فيه
   // صورةٌ أو مقطع قبل أن يصل طلب النشر نفسه. فيُجرَّب `/media/upload` أوّلاً،
   // ويبقى `/media` احتياطاً إن ردّ «غير موجود» — فلا يتوقّف ما كان يعمل.
-  private async uploadMedia(m: { data?: ArrayBuffer; mimeType: string; filename: string }): Promise<string> {
-    if (!m.data) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
+  private async uploadMedia(m: PublishMedia): Promise<string> {
+    const size = m.data ? m.data.byteLength : m.size ?? 0;
+    if (!m.data && !m.open) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
     let last = '';
     for (const path of [EP.mediaUpload, EP.media]) {
-      const form = new FormData();
-      form.append('file', new Blob([m.data], { type: m.mimeType || 'application/octet-stream' }), m.filename || 'media');
+      const body = await multipartBody(m, size);
+      if (!body) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
       const res = await fetch(`${BASE}${path}`, {
         method: 'POST',
-        // بلا content-type — يضبطه FormData مع الحدود
-        headers: { authorization: `Bearer ${this.key}`, 'user-agent': USER_AGENT },
-        body: form,
+        headers: {
+          authorization: `Bearer ${this.key}`,
+          'user-agent': USER_AGENT,
+          'content-type': body.contentType,
+        },
+        body: body.stream,
+        // جسمٌ تدفّقي — يطلبه fetch في Node، ويتجاهله عامل كلاودفلير
+        ...({ duplex: 'half' } as object),
       });
       const text = await res.text();
       let data: any = null;
@@ -1539,7 +1598,7 @@ export class SocialApiProvider implements PublishingProvider {
          الفشل كما هي — «<html><head><title>413…» — فلا يُقرأ منها أن الملف
          كبير ولا كم حجمه ولا ما العمل. */
       if (res.status === 413) {
-        const mb = (m.data.byteLength / 1048576).toFixed(1);
+        const mb = (size / 1048576).toFixed(1);
         last = `حجم الوسيط «${m.filename}» (${mb} ميغابايت) أكبر مما يقبله مزوّد النشر. صغّر الصورة أو اضغطها، ثم ضعها مكان القديمة في المحتوى وأعد النشر`;
       } else {
         const detail = data?.error?.message || data?.message || plainText(text).slice(0, 140);

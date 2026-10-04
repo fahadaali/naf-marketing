@@ -130,8 +130,11 @@ async function publishJobs(
   return { published, failed, pending };
 }
 
-// يقرأ بايتات الوسائط من R2 لتمريرها للمزوّد (مسار /api/media محمي بالمصادقة،
+// يجهّز الوسائط من R2 لتمريرها للمزوّد (مسار /api/media محمي بالمصادقة،
 // فلا يستطيع المزوّد جلبه برابط). حد أقصى ٤ وسائط لكل منشور.
+//
+// تُفتح تدفّقاً عند الرفع لا تُقرأ هنا: ما يُقرأ كاملاً يبقى في ذاكرة العامل
+// حتى ينتهي النشر، وأربعة مقاطع كبيرة تتجاوزها.
 //
 // ووسيطٌ في المحتوى لا يوجد سجلُّه أو ملفُّه كان يُتخطّى صامتاً، فيُنشر
 // المنشور بلا صورته — أو يُرفض في منصةٍ لا تقبله بلا وسيط بسببٍ لا يدلّ عليه.
@@ -143,12 +146,14 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
     )
       .bind(id)
       .first<{ r2_key: string; mime_type: string | null; filename: string | null }>();
-    const obj = asset ? await env.MEDIA.get(asset.r2_key) : null;
-    if (!asset || !obj) {
+    const head = asset ? await env.MEDIA.head(asset.r2_key) : null;
+    if (!asset || !head) {
       throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
     }
+    const key = asset.r2_key;
     out.push({
-      data: await obj.arrayBuffer(),
+      open: async () => (await env.MEDIA.get(key))?.body ?? null,
+      size: head.size,
       mimeType: asset.mime_type || 'application/octet-stream',
       filename: asset.filename || asset.r2_key.split('/').pop() || 'media',
     });
