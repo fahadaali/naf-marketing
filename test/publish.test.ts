@@ -155,58 +155,92 @@ describe('المزوّد غير المضبوط', () => {
 });
 
 describe('النشر عبر SocialAPI', () => {
-  it('يرفع الوسيط إلى مسار الرفع ثم ينشر بمعرّفه', async () => {
-    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_1', 'k/1.png', 'image/png', '1.png')").run();
-    env.MEDIA._put('k/1.png');
-    post(db, 'p4', '<p>نص</p><img src="/api/media/med_1">', ['instagram']);
+  /** وسيطٌ في المكتبة ومنشورٌ يضمّه. */
+  function withImage(id: string, postId: string, platform: string, filename = `${id}.png`): void {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES (?, ?, 'image/png', ?)").run(id, `k/${id}`, filename);
+    env.MEDIA._put(`k/${id}`);
+    post(db, postId, `<p>نص</p><img src="/api/media/${id}">`, [platform]);
+  }
+
+  it('يرفع الوسيط برابطٍ موقَّع ثم يؤكّده ثم ينشر بمعرّفه ونوعه', async () => {
+    withImage('med_1', 'p4', 'instagram', '1.png');
+    let asked: URLSearchParams | null = null;
+    let put: { headers: Headers; body: string } | null = null;
     let sent: any = null;
-    let upload: { type: string; body: string } | null = null;
-    replies['POST /media/upload'] = (_u, init) => {
-      upload = { type: new Headers(init?.headers).get('content-type') || '', body: String(init?.body) };
-      return { body: { media_id: 'sapi_med_1' } };
+    replies['GET /media/upload-url'] = (u) => {
+      asked = u.searchParams;
+      return { body: { media_id: 'sapi_med_1', upload_url: 'https://storage.example/put/abc?sig=1', expires_at: '2026-10-04T17:00:00Z' } };
     };
+    replies['PUT /put/abc'] = (_u, init) => {
+      put = { headers: new Headers(init?.headers), body: String(init?.body) };
+      return { body: {} };
+    };
+    replies['POST /media/sapi_med_1/verify'] = () => ({ body: { success: true } });
     replies['POST /posts'] = (_u, init) => {
       sent = JSON.parse(String(init?.body));
       return { status: 201, body: { id: 'post_1', status: 'published', targets: [{ account_id: 'acc_ig', status: 'published' }] } };
     };
     const r = await runDuePublishes(env);
     expect(r.published).toBe(1);
-    expect(sent.media_ids).toEqual(['sapi_med_1']);
-    // جزءٌ واحد باسم file، فيه الملف كما هو بين الرأس والخاتمة
-    const boundary = /boundary=(\S+)/.exec(upload!.type)![1];
-    expect(upload!.body).toBe(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="1.png"\r\n` +
-      `Content-Type: image/png\r\n\r\nPNGDATA!\r\n--${boundary}--\r\n`,
-    );
+    expect(calls).toEqual(['GET /media/upload-url', 'PUT /put/abc', 'POST /media/sapi_med_1/verify', 'POST /posts']);
+    expect(asked!.get('media_type')).toBe('image/png');
+    expect(asked!.get('filename')).toBe('1.png');
+    // الملف كما هو، بنوعه، وبلا مفتاح يُفسد توقيع الرابط
+    expect(put!.body).toBe('PNGDATA!');
+    expect(put!.headers.get('content-type')).toBe('image/png');
+    expect(put!.headers.get('authorization')).toBeNull();
+    expect(sent.media).toEqual([{ source: 'sapi_med_1', source_type: 'media_id', type: 'image' }]);
+    expect(sent.media_ids).toBeUndefined();
     expect(sent.targets).toEqual([{ account_id: 'acc_ig' }]);
     expect(row(db, 'sch_p4_instagram')).toMatchObject({ status: 'published', provider_post_id: 'post_1' });
     expect(db.prepare("SELECT status FROM content_posts WHERE id = 'p4'").get().status).toBe('published');
   });
 
-  it('يعود إلى المسار القديم إن لم يوجد مسار الرفع', async () => {
-    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_2', 'k/2.png', 'image/png', '2.png')").run();
-    env.MEDIA._put('k/2.png');
-    post(db, 'p5', '<p>نص</p><img src="/api/media/med_2">', ['linkedin']);
-    replies['POST /media'] = () => ({ body: { id: 'sapi_med_2' } });
+  it('يعود إلى الرفع من الخادم إن لم يوجد مسار الرابط الموقَّع', async () => {
+    withImage('med_2', 'p5', 'linkedin', '2.png');
+    let upload: { type: string; body: string } | null = null;
+    replies['POST /media/upload'] = (_u, init) => {
+      upload = { type: new Headers(init?.headers).get('content-type') || '', body: String(init?.body) };
+      return { body: { media_id: 'sapi_med_2' } };
+    };
     replies['POST /posts'] = () => ({ body: { id: 'post_2', status: 'published' } });
     await runDuePublishes(env);
-    expect(calls).toEqual(['POST /media/upload', 'POST /media', 'POST /posts']);
+    expect(calls).toEqual(['GET /media/upload-url', 'POST /media/upload', 'POST /posts']);
+    // جزءٌ واحد باسم file، فيه الملف كما هو بين الرأس والخاتمة
+    const boundary = /boundary=(\S+)/.exec(upload!.type)![1];
+    expect(upload!.body).toBe(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="2.png"\r\n` +
+      `Content-Type: image/png\r\n\r\nPNGDATA!\r\n--${boundary}--\r\n`,
+    );
     expect(row(db, 'sch_p5_linkedin').status).toBe('published');
   });
 
-  it('الملف الكبير يُقال بحجمه وما العمل، لا بصفحة HTML من خادم الويب', async () => {
-    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_3', 'k/3.png', 'image/png', 'CD29D019.png')").run();
-    env.MEDIA._put('k/3.png');
-    post(db, 'p11', '<p>نص</p><img src="/api/media/med_3">', ['x']);
+  it('٤١٣ خادم الويب في الاحتياط يُقال بحجم الملف وما العمل، لا بصفحة HTML', async () => {
+    withImage('med_3', 'p11', 'x', 'CD29D019.png');
     const html = '<html> <head><title>413 Request Entity Too Large</title></head> <body> <center><h1>413 Request Entity Too Large</h1></center>';
     replies['POST /media/upload'] = () => ({ status: 413, body: html });
-    replies['POST /media'] = () => ({ status: 413, body: html });
     await runDuePublishes(env);
     const error = row(db, 'sch_p11_x').error;
     expect(error).toMatch(/حجم الوسيط «CD29D019\.png» \(0\.0 ميغابايت\) أكبر مما يقبله مزوّد النشر/);
     expect(error).not.toMatch(/<html>/);
-    // ٤١٣ ليس «غير موجود» — لا يُجرَّب المسار الآخر، ولا يُرسل طلب النشر
-    expect(calls).toEqual(['POST /media/upload']);
+    expect(calls).toEqual(['GET /media/upload-url', 'POST /media/upload']);
+  });
+
+  it('٤١٣ المزوّد على الرابط الموقَّع مساحةٌ ممتلئة لا ملفٌ كبير', async () => {
+    withImage('med_4', 'p12', 'x');
+    replies['GET /media/upload-url'] = () => ({ status: 413, body: { error: { code: 'storage.quota_exceeded', message: 'Storage quota exceeded' } } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p12_x').error).toMatch(/مساحة التخزين في حساب مزوّد النشر ممتلئة/);
+    expect(calls).toEqual(['GET /media/upload-url']);
+  });
+
+  it('رفضُ التخزين للرفع يُقال ولا يُرسل طلب النشر', async () => {
+    withImage('med_5', 'p13', 'x', '5.png');
+    replies['GET /media/upload-url'] = () => ({ body: { media_id: 'm5', upload_url: 'https://storage.example/put/m5' } });
+    replies['PUT /put/m5'] = () => ({ status: 403, body: '<Error><Code>SignatureDoesNotMatch</Code></Error>' });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p13_x').error).toMatch(/فشل رفع الوسيط «5\.png» إلى تخزين المزوّد \(403\): .*SignatureDoesNotMatch/);
+    expect(calls).toEqual(['GET /media/upload-url', 'PUT /put/m5']);
   });
 
   it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {

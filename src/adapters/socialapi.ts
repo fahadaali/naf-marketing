@@ -30,8 +30,10 @@ const EP = {
   conversationMessages: (id: string) => `/inbox/conversations/${id}/messages`, // POST إرسال رسالة
   mentions: '/inbox/mentions', // GET الإشارات
   replyMention: (id: string) => `/inbox/mentions/${id}/reply`, // POST رد على إشارة
-  media: '/media', // GET سرد — والرفع القديم POST إليه احتياطاً
-  mediaUpload: '/media/upload', // POST رفع وسيط من الخادم (multipart، حقل file)
+  media: '/media', // GET سرد
+  mediaUploadUrl: '/media/upload-url', // GET رابط رفعٍ موقَّع (PUT مباشرةً إلى التخزين)
+  mediaVerify: (id: string) => `/media/${id}/verify`, // POST تأكيد اكتمال الرفع الموقَّع
+  mediaUpload: '/media/upload', // POST رفع من الخادم (multipart، حقل file) — احتياطٌ وحسب
   exports: '/exports', // GET سرد، POST إنشاء تصدير تحليلات
   exportItem: (id: string) => `/exports/${id}`, // GET حالة/نتيجة تصدير
   exportVideos: (id: string) => `/exports/${id}/videos`, // GET فيديوهات تصدير مكتمل مع المقاييس
@@ -1482,6 +1484,26 @@ export async function multipartBody(
   return { stream: readable as ReadableStream<Uint8Array>, length, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
+/** جسم PUT بطولٍ معلوم — التخزين الموقَّع يرفض جسماً مقطّعاً بلا طول. */
+async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuffer | ReadableStream<Uint8Array> | null> {
+  if (m.data) return m.data;
+  const source = m.open ? await m.open() : null;
+  if (!source) return null;
+  const Fixed = (globalThis as any).FixedLengthStream;
+  if (!Fixed) return source;
+  const { readable, writable } = new Fixed(size);
+  source.pipeTo(writable).catch(() => { /* يسقط الطلب نفسه بخطئه */ });
+  return readable as ReadableStream<Uint8Array>;
+}
+
+/** نوع الوسيط كما يسمّيه SocialAPI. */
+function mediaKind(mime: string): 'image' | 'video' | 'audio' | 'file' {
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
 /* ═══ حالُ النشر ═══
 
    طلب النشر يُقبل ثم يُنفَّذ: SocialAPI يردّ بالمنشور وحالُه في الغالب
@@ -1561,52 +1583,85 @@ export class SocialApiProvider implements PublishingProvider {
     this.key = (apiKey || '').trim();
   }
 
-  // يرفع وسيطاً إلى SocialAPI ويُعيد media_id (الرابط العام الخام داخل media_ids يُتجاهل،
-  // فالرفع أولاً إلزامي). multipart لأن المسار يقبل الملف مباشرةً من الخادم.
-  //
-  // كان الرفع إلى `/media` وحده، وهو مسار السرد؛ وعملاءُ الواجهة المنشورون
-  // يرفعون إلى `/media/upload`. فإن لم يقبل الأوّلُ الرفع رُدّ كل منشورٍ فيه
-  // صورةٌ أو مقطع قبل أن يصل طلب النشر نفسه. فيُجرَّب `/media/upload` أوّلاً،
-  // ويبقى `/media` احتياطاً إن ردّ «غير موجود» — فلا يتوقّف ما كان يعمل.
+  /* ═══ رفعُ الوسيط ═══
+
+     يُرفع الوسيط برابطٍ موقَّع: `GET /media/upload-url` يُعطي معرّفاً ورابط
+     PUT إلى التخزين مباشرةً، ثم `POST /media/{id}/verify` يؤكّده. هذا ما
+     يوثّقه SocialAPI للرفع، ولا يمرّ بخادمه أصلاً.
+
+     وكان الرفع multipart إلى `/media` ثم `/media/upload`، وأمامهما خادم ويب
+     يردّ كل جسمٍ فوق ميغابايتٍ تقريباً بـ ٤١٣ صفحةَ HTML — ولو قال التوثيق
+     إن حدّ `/media/upload` خمسون. جُرِّب ذلك بلا مفتاح: ٢٠٠ كيلوبايت تبلغ
+     التحقّق من المفتاح (٤٠١)، و١٫٨ ميغابايت تُردّ قبله (٤١٣). فصورةٌ عادية
+     تُرفض على كل منصة، والمقطع لا يمرّ أبداً.
+
+     ويبقى `/media/upload` احتياطاً إن لم يوجد مسار الرابط الموقَّع وحده. */
   private async uploadMedia(m: PublishMedia): Promise<string> {
     const size = m.data ? m.data.byteLength : m.size ?? 0;
     if (!m.data && !m.open) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
-    let last = '';
-    for (const path of [EP.mediaUpload, EP.media]) {
-      const body = await multipartBody(m, size);
-      if (!body) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
-      const res = await fetch(`${BASE}${path}`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.key}`,
-          'user-agent': USER_AGENT,
-          'content-type': body.contentType,
-        },
-        body: body.stream,
-        // جسمٌ تدفّقي — يطلبه fetch في Node، ويتجاهله عامل كلاودفلير
-        ...({ duplex: 'half' } as object),
-      });
-      const text = await res.text();
-      let data: any = null;
-      try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
-      if (res.ok) {
-        const id = data?.media_id || data?.id || data?.data?.media_id || data?.data?.id;
-        if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
-        return String(id);
+    const mime = m.mimeType || 'application/octet-stream';
+
+    let info: any;
+    try {
+      const q = new URLSearchParams({ media_type: mime, filename: m.filename || 'media' });
+      info = unwrapPost(await sapi<any>(this.key, 'GET', `${EP.mediaUploadUrl}?${q}`));
+    } catch (err) {
+      if (isNotFound(err)) return this.uploadMultipart(m, size);
+      // ٤١٣ هنا من المزوّد لا من خادم الويب: مساحة الحساب نفدت
+      if (err instanceof SocialApiError && err.status === 413) {
+        throw new Error('مساحة التخزين في حساب مزوّد النشر ممتلئة. احذف وسائط قديمة من لوحة SocialAPI أو وسّع الخطة ثم أعد النشر');
       }
-      /* ٤١٣ يردّه خادم الويب أمام الواجهة صفحةَ HTML، وكانت تُلصق في سبب
-         الفشل كما هي — «<html><head><title>413…» — فلا يُقرأ منها أن الملف
-         كبير ولا كم حجمه ولا ما العمل. */
-      if (res.status === 413) {
-        const mb = (size / 1048576).toFixed(1);
-        last = `حجم الوسيط «${m.filename}» (${mb} ميغابايت) أكبر مما يقبله مزوّد النشر. صغّر الصورة أو اضغطها، ثم ضعها مكان القديمة في المحتوى وأعد النشر`;
-      } else {
-        const detail = data?.error?.message || data?.message || plainText(text).slice(0, 140);
-        last = `فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${detail}`;
-      }
-      if (![404, 405].includes(res.status)) break;
+      throw new Error(`تعذّر طلب رابط رفع الوسيط «${m.filename}»: ${String((err as Error)?.message || err)}`);
     }
-    throw new Error(last);
+    const id = String(info?.media_id || info?.id || '');
+    const uploadUrl = String(info?.upload_url || '');
+    if (!id || !/^https?:\/\//.test(uploadUrl)) throw new Error(`لم يُعِد SocialAPI رابط رفعٍ لـ «${m.filename}»`);
+
+    const body = await fixedLengthBody(m, size);
+    if (!body) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
+    // الرابط موقَّعٌ بنفسه: لا مفتاح معه — ترويسةٌ زائدة تُفسد توقيعه
+    const put = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'content-type': mime },
+      body,
+      // جسمٌ تدفّقي — يطلبه fetch في Node، ويتجاهله عامل كلاودفلير
+      ...({ duplex: 'half' } as object),
+    });
+    if (!put.ok) {
+      const text = await put.text().catch(() => '');
+      throw new Error(`فشل رفع الوسيط «${m.filename}» إلى تخزين المزوّد (${put.status}): ${plainText(text).slice(0, 140)}`);
+    }
+    await sapi(this.key, 'POST', EP.mediaVerify(id));
+    return id;
+  }
+
+  /** الرفع من الخادم multipart — للحساب الذي لا رابط موقَّعاً له. حدُّه ميغابايتٌ تقريباً. */
+  private async uploadMultipart(m: PublishMedia, size: number): Promise<string> {
+    const body = await multipartBody(m, size);
+    if (!body) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
+    const res = await fetch(`${BASE}${EP.mediaUpload}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.key}`, 'user-agent': USER_AGENT, 'content-type': body.contentType },
+      body: body.stream,
+      ...({ duplex: 'half' } as object),
+    });
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : {}; } catch { /* رد غير JSON */ }
+    if (res.ok) {
+      const id = data?.media_id || data?.id || data?.data?.media_id || data?.data?.id;
+      if (!id) throw new Error(`لم يُعِد SocialAPI معرّف وسيط لـ «${m.filename}»`);
+      return String(id);
+    }
+    /* ٤١٣ يردّه خادم الويب أمام الواجهة صفحةَ HTML، وكانت تُلصق في سبب
+       الفشل كما هي — «<html><head><title>413…» — فلا يُقرأ منها أن الملف
+       كبير ولا كم حجمه ولا ما العمل. */
+    if (res.status === 413) {
+      const mb = (size / 1048576).toFixed(1);
+      throw new Error(`حجم الوسيط «${m.filename}» (${mb} ميغابايت) أكبر مما يقبله مزوّد النشر. صغّر الصورة أو اضغطها، ثم ضعها مكان القديمة في المحتوى وأعد النشر`);
+    }
+    const detail = data?.error?.message || data?.message || plainText(text).slice(0, 140);
+    throw new Error(`فشل رفع الوسيط «${m.filename}» إلى SocialAPI (${res.status}): ${detail}`);
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
@@ -1614,13 +1669,16 @@ export class SocialApiProvider implements PublishingProvider {
     if (!accountIds.length) {
       throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
-    // جسم النشر: { text, targets:[{account_id}], media_ids?, scheduled_at? }
+    // جسم النشر: { text, targets:[{account_id}], media?, scheduled_at? }
     // والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
+    // `media` بنوع كلٍّ منها — و`media_ids` مهجورٌ في التوثيق
     if (input.media?.length) {
-      const mediaIds: string[] = [];
-      for (const m of input.media) mediaIds.push(await this.uploadMedia(m));
-      if (mediaIds.length) body.media_ids = mediaIds;
+      const media: { source: string; source_type: 'media_id'; type: string }[] = [];
+      for (const m of input.media) {
+        media.push({ source: await this.uploadMedia(m), source_type: 'media_id', type: mediaKind(m.mimeType) });
+      }
+      body.media = media;
     }
     if (input.firstComment?.trim()) body.first_comment = input.firstComment.trim();
     if (input.scheduleAt) body.scheduled_at = input.scheduleAt;
