@@ -19,7 +19,7 @@ vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () =
 import {
   runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, CONFIRM_WITHIN_MS,
 } from '../src/services/publish';
-import { publishOutcome, validationIssues, instagramContentType } from '../src/adapters/socialapi';
+import { publishOutcome, validationIssues, instagramContentType, youtubeTitle } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -326,6 +326,33 @@ describe('النشر عبر SocialAPI', () => {
     await runDuePublishes(env);
     expect(row(db, 'sch_p16_tiktok').error).toMatch(/لا يسمح بالنشر العامّ\. المتاح: MUTUAL_FOLLOW_FRIENDS، SELF_ONLY/);
     expect(calls).toEqual(['GET /accounts/acc_tt/creator-info']);
+  });
+
+  it('يوتيوب: عنوان المحتوى يُرسل عنواناً للمقطع، ولا يُرسل لغيره', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('vid_1', 'k/vid_1', 'video/mp4', 'v.mp4')").run();
+    env.MEDIA._put('k/vid_1');
+    post(db, 'p17', '<p>نص المقطع</p><img src="/api/media/vid_1">', ['youtube', 'linkedin']);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('socialapi_profiles', ?)")
+      .run(JSON.stringify({ linkedin: 'acc_li', youtube: 'acc_yt' }));
+    const sent: any[] = [];
+    replies['GET /media/upload-url'] = () => ({ body: { media_id: 'mv', upload_url: 'https://storage.example/put/mv' } });
+    replies['PUT /put/mv'] = () => ({ body: {} });
+    replies['POST /media/mv/verify'] = () => ({ body: { success: true } });
+    replies['POST /posts'] = (_u, init) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return { status: 201, body: { id: `post_${sent.length}`, status: 'published' } };
+    };
+    await runDuePublishes(env);
+    const yt = sent.find((b) => b.targets[0].account_id === 'acc_yt');
+    const li = sent.find((b) => b.targets[0].account_id === 'acc_li');
+    expect(yt.title).toBe('عنوان');
+    expect(li.title).toBeUndefined();
+  });
+
+  it('عنوان يوتيوب: مئة حرف، بلا «<>»، ومن أوّل سطرٍ إن غاب', () => {
+    expect(youtubeTitle('  عنوان <المقطع>  ', '')).toBe('عنوان المقطع');
+    expect(youtubeTitle('', '\n  السطر الأول\nالثاني')).toBe('السطر الأول');
+    expect([...youtubeTitle('ن'.repeat(150), '')]).toHaveLength(100);
   });
 
   it('إنستغرام: أكثر من وسيطٍ دوّارة، والمقطع ريلز', () => {

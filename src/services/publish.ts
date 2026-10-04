@@ -106,6 +106,7 @@ async function publishJobs(
       const result = await provider.publish({
         platforms: [job.platform],
         text,
+        title: job.title || undefined,
         media,
         firstComment: variant?.first_comment || undefined,
       });
