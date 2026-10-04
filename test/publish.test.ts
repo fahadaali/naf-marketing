@@ -17,9 +17,11 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () => {}) }));
 
 import {
-  runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, CONFIRM_WITHIN_MS,
+  runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, preflightSchedules, CONFIRM_WITHIN_MS,
 } from '../src/services/publish';
-import { publishOutcome, validationIssues, instagramContentType, youtubeTitle } from '../src/adapters/socialapi';
+import {
+  publishOutcome, validationIssues, instagramContentType, youtubeTitle, constraintIssues, constraintsByPlatform,
+} from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -424,5 +426,71 @@ describe('الجدول الذي انقطع عامله', () => {
     expect(row(db, 'sch_p10_linkedin').error).toMatch(/انقطع النشر/);
     expect(row(db, 'sch_p10_x').status).toBe('processing');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('الفحص عند الجدولة', () => {
+  const big = { mimeType: 'image/png', filename: 'big.png', size: 10_404_521 };
+
+  it('حدود المنصة: الصيغة والحجم وما لا تقبله أصلاً وطول النص والدوّارة', () => {
+    const ig = { media: { supported_image_types: ['image/jpeg'], max_image_size_bytes: 8_388_608 } };
+    expect(constraintIssues(ig, { platforms: ['instagram'], text: 'نص', media: [big] })).toEqual([
+      'صيغة الصورة «big.png» (image/png) لا تقبلها هذه المنصة. المقبول: image/jpeg',
+      'حجم الصورة «big.png» (9.9 ميغابايت) أكبر من حدّ هذه المنصة (8.0 ميغابايت). صغّره ثم ضعه مكان القديم',
+    ]);
+    expect(constraintIssues({ media: { max_image_size_bytes: 0 } }, { platforms: ['youtube'], text: 'نص', media: [big] }))
+      .toEqual(['هذه المنصة لا تقبل الصور. احذف «big.png» من نسخة المنصة أو لا تجدولها عليها']);
+    expect(constraintIssues({ text: { max_length: 5, counting_mode: 'chars' } }, { platforms: ['x'], text: 'نصٌّ طويل', media: [] }))
+      .toEqual(['النص أطول من حدّ هذه المنصة: 9 من 5. اختصره في نسخة المنصة']);
+    // طريقة عدٍّ لا نعرفها لا يُحكم بها
+    expect(constraintIssues({ text: { max_length: 5, counting_mode: 'weighted' } }, { platforms: ['x'], text: 'نصٌّ طويل', media: [] }))
+      .toEqual([]);
+    const two = [{ mimeType: 'image/jpeg', filename: 'a.jpg', size: 1 }, { mimeType: 'image/jpeg', filename: 'b.jpg', size: 1 }];
+    expect(constraintIssues({ carousel: { supported: false } }, { platforms: ['x'], text: 'نص', media: two }))
+      .toEqual(['هذه المنصة لا تقبل أكثر من وسيطٍ واحد في المنشور']);
+  });
+
+  it('خريطة الحدود بالشكلين', () => {
+    expect(constraintsByPlatform({ data: { Twitter: { text: {} } } })).toEqual({ twitter: { text: {} } });
+    expect(constraintsByPlatform({ data: [{ platform: 'instagram', media: {} }] })).toEqual({ instagram: { platform: 'instagram', media: {} } });
+    expect(constraintsByPlatform({ data: 'x' })).toBeNull();
+  });
+
+  it('يُكتب السبب على كل موعدٍ معلّق ويُردّ — ولا يُرسل منشور', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_pf', 'k/med_pf', 'image/png', 'p.png')").run();
+    env.MEDIA._put('k/med_pf');
+    post(db, 'pf1', '<p>نص</p><img src="/api/media/med_pf">', ['x', 'instagram', 'tiktok', 'linkedin']);
+    replies['GET /posts/validate'] = () => ({
+      body: { data: {
+        twitter: { media: { supported_image_types: ['image/jpeg', 'image/png'], max_image_size_bytes: 4 } },
+        instagram: { media: { supported_image_types: ['image/jpeg'] } },
+      } },
+    });
+    const issues = await preflightSchedules(env, 'pf1', ['x', 'instagram', 'tiktok', 'linkedin']);
+    expect(issues.map((i) => i.platform)).toEqual(['x', 'instagram', 'tiktok']);
+    expect(row(db, 'sch_pf1_x').error).toMatch(/أكبر من حدّ هذه المنصة/);
+    expect(row(db, 'sch_pf1_instagram').error).toMatch(/لا تقبلها هذه المنصة. المقبول: image\/jpeg/);
+    expect(row(db, 'sch_pf1_tiktok').error).toMatch(/بأقلّ من صورتين/);
+    expect(row(db, 'sch_pf1_linkedin').error).toBeNull();
+    // الموعد باقٍ معلّقاً — المحتوى قد يُصلَح قبل موعده
+    expect(row(db, 'sch_pf1_x').status).toBe('pending');
+    // الحدود تُطلب مرّةً للدفعة، ولا نشر
+    expect(calls.filter((c) => c === 'GET /posts/validate')).toHaveLength(1);
+    expect(calls).not.toContain('POST /posts');
+  });
+
+  it('تعذّر الحدود لا يمنع الفحص بقواعدنا', async () => {
+    post(db, 'pf2', '<p>نص بلا صورة</p>', ['instagram']);
+    replies['GET /posts/validate'] = () => ({ status: 500, body: { error: { message: 'down' } } });
+    const issues = await preflightSchedules(env, 'pf2', ['instagram']);
+    expect(issues).toEqual([{ platform: 'instagram', error: expect.stringMatching(/بلا صورة أو فيديو/) }]);
+  });
+
+  it('أوّل محاولة نشرٍ تمحو سبب الفحص المسبق', async () => {
+    post(db, 'pf3', '<p>نص</p>', ['linkedin']);
+    db.prepare("UPDATE schedules SET error = 'سبب قديم' WHERE id = 'sch_pf3_linkedin'").run();
+    replies['POST /posts'] = () => ({ body: { id: 'post_pf3', status: 'published' } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_pf3_linkedin')).toMatchObject({ status: 'published', error: null });
   });
 });

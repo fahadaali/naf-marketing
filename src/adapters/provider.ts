@@ -79,6 +79,11 @@ export interface PublishingProvider {
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
    */
   getPublishStatus?(providerPostId: string): Promise<PublishCheck | null>;
+  /**
+   * فحصٌ مسبق بلا نشر: ما سترفضه المنصة من هذا المحتوى — بنصٍّ يُعرض كما هو.
+   * اختيارية؛ ومن لا يُعلن حدود منصاته يردّ قائمةً فارغة.
+   */
+  preflight?(input: PublishInput): Promise<string[]>;
   // إدارة التعليقات/الرسائل — اختيارية؛ المزوّدون غير الداعمين يتجاوزونها بأمان.
   // يعيد replyComment معرّف الرد على المنصة (إن توفّر) لتمكين تعديله/حذفه لاحقاً.
   getComments?(providerPostId: string): Promise<CommentItem[]>;

@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import type { PublishMedia, PublishingProvider } from '../adapters/provider';
+import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters/provider';
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds } from '../util';
 import { notifyPublishFailed } from './notify';
@@ -40,6 +40,31 @@ export function missingRequirement(platform: string, text: string, media: Publis
   }
   if (!text && !media.length) return 'المنشور فارغ: لا نصّ فيه ولا وسيط. أضف محتوى ثم أعد النشر';
   return null;
+}
+
+/** ما يُرسل للمزوّد لمنصةٍ واحدة — يُبنى هكذا عند النشر وعند الفحص المسبق. */
+async function prepareInput(env: Env, job: Job): Promise<PublishInput> {
+  const variant = await env.DB.prepare(
+    'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
+  )
+    .bind(job.post_id, job.platform)
+    .first<{ body_override: string | null; media_asset_id: string | null; first_comment: string | null }>();
+
+  // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
+  const rawBody = variant?.body_override || job.body || '';
+  const text = (htmlToText(rawBody) || job.title || '').trim();
+
+  // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
+  const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  const media = await loadMedia(env, assetIds);
+
+  return {
+    platforms: [job.platform],
+    text,
+    title: job.title || undefined,
+    media,
+    firstComment: variant?.first_comment || undefined,
+  };
 }
 
 async function failJob(env: Env, job: Job, errMsg: string): Promise<void> {
@@ -84,32 +109,11 @@ async function publishJobs(
     try {
       if (!provider) throw new Error(providerError);
 
-      const variant = await env.DB.prepare(
-        'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
-      )
-        .bind(job.post_id, job.platform)
-        .first<{ body_override: string | null; media_asset_id: string | null; first_comment: string | null }>();
-
-      // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
-      const rawBody = variant?.body_override || job.body || '';
-      const text = (htmlToText(rawBody) || job.title || '').trim();
-
-      // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
-      const assetIds = variant?.media_asset_id
-        ? [variant.media_asset_id]
-        : extractMediaIds(rawBody);
-      const media = await loadMedia(env, assetIds);
-
-      const missing = missingRequirement(job.platform, text, media);
+      const input = await prepareInput(env, job);
+      const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
 
-      const result = await provider.publish({
-        platforms: [job.platform],
-        text,
-        title: job.title || undefined,
-        media,
-        firstComment: variant?.first_comment || undefined,
-      });
+      const result = await provider.publish(input);
 
       if (result.state === 'pending') {
         /* قبله المزوّد ولم يؤكّد نشره: يبقى «قيد النشر» ومعه معرّفه، ويُسأل
@@ -323,4 +327,56 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
 
   if (published) await markFullyPublishedPosts(env);
   return { published, failed };
+}
+
+/* ═══ الفحص عند الجدولة ═══
+
+   كان ما سترفضه المنصة لا يُعرف إلا في الموعد: جُدول منشورٌ على أربع منصات
+   فرُفض على الأربع ساعة نشره — صورةٌ أكبر من حدّ إكس، وPNG لا يقبله
+   إنستغرام، وصورةٌ واحدة لتيك توك، ولا فيديو ليوتيوب — والمحتوى يظهر
+   «متأخراً» ولا أحد يعرف لماذا.
+
+   فيُبنى عند الجدولة ما سيُرسل لكل منصة كما يُبنى عند النشر، ويُفحص بقواعدنا
+   (`missingRequirement`) ثم بحدود المنصة كما يُعلنها المزوّد (`preflight`).
+   والسبب يُكتب على الموعد نفسه فيظهر تحته فوراً، ويُمحى عند أوّل محاولة نشر.
+   ولا يمنع الجدولة: المحتوى قد يُصلَح قبل موعده. */
+export async function preflightSchedules(
+  env: Env,
+  postId: string,
+  platforms: string[],
+): Promise<PublishError[]> {
+  const post = await env.DB.prepare('SELECT body, title FROM content_posts WHERE id = ?')
+    .bind(postId)
+    .first<{ body: string; title: string }>();
+  if (!post) return [];
+
+  let provider: PublishingProvider | null = null;
+  let providerError = '';
+  try {
+    provider = await getProvider(env);
+  } catch (err: any) {
+    providerError = String(err?.message || err);
+  }
+
+  const out: PublishError[] = [];
+  for (const platform of platforms) {
+    const issues: string[] = [];
+    try {
+      if (!provider) throw new Error(providerError);
+      const input = await prepareInput(env, { id: '', post_id: postId, platform, body: post.body, title: post.title });
+      const missing = missingRequirement(platform, input.text, input.media || []);
+      if (missing) issues.push(missing);
+      if (provider.preflight) issues.push(...(await provider.preflight(input)));
+    } catch (err: any) {
+      issues.push(String(err?.message || err));
+    }
+    const error = [...new Set(issues)].join(' · ') || null;
+    await env.DB.prepare(
+      "UPDATE schedules SET error = ? WHERE post_id = ? AND platform = ? AND status = 'pending'",
+    )
+      .bind(error, postId, platform)
+      .run();
+    if (error) out.push({ platform, error });
+  }
+  return out;
 }

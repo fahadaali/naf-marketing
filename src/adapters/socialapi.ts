@@ -17,6 +17,7 @@ const USER_AGENT = 'naf-marketing/1.0 (+https://naflaw.sa)';
 const EP = {
   accounts: '/accounts', // GET قائمة الحسابات المربوطة
   posts: '/posts', // GET قائمة المنشورات، POST نشر/جدولة
+  postsValidate: '/posts/validate', // GET حدود كل منصة (الوسائط والنص)
   post: (id: string) => `/posts/${id}`, // GET/DELETE منشور
   metrics: (id: string) => `/posts/${id}/metrics`, // GET مقاييس منشور
   comments: '/inbox/comments', // GET قائمة المنشورات التي عليها تعليقات (InboxPostRow)
@@ -1540,6 +1541,87 @@ async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuff
   return readable as ReadableStream<Uint8Array>;
 }
 
+/* ═══ حدود المنصات ═══
+
+   `GET /posts/validate` يُعلن لكل منصة حدودها: أنواع الصور والمقاطع
+   المقبولة وأكبر حجمٍ لكلٍّ (والصفر «غير مدعوم»)، وطول النص وطريقة عدّه،
+   وعدد عناصر الدوّارة. وهي ما ردّ به المزوّد منشوراً حقيقياً: «image size
+   10404521 bytes exceeds twitter limit of 5242880 bytes» و«image type
+   "image/png" is not supported on instagram». */
+
+/** اسم المنصة لدى SocialAPI — إكس عنده twitter. */
+export function sapiPlatform(platform: string): string {
+  return platform === 'x' ? 'twitter' : platform;
+}
+
+/** خريطة الحدود باسم المنصة — من `{data: {platform: {...}}}` أو مصفوفةٍ فيها `platform`. */
+export function constraintsByPlatform(res: any): Record<string, any> | null {
+  const data = res?.data ?? res;
+  const list = Array.isArray(data) ? data : Array.isArray(data?.platforms) ? data.platforms : null;
+  if (list) {
+    const out: Record<string, any> = {};
+    for (const c of list) if (c?.platform) out[String(c.platform).toLowerCase()] = c;
+    return Object.keys(out).length ? out : null;
+  }
+  if (data && typeof data === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data)) if (v && typeof v === 'object') out[k.toLowerCase()] = v;
+    return Object.keys(out).length ? out : null;
+  }
+  return null;
+}
+
+function mb(bytes: number): string {
+  return (bytes / 1048576).toFixed(1);
+}
+
+/** طول النص بطريقة عدّ المنصة — `null` لطريقةٍ لا نعرفها فلا يُحكم بها. */
+function textLength(text: string, mode: unknown): number | null {
+  const m = String(mode || 'chars');
+  if (m === 'chars') return [...text].length;
+  if (m === 'utf16') return text.length;
+  if (m === 'bytes') return new TextEncoder().encode(text).length;
+  return null;
+}
+
+/** ما سترفضه المنصة من هذا المحتوى بحدودها المعلنة — بنصٍّ عربيٍّ يقول ما العمل. */
+export function constraintIssues(c: any, input: PublishInput): string[] {
+  const issues: string[] = [];
+  const media = input.media || [];
+  const mc = c?.media || {};
+  for (const m of media) {
+    const kind = mediaKind(m.mimeType);
+    if (kind !== 'image' && kind !== 'video') continue;
+    const types: unknown = kind === 'image' ? mc.supported_image_types : mc.supported_video_types;
+    const max: unknown = kind === 'image' ? mc.max_image_size_bytes : mc.max_video_size_bytes;
+    const size = m.data ? m.data.byteLength : m.size ?? 0;
+    const what = kind === 'image' ? 'الصورة' : 'المقطع';
+    if (max === 0) {
+      issues.push(`هذه المنصة لا تقبل ${kind === 'image' ? 'الصور' : 'المقاطع'}. احذف «${m.filename}» من نسخة المنصة أو لا تجدولها عليها`);
+      continue;
+    }
+    if (Array.isArray(types) && types.length && !types.includes(m.mimeType)) {
+      issues.push(`صيغة ${what} «${m.filename}» (${m.mimeType}) لا تقبلها هذه المنصة. المقبول: ${types.join('، ')}`);
+    }
+    if (typeof max === 'number' && max > 0 && size > max) {
+      issues.push(`حجم ${what} «${m.filename}» (${mb(size)} ميغابايت) أكبر من حدّ هذه المنصة (${mb(max)} ميغابايت). صغّره ثم ضعه مكان القديم`);
+    }
+  }
+  const car = c?.carousel;
+  if (media.length > 1 && car && typeof car === 'object') {
+    if (car.supported === false) issues.push('هذه المنصة لا تقبل أكثر من وسيطٍ واحد في المنشور');
+    else if (typeof car.max_items === 'number' && car.max_items > 0 && media.length > car.max_items) {
+      issues.push(`عدد الوسائط (${media.length}) أكثر مما تقبله هذه المنصة في المنشور الواحد (${car.max_items})`);
+    }
+  }
+  const max = c?.text?.max_length;
+  const len = textLength(input.text || '', c?.text?.counting_mode);
+  if (typeof max === 'number' && max > 0 && len !== null && len > max) {
+    issues.push(`النص أطول من حدّ هذه المنصة: ${len} من ${max}. اختصره في نسخة المنصة`);
+  }
+  return issues;
+}
+
 /** مستوى «عامّ للجميع» بتسمية تيك توك. */
 const TIKTOK_PUBLIC = 'PUBLIC_TO_EVERYONE';
 
@@ -1821,6 +1903,30 @@ export class SocialApiProvider implements PublishingProvider {
       throw new Error(`حساب تيك توك لا يسمح بالنشر العامّ. المتاح: ${options.join('، ')}. غيّر إعداد الخصوصية من تطبيق تيك توك ثم أعد النشر`);
     }
     return TIKTOK_PUBLIC;
+  }
+
+  /** حدود المنصات كما يُعلنها المزوّد — تُطلب مرّةً للنسخة. `null` = تعذّرت. */
+  private constraints: Record<string, any> | null | undefined;
+
+  private async platformConstraints(): Promise<Record<string, any> | null> {
+    if (this.constraints !== undefined) return this.constraints;
+    try {
+      this.constraints = constraintsByPlatform(await sapi<any>(this.key, 'GET', EP.postsValidate));
+    } catch {
+      this.constraints = null; // الفحص المسبق زيادة — تعذّره لا يمنع الجدولة ولا النشر
+    }
+    return this.constraints;
+  }
+
+  async preflight(input: PublishInput): Promise<string[]> {
+    const map = await this.platformConstraints();
+    if (!map) return [];
+    const issues: string[] = [];
+    for (const platform of input.platforms) {
+      const c = map[sapiPlatform(platform)];
+      if (c) issues.push(...constraintIssues(c, input));
+    }
+    return issues;
   }
 
   async getPublishStatus(providerPostId: string): Promise<PublishCheck | null> {
