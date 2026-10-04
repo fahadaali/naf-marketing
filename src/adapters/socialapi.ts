@@ -141,24 +141,38 @@ function plainText(text: string): string {
   return text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/* رفضُ التحقّق يقول «fix the listed issues» والقائمة في `error.meta` لا في
-   الرسالة — فكان السبب يُكتب بلا ما يُصلَح. وتُقرأ بأسمائها المحتملة:
-   مصفوفةُ `ValidationIssue` ({platform, field, message}) أو نصوص. */
+/* رفضُ التحقّق يقول «fix the listed issues» والقائمة خارج الرسالة — فكان
+   السبب يُكتب بلا ما يُصلَح. وموضعها في الردّ غير موثّق، فيُبحث الجسم كلّه
+   عن كل عنصرٍ فيه `message` (شكل `ValidationIssue`: {platform, field,
+   message})، سوى الرسالة العامة نفسها. فإن لم يوجد شيء أُلحق `meta` خاماً
+   مختصراً: سببٌ يُقرأ منه الشكل خيرٌ من سببٍ لا يُقرأ منه شيء. */
 export function validationIssues(data: any): string {
-  const meta = data?.error?.meta;
-  const lists = [meta?.errors, meta?.issues, meta?.validation_errors, meta?.details, data?.errors, data?.error?.details];
-  const list = lists.find((l) => Array.isArray(l) && l.length) as any[] | undefined;
-  if (!list) return '';
-  return list
-    .map((i) => {
-      if (typeof i === 'string') return i;
-      const where = [i?.platform, i?.field].filter(Boolean).join('.');
-      const msg = String(i?.message || i?.code || '');
-      return where && msg ? `${where}: ${msg}` : msg || where;
-    })
-    .filter(Boolean)
-    .slice(0, 6)
-    .join(' · ');
+  if (!data || typeof data !== 'object') return '';
+  const top = data?.error?.message;
+  const found: string[] = [];
+  const walk = (v: any, depth: number): void => {
+    if (depth > 6 || found.length >= 6 || v === null || typeof v !== 'object') return;
+    if (Array.isArray(v)) {
+      for (const i of v) {
+        if (typeof i === 'string' && i.trim()) found.push(i.trim());
+        else walk(i, depth + 1);
+      }
+      return;
+    }
+    if (typeof v.message === 'string' && v.message !== top) {
+      const where = [v.platform, v.target, v.field].filter((x) => typeof x === 'string' && x).join('.');
+      found.push(where ? `${where}: ${v.message}` : v.message);
+    }
+    for (const [k, child] of Object.entries(v)) {
+      if (k !== 'message') walk(child, depth + 1);
+    }
+  };
+  walk(data, 0);
+  const unique = [...new Set(found)].slice(0, 6);
+  if (unique.length) return unique.join(' · ');
+  const meta = data?.error?.meta ?? data?.meta;
+  if (meta && typeof meta === 'object' && Object.keys(meta).length) return JSON.stringify(meta).slice(0, 400);
+  return '';
 }
 
 // منفّذ REST مشترك

@@ -19,7 +19,7 @@ vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () =
 import {
   runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, CONFIRM_WITHIN_MS,
 } from '../src/services/publish';
-import { publishOutcome } from '../src/adapters/socialapi';
+import { publishOutcome, validationIssues } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -259,6 +259,15 @@ describe('النشر عبر SocialAPI', () => {
     expect(row(db, 'sch_p14_linkedin').error).toMatch(
       /post failed validation; fix the listed issues or set skip_validation — tiktok\.platform_data\.tiktok\.privacy_level: privacy_level is required/,
     );
+  });
+
+  it('القائمة تُقرأ أينما وقعت في الجسم، وإلا أُلحق meta خاماً', () => {
+    expect(validationIssues({
+      error: { message: 'post failed validation', meta: { targets: { acc_tt: { errors: [{ field: 'media', message: 'image/png not supported' }] } } } },
+    })).toBe('media: image/png not supported');
+    expect(validationIssues({ error: { message: 'post failed validation', meta: { tiktok: 'privacy_level required' } } }))
+      .toBe('{"tiktok":"privacy_level required"}');
+    expect(validationIssues({ error: { message: 'Account not found' } })).toBe('');
   });
 
   it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {
