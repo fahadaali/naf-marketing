@@ -33,6 +33,11 @@ export function missingRequirement(platform: string, text: string, media: Publis
   if (need === 'any' && !media.length) {
     return 'هذه المنصة لا تقبل منشوراً بلا صورة أو فيديو. أضف وسيطاً إلى المحتوى أو إلى نسخة المنصة ثم أعد النشر';
   }
+  /* تيك توك: منشور الصور صورتان فأكثر — «photo posts require at least 2
+     images» كما ردّه تحقّق SocialAPI. والمقطع الواحد يكفي. */
+  if (platform === 'tiktok' && media.length && media.every((m) => m.mimeType.startsWith('image/')) && media.length < 2) {
+    return 'تيك توك لا يقبل منشور صورٍ بأقلّ من صورتين. أضف صورة ثانية أو ضع مقطع فيديو مكان الصورة، ثم أعد النشر';
+  }
   if (!text && !media.length) return 'المنشور فارغ: لا نصّ فيه ولا وسيط. أضف محتوى ثم أعد النشر';
   return null;
 }

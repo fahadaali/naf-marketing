@@ -124,6 +124,11 @@ describe('ما ترفضه المنصة قبل أن يصلها', () => {
     expect(missingRequirement('youtube', 'نص', [{ mimeType: 'image/png', filename: 'a.png' }])).toMatch(/إلا فيديو/);
     expect(missingRequirement('linkedin', '', [])).toMatch(/فارغ/);
     expect(missingRequirement('linkedin', 'نص', [])).toBeNull();
+    // تيك توك: صورتان فأكثر، أو مقطعٌ واحد
+    const img = { mimeType: 'image/jpeg', filename: 'a.jpg' };
+    expect(missingRequirement('tiktok', 'نص', [img])).toMatch(/بأقلّ من صورتين/);
+    expect(missingRequirement('tiktok', 'نص', [img, img])).toBeNull();
+    expect(missingRequirement('tiktok', 'نص', [{ mimeType: 'video/mp4', filename: 'v.mp4' }])).toBeNull();
   });
 
   it('يُكتب السبب على الجدول ولا يُرسل شيء', async () => {
@@ -160,6 +165,15 @@ describe('النشر عبر SocialAPI', () => {
     db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES (?, ?, 'image/png', ?)").run(id, `k/${id}`, filename);
     env.MEDIA._put(`k/${id}`);
     post(db, postId, `<p>نص</p><img src="/api/media/${id}">`, [platform]);
+  }
+
+  /** منشورٌ بصورتين — تيك توك لا يقبل منشور صورٍ بأقلّ منهما. */
+  function withTwoImages(a: string, b: string, postId: string, platform: string): void {
+    for (const id of [a, b]) {
+      db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES (?, ?, 'image/jpeg', ?)").run(id, `k/${id}`, `${id}.jpg`);
+      env.MEDIA._put(`k/${id}`);
+    }
+    post(db, postId, `<p>نص</p><img src="/api/media/${a}"><img src="/api/media/${b}">`, [platform]);
   }
 
   it('يرفع الوسيط برابطٍ موقَّع ثم يؤكّده ثم ينشر بمعرّفه ونوعه', async () => {
@@ -285,7 +299,7 @@ describe('النشر عبر SocialAPI', () => {
   });
 
   it('تيك توك: الخصوصية العامة من خيارات الحساب، ومنشور الصور «photo»', async () => {
-    withImage('med_6', 'p15', 'tiktok', '6.jpg');
+    withTwoImages('med_6', 'med_6b', 'p15', 'tiktok');
     let sent: any = null;
     replies['GET /accounts/acc_tt/creator-info'] = () => ({
       body: { platform: 'tiktok', can_post: true, privacy_level_options: ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'] },
@@ -305,7 +319,7 @@ describe('النشر عبر SocialAPI', () => {
   });
 
   it('تيك توك بلا خيارٍ عامّ يُقال بخياراته ولا يُختار غيره عنه', async () => {
-    withImage('med_7', 'p16', 'tiktok', '7.jpg');
+    withTwoImages('med_7', 'med_7b', 'p16', 'tiktok');
     replies['GET /accounts/acc_tt/creator-info'] = () => ({
       body: { data: { can_post: true, privacy_level_options: ['MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'] } },
     });
