@@ -19,7 +19,7 @@ vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () =
 import {
   runDuePublishes, publishPostNow, reconcilePublishing, missingRequirement, CONFIRM_WITHIN_MS,
 } from '../src/services/publish';
-import { publishOutcome, validationIssues } from '../src/adapters/socialapi';
+import { publishOutcome, validationIssues, instagramContentType } from '../src/adapters/socialapi';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -51,7 +51,7 @@ function build(provider = 'socialapi'): any {
   }
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', ?)").run(provider);
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('socialapi_profiles', ?)")
-    .run(JSON.stringify({ linkedin: 'acc_li', instagram: 'acc_ig', x: 'acc_x' }));
+    .run(JSON.stringify({ linkedin: 'acc_li', instagram: 'acc_ig', x: 'acc_x', tiktok: 'acc_tt' }));
   db.prepare("INSERT INTO users (id, name, email, password_hash, role_name) VALUES ('u1', 'فهد', 'f@naf.sa', 'h', 'general_manager')").run();
   return db;
 }
@@ -190,6 +190,8 @@ describe('النشر عبر SocialAPI', () => {
     expect(put!.headers.get('content-type')).toBe('image/png');
     expect(put!.headers.get('authorization')).toBeNull();
     expect(sent.media).toEqual([{ source: 'sapi_med_1', source_type: 'media_id', type: 'image' }]);
+    // إنستغرام يشترط نوع المنشور — صورةٌ واحدة منشورٌ عادي
+    expect(sent.platform_data).toEqual({ instagram: { content_type: 'feed' } });
     expect(sent.media_ids).toBeUndefined();
     expect(sent.targets).toEqual([{ account_id: 'acc_ig' }]);
     expect(row(db, 'sch_p4_instagram')).toMatchObject({ status: 'published', provider_post_id: 'post_1' });
@@ -261,6 +263,18 @@ describe('النشر عبر SocialAPI', () => {
     );
   });
 
+  it('القائمة بحقولها كما يردّها المزوّد فعلاً — بأوّلها كبيراً — والتحذير لا يُعدّ', () => {
+    expect(validationIssues({
+      error: {
+        message: 'post failed validation; fix the listed issues or set skip_validation',
+        meta: { issues: [
+          { Type: 'error', Platform: 'tiktok', Field: 'privacy_level', Message: 'privacy level is required', Target: 'acc_tt', SegmentIndex: null },
+          { Type: 'warning', Platform: 'tiktok', Field: 'text', Message: 'consider hashtags', Target: 'acc_tt', SegmentIndex: null },
+        ] },
+      },
+    })).toBe('tiktok.privacy_level: privacy level is required');
+  });
+
   it('القائمة تُقرأ أينما وقعت في الجسم، وإلا أُلحق meta خاماً', () => {
     expect(validationIssues({
       error: { message: 'post failed validation', meta: { targets: { acc_tt: { errors: [{ field: 'media', message: 'image/png not supported' }] } } } },
@@ -268,6 +282,42 @@ describe('النشر عبر SocialAPI', () => {
     expect(validationIssues({ error: { message: 'post failed validation', meta: { tiktok: 'privacy_level required' } } }))
       .toBe('{"tiktok":"privacy_level required"}');
     expect(validationIssues({ error: { message: 'Account not found' } })).toBe('');
+  });
+
+  it('تيك توك: الخصوصية العامة من خيارات الحساب، ومنشور الصور «photo»', async () => {
+    withImage('med_6', 'p15', 'tiktok', '6.jpg');
+    let sent: any = null;
+    replies['GET /accounts/acc_tt/creator-info'] = () => ({
+      body: { platform: 'tiktok', can_post: true, privacy_level_options: ['PUBLIC_TO_EVERYONE', 'SELF_ONLY'] },
+    });
+    replies['GET /media/upload-url'] = () => ({ body: { media_id: 'm6', upload_url: 'https://storage.example/put/m6' } });
+    replies['PUT /put/m6'] = () => ({ body: {} });
+    replies['POST /media/m6/verify'] = () => ({ body: { success: true } });
+    replies['POST /posts'] = (_u, init) => {
+      sent = JSON.parse(String(init?.body));
+      return { status: 201, body: { id: 'post_tt', status: 'publishing', targets: [{ status: 'publishing' }] } };
+    };
+    await runDuePublishes(env);
+    expect(sent.platform_data).toEqual({ tiktok: { privacy_level: 'PUBLIC_TO_EVERYONE', media_type: 'photo' } });
+    // الإعداد قبل الرفع: ما يُرفض فيه لا يُستهلك فيه رفع
+    expect(calls[0]).toBe('GET /accounts/acc_tt/creator-info');
+    expect(row(db, 'sch_p15_tiktok')).toMatchObject({ status: 'processing', provider_post_id: 'post_tt' });
+  });
+
+  it('تيك توك بلا خيارٍ عامّ يُقال بخياراته ولا يُختار غيره عنه', async () => {
+    withImage('med_7', 'p16', 'tiktok', '7.jpg');
+    replies['GET /accounts/acc_tt/creator-info'] = () => ({
+      body: { data: { can_post: true, privacy_level_options: ['MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'] } },
+    });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p16_tiktok').error).toMatch(/لا يسمح بالنشر العامّ\. المتاح: MUTUAL_FOLLOW_FRIENDS، SELF_ONLY/);
+    expect(calls).toEqual(['GET /accounts/acc_tt/creator-info']);
+  });
+
+  it('إنستغرام: أكثر من وسيطٍ دوّارة، والمقطع ريلز', () => {
+    expect(instagramContentType(['image', 'image'])).toBe('carousel');
+    expect(instagramContentType(['video'])).toBe('reel');
+    expect(instagramContentType(['image'])).toBe('feed');
   });
 
   it('رفضُ الوجهة في ٤٢٢ يُكتب بسببه لا بنصّ الطلب العامّ', async () => {

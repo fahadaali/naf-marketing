@@ -34,6 +34,7 @@ const EP = {
   mediaUploadUrl: '/media/upload-url', // GET رابط رفعٍ موقَّع (PUT مباشرةً إلى التخزين)
   mediaVerify: (id: string) => `/media/${id}/verify`, // POST تأكيد اكتمال الرفع الموقَّع
   mediaUpload: '/media/upload', // POST رفع من الخادم (multipart، حقل file) — احتياطٌ وحسب
+  creatorInfo: (id: string) => `/accounts/${id}/creator-info`, // GET إعدادات النشر لتيك توك (الخصوصية المسموحة)
   exports: '/exports', // GET سرد، POST إنشاء تصدير تحليلات
   exportItem: (id: string) => `/exports/${id}`, // GET حالة/نتيجة تصدير
   exportVideos: (id: string) => `/exports/${id}/videos`, // GET فيديوهات تصدير مكتمل مع المقاييس
@@ -159,12 +160,16 @@ export function validationIssues(data: any): string {
       }
       return;
     }
-    if (typeof v.message === 'string' && v.message !== top) {
-      const where = [v.platform, v.target, v.field].filter((x) => typeof x === 'string' && x).join('.');
-      found.push(where ? `${where}: ${v.message}` : v.message);
+    // الحقول بأحرفٍ صغيرة في التوثيق، وبأوّلها كبيراً في الردّ الفعلي (`Message`, `Field`)
+    const pick = (k: string): unknown => v[k] ?? v[k[0].toUpperCase() + k.slice(1)];
+    const message = pick('message');
+    const isWarning = String(pick('type') ?? '').toLowerCase() === 'warning';
+    if (typeof message === 'string' && message !== top && !isWarning) {
+      const where = [pick('platform'), pick('field')].filter((x) => typeof x === 'string' && x).join('.');
+      found.push(where ? `${where}: ${message}` : message);
     }
     for (const [k, child] of Object.entries(v)) {
-      if (k !== 'message') walk(child, depth + 1);
+      if (k.toLowerCase() !== 'message') walk(child, depth + 1);
     }
   };
   walk(data, 0);
@@ -1535,6 +1540,15 @@ async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuff
   return readable as ReadableStream<Uint8Array>;
 }
 
+/** مستوى «عامّ للجميع» بتسمية تيك توك. */
+const TIKTOK_PUBLIC = 'PUBLIC_TO_EVERYONE';
+
+/** نوع منشور إنستغرام من وسائطه: أكثر من وسيطٍ دوّارة، والمقطع الواحد ريلز، والصورة منشور. */
+export function instagramContentType(kinds: string[]): 'feed' | 'reel' | 'carousel' {
+  if (kinds.length > 1) return 'carousel';
+  return kinds[0] === 'video' ? 'reel' : 'feed';
+}
+
 /** نوع الوسيط كما يسمّيه SocialAPI. */
 function mediaKind(mime: string): 'image' | 'video' | 'audio' | 'file' {
   if (mime.startsWith('image/')) return 'image';
@@ -1712,6 +1726,9 @@ export class SocialApiProvider implements PublishingProvider {
     // والنشر الفوري يحتاج publish_now
     const body: Record<string, unknown> = { text: input.text, targets: accountIds.map((id) => ({ account_id: id })) };
     // `media` بنوع كلٍّ منها — و`media_ids` مهجورٌ في التوثيق
+    const kinds = (input.media || []).map((m) => mediaKind(m.mimeType));
+    const platformData = await this.platformData(input.platforms, accountIds, kinds);
+    if (platformData) body.platform_data = platformData;
     if (input.media?.length) {
       const media: { source: string; source_type: 'media_id'; type: string }[] = [];
       for (const m of input.media) {
@@ -1742,6 +1759,54 @@ export class SocialApiProvider implements PublishingProvider {
     // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
     const state = id && outcome ? outcome.state : 'published';
     return { providerPostId: id, status: input.scheduleAt ? 'scheduled' : String(post?.status || 'published'), state };
+  }
+
+  /* ═══ ما تشترطه المنصة في `platform_data` ═══
+
+     رفض التحقّق في SocialAPI قالها بأسمائها:
+     - إنستغرام: «content_type is required (feed, reel, stories, carousel)»
+     - تيك توك: «privacy level is required and must be explicitly selected»،
+       و«video posts require a video file … to publish images set media_type
+       to "photo"».
+     وتُبنى قبل رفع الوسائط: ما يُرفض هنا لا يُستهلك فيه رفعٌ. */
+  private async platformData(
+    platforms: string[],
+    accountIds: string[],
+    kinds: ReturnType<typeof mediaKind>[],
+  ): Promise<Record<string, Record<string, string>> | null> {
+    const out: Record<string, Record<string, string>> = {};
+    if (platforms.includes('instagram')) out.instagram = { content_type: instagramContentType(kinds) };
+    if (platforms.includes('tiktok')) {
+      const accountId = this.accounts.tiktok || accountIds[0];
+      out.tiktok = { privacy_level: await this.tiktokPrivacy(accountId) };
+      if (kinds.length && kinds.every((k) => k === 'image')) out.tiktok.media_type = 'photo';
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  /**
+   * مستوى الخصوصية لتيك توك: عامٌّ للجميع — منشورات حساب الشركة للجمهور.
+   * والمسموح لكل حسابٍ من `creator-info`: إن لم يكن فيه العامّ قيل ذلك بخياراته
+   * ولم يُختر غيرُه عنه، فمنشورٌ يظهر لغير من قُصد أسوأ من منشورٍ لم يُنشر.
+   */
+  private async tiktokPrivacy(accountId: string): Promise<string> {
+    let info: any = null;
+    try {
+      const res = await sapi<any>(this.key, 'GET', EP.creatorInfo(accountId));
+      // مغلّفاً في `data` أو مكشوفاً
+      info = res?.data && typeof res.data === 'object' && !Array.isArray(res.data) ? res.data : res;
+    } catch {
+      // تعذّر السؤال لا يمنع النشر: العامّ هو المقصود، وتيك توك يرفضه بسببه إن لم يُسمح
+      return TIKTOK_PUBLIC;
+    }
+    if (info?.can_post === false) {
+      throw new Error('حساب تيك توك لا يقبل النشر الآن (حدّ النشر اليومي أو قيدٌ على الحساب). أعد المحاولة لاحقاً');
+    }
+    const options: unknown = info?.privacy_level_options;
+    if (Array.isArray(options) && options.length && !options.includes(TIKTOK_PUBLIC)) {
+      throw new Error(`حساب تيك توك لا يسمح بالنشر العامّ. المتاح: ${options.join('، ')}. غيّر إعداد الخصوصية من تطبيق تيك توك ثم أعد النشر`);
+    }
+    return TIKTOK_PUBLIC;
   }
 
   async getPublishStatus(providerPostId: string): Promise<PublishCheck | null> {
