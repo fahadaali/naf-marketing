@@ -52,7 +52,7 @@ export default function NotificationBell() {
               <button className="btn ghost sm" onClick={markAll}><CheckCheck size={20} /> تعليم الكل</button>
             )}
           </div>
-          <div style={{ maxHeight: 340, overflow: 'auto' }}>
+          <div className="notif-list">
             {items.map((n) => (
               <button
                 type="button"

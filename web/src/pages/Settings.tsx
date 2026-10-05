@@ -73,27 +73,29 @@ function Users() {
       <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0, marginBottom: 12 }}>
         العضوية من الدخول الموحّد. يظهر العضو هنا بعد أول دخول له، ثم يُمنح دوره.
       </p>
-      <table className="table">
-        <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>آخر ظهور</th><th>الحالة</th><th></th></tr></thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td>{u.name}</td>
-              <td className="muted">{u.email}</td>
-              <td>
-                <select className="select" style={{ width: 150 }} value={u.role_name} onChange={(e) => changeRole(u, e.target.value)}>
-                  {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </td>
-              {/* آخر ظهور — يكتبه الدخول الموحّد مع كل طلب. و«—» لمن
-                  لم يدخل بعد، لا صفراً ولا تاريخاً مخترَعاً. */}
-              <td className="muted" style={{ whiteSpace: 'nowrap' }}>{formatRiyadh(u.last_seen_at)}</td>
-              <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
-              <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-scroll">
+        <table className="table">
+          <thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>آخر ظهور</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td>{u.name}</td>
+                <td className="muted">{u.email}</td>
+                <td>
+                  <select className="select" style={{ width: 150 }} value={u.role_name} onChange={(e) => changeRole(u, e.target.value)}>
+                    {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </td>
+                {/* آخر ظهور — يكتبه الدخول الموحّد مع كل طلب. و«—» لمن
+                    لم يدخل بعد، لا صفراً ولا تاريخاً مخترَعاً. */}
+                <td className="muted" style={{ whiteSpace: 'nowrap' }}>{formatRiyadh(u.last_seen_at)}</td>
+                <td><ConnectionBadge kind="enabled" on={!!u.is_active} /></td>
+                <td><button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'تعطيل' : 'تفعيل'}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -121,24 +123,26 @@ function Permissions() {
     <div className="card">
       <h3 style={{ marginTop: 0 }}>مصفوفة الصلاحيات</h3>
       <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>التعديل يسري فوراً على كل العمليات (يُتحقق منه على الخادم).</p>
-      <table className="table">
-        <thead><tr><th>الصلاحية</th>{roles.map((r) => <th key={r} style={{ textAlign: 'center' }}>{ROLE_LABELS[r]}</th>)}</tr></thead>
-        <tbody>
-          {keys.map((key) => (
-            <tr key={key}>
-              <td>{labels[key] || key}</td>
-              {roles.map((role) => {
-                const v = val(role, key);
-                return (
-                  <td key={role} style={{ textAlign: 'center' }}>
-                    <input type="checkbox" checked={v} onChange={() => toggle(role, key, v)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-scroll">
+        <table className="table">
+          <thead><tr><th>الصلاحية</th>{roles.map((r) => <th key={r} style={{ textAlign: 'center' }}>{ROLE_LABELS[r]}</th>)}</tr></thead>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={key}>
+                <td>{labels[key] || key}</td>
+                {roles.map((role) => {
+                  const v = val(role, key);
+                  return (
+                    <td key={role} style={{ textAlign: 'center' }}>
+                      <input type="checkbox" checked={v} onChange={() => toggle(role, key, v)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -178,20 +182,22 @@ function Feeds() {
       </div>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
-      <table className="table">
-        <thead><tr><th>العنوان</th><th>الرابط</th><th>أُضيفت</th><th></th></tr></thead>
-        <tbody>
-          {feeds.map((f) => (
-            <tr key={f.id}>
-              <td>{f.title}</td>
-              <td className="muted" style={{ fontSize: 'var(--text-xs)' }}>{f.url}</td>
-              <td className="muted">{formatRiyadh(f.created_at)}</td>
-              <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={20} /></button></td>
-            </tr>
-          ))}
-          {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا خلاصات بعد. أضِف أول خلاصة RSS.</td></tr>}
-        </tbody>
-      </table>
+      <div className="table-scroll">
+        <table className="table">
+          <thead><tr><th>العنوان</th><th>الرابط</th><th>أُضيفت</th><th></th></tr></thead>
+          <tbody>
+            {feeds.map((f) => (
+              <tr key={f.id}>
+                <td>{f.title}</td>
+                <td className="muted" style={{ fontSize: 'var(--text-xs)' }}>{f.url}</td>
+                <td className="muted">{formatRiyadh(f.created_at)}</td>
+                <td><button className="btn danger sm" onClick={() => del(f.id)} title="حذف"><Trash2 size={20} /></button></td>
+              </tr>
+            ))}
+            {feeds.length === 0 && <tr><td colSpan={4} className="muted">لا خلاصات بعد. أضِف أول خلاصة RSS.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

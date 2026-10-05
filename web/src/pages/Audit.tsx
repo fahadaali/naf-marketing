@@ -68,21 +68,23 @@ export default function Audit() {
       <div className="card">
         {loading && <p className="muted">جارٍ التحميل…</p>}
         {!loading && (
-          <table className="table">
-            <thead><tr><th>الفاعل</th><th>الإجراء</th><th>الكيان</th><th>التفاصيل</th><th>الوقت</th></tr></thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr key={e.id}>
-                  <td>{e.actor_name || '—'}</td>
-                  <td>{ACTION_LABELS[e.action] || e.action}</td>
-                  <td className="muted">{e.entity_type ? `${e.entity_type}${e.entity_id ? ` #${String(e.entity_id).slice(0, 8)}` : ''}` : '—'}</td>
-                  <td className="muted">{e.details || '—'}</td>
-                  <td className="muted">{formatRiyadh(e.created_at)}</td>
-                </tr>
-              ))}
-              {entries.length === 0 && <tr><td colSpan={5} className="muted">لا نشاط مسجّل في هذه المدة. وسّع النطاق الزمني.</td></tr>}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="table">
+              <thead><tr><th>الفاعل</th><th>الإجراء</th><th>الكيان</th><th>التفاصيل</th><th>الوقت</th></tr></thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr key={e.id}>
+                    <td>{e.actor_name || '—'}</td>
+                    <td>{ACTION_LABELS[e.action] || e.action}</td>
+                    <td className="muted">{e.entity_type ? `${e.entity_type}${e.entity_id ? ` #${String(e.entity_id).slice(0, 8)}` : ''}` : '—'}</td>
+                    <td className="muted">{e.details || '—'}</td>
+                    <td className="muted">{formatRiyadh(e.created_at)}</td>
+                  </tr>
+                ))}
+                {entries.length === 0 && <tr><td colSpan={5} className="muted">لا نشاط مسجّل في هذه المدة. وسّع النطاق الزمني.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
