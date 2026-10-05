@@ -32,31 +32,33 @@ export default function Queue() {
       )}
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>العنوان</th>
-              <th>الكاتب</th>
-              <th>المرحلة</th>
-              <th>منذ</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {posts.map((p) => (
-              <tr key={p.id}>
-                <td>{p.title}</td>
-                <td>{p.author_name}</td>
-                <td><StatusBadge status={p.status} /></td>
-                <td className="muted">{formatRiyadh(p.updated_at)}</td>
-                <td><button className="btn sm" onClick={() => navigate(`/editor/${p.id}`)}>مراجعة</button></td>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>العنوان</th>
+                <th>الكاتب</th>
+                <th>المرحلة</th>
+                <th>منذ</th>
+                <th></th>
               </tr>
-            ))}
-            {posts.length === 0 && !err && (
-              <tr><td colSpan={5} className="muted" style={{ textAlign: 'center' }}>لا محتوى بانتظار الاعتماد. الطابور فارغ.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {posts.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.title}</td>
+                  <td>{p.author_name}</td>
+                  <td><StatusBadge status={p.status} /></td>
+                  <td className="muted">{formatRiyadh(p.updated_at)}</td>
+                  <td><button className="btn sm" onClick={() => navigate(`/editor/${p.id}`)}>مراجعة</button></td>
+                </tr>
+              ))}
+              {posts.length === 0 && !err && (
+                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center' }}>لا محتوى بانتظار الاعتماد. الطابور فارغ.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

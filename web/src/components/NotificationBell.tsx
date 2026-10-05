@@ -39,7 +39,8 @@ export default function NotificationBell() {
       render={({ toggle }) => (
         <button className="naf-icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
           <Bell size={20} />
-          {unread > 0 && <span className="notif-dot">{unread > 9 ? '9+' : unread}</span>}
+          {/* معزولٌ اتجاهياً: بلا عزلٍ تقرؤه العربية «+9» */}
+          {unread > 0 && <span className="notif-dot"><bdi>{unread > 9 ? '9+' : unread}</bdi></span>}
         </button>
       )}
     >
@@ -52,7 +53,7 @@ export default function NotificationBell() {
               <button className="btn ghost sm" onClick={markAll}><CheckCheck size={20} /> تعليم الكل</button>
             )}
           </div>
-          <div style={{ maxHeight: 340, overflow: 'auto' }}>
+          <div className="notif-list">
             {items.map((n) => (
               <button
                 type="button"

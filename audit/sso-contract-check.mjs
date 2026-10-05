@@ -30,7 +30,7 @@ const AUTH_ISSUER = 'https://app.naflaw.sa';
    `resolved` في القفل على عقدة الإصدار السابق، فيثبّت `npm ci` القديمَ
    بينما يقول الملفُّ الجديد — وهو أسوأ من ألّا تُرفع. وقد وقع فعلاً في
    هذه الترقية، وهذا السطر هو ما أمسكه. */
-const AUTH_TAG = 'v3.3.0';
+const AUTH_TAG = 'v3.4.0';
 
 const results = [];
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null);

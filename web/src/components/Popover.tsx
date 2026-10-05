@@ -13,7 +13,10 @@ export function Popover({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<CSSProperties>({ position: 'fixed', top: 0, left: 0, opacity: 0, zIndex: 60 });
+  // لا تتّسع النافذة لأكثر من الشاشة ناقصاً هامشَي M — وإلا لم يُجدِ القصّ
+  // في reposition شيئاً: نافذةٌ أعرض من الشاشة تخرج من إحدى حافتيها أياً كان موضعها.
+  const maxWidth = 'calc(100vw - 2 * var(--space-2))';
+  const [style, setStyle] = useState<CSSProperties>({ position: 'fixed', top: 0, left: 0, opacity: 0, zIndex: 60, maxWidth });
 
   function reposition() {
     const a = anchorRef.current?.getBoundingClientRect();
@@ -31,7 +34,7 @@ export function Popover({
       const up = a.top - 6 - ph;
       top = up >= M ? up : Math.max(M, window.innerHeight - M - ph);
     }
-    setStyle({ position: 'fixed', top, left, opacity: 1, zIndex: 60 });
+    setStyle({ position: 'fixed', top, left, opacity: 1, zIndex: 60, maxWidth });
   }
 
   useLayoutEffect(() => {

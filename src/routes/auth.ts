@@ -50,5 +50,7 @@ authRoutes.get('/me', async (c) => {
   }
 
   const permissions = await permissionMap(c.env, user.role_name);
-  return c.json({ user, permissions });
+  // عنوان المركز لزرّ «كل المنصات» في الترويسة — من الإعداد لا رقماً في
+  // الواجهة. غيابه (خادم محلي بلا مركز) يُخفي الزرّ بدل أن يشير إلى لا مكان.
+  return c.json({ user, permissions, center: c.env.AUTH_ISSUER ?? null });
 });

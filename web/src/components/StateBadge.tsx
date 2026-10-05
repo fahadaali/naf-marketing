@@ -1,6 +1,6 @@
 import {
   Archive,
-  CalendarCheck,
+  CalendarX2,
   CalendarClock,
   CalendarRange,
   CircleCheck,
@@ -53,7 +53,7 @@ const DELIVERY: Record<string, State> = {
 const CAMPAIGN: Record<string, State> = {
   planned: { label: 'مخطّطة', badge: 'gray', icon: CalendarRange },
   active: { label: 'نشطة', badge: 'green', icon: CirclePlay },
-  completed: { label: 'مكتملة', badge: 'blue', icon: CalendarCheck },
+  completed: { label: 'مكتملة', badge: 'blue', icon: CalendarX2 },
   archived: { label: 'مؤرشفة', badge: 'gray', icon: Archive },
 };
 

@@ -254,7 +254,7 @@ export default function Analytics() {
                     <div className="field" style={{ margin: 0, minWidth: 160 }}>
                       <label htmlFor="an-platform">المنصة</label>
                       <select id="an-platform" className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-                        <option value="">كل المنصات</option>
+                        <option value="">كل منصات التواصل</option>
                         {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
                       </select>
                     </div>

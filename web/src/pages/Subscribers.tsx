@@ -123,29 +123,31 @@ export default function Subscribers() {
       </div>
 
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr><th>البريد</th><th>الاسم</th><th>الحالة</th><th>المصدر</th><th>تاريخ الموافقة</th><th></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.id}>
-                <td>{s.email}</td>
-                <td>{s.name || '—'}</td>
-                <td><SubscriptionBadge state={s.status} /></td>
-                <td className="muted">{SOURCE_AR[s.consent_source] || s.consent_source || '—'}</td>
-                <td className="muted">{s.consent_at ? formatRiyadh(s.consent_at) : '—'}</td>
-                <td>
-                  {s.status === 'active'
-                    ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={20} /></button>
-                    : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={20} /></button>}
-                  <button className="btn sm ghost" title="حذف" onClick={() => setRemoving(s.id)}><Trash2 size={20} /></button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={6} className="muted">لا مشتركين بعد. أضف أول مشترك أو استورد قائمة.</td></tr>}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr><th>البريد</th><th>الاسم</th><th>الحالة</th><th>المصدر</th><th>تاريخ الموافقة</th><th></th></tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.email}</td>
+                  <td>{s.name || '—'}</td>
+                  <td><SubscriptionBadge state={s.status} /></td>
+                  <td className="muted">{SOURCE_AR[s.consent_source] || s.consent_source || '—'}</td>
+                  <td className="muted">{s.consent_at ? formatRiyadh(s.consent_at) : '—'}</td>
+                  <td>
+                    {s.status === 'active'
+                      ? <button className="btn sm ghost" title="إلغاء الاشتراك" onClick={() => setStatusOf(s.id, 'unsubscribed')}><UserMinus size={20} /></button>
+                      : <button className="btn sm ghost" title="إعادة التفعيل" onClick={() => setStatusOf(s.id, 'active')}><RotateCcw size={20} /></button>}
+                    <button className="btn sm ghost" title="حذف" onClick={() => setRemoving(s.id)}><Trash2 size={20} /></button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={6} className="muted">لا مشتركين بعد. أضف أول مشترك أو استورد قائمة.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {adding && (

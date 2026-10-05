@@ -231,7 +231,7 @@ export default function Campaigns() {
             />
           </div>
           <select className="select filter-sm" value={fPlatform} onChange={(e) => setFPlatform(e.target.value)}>
-            <option value="">كل المنصات</option>
+            <option value="">كل منصات التواصل</option>
             {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
           </select>
           <select className="select filter-sm" value={fOwner} onChange={(e) => setFOwner(e.target.value)}>

@@ -33,6 +33,7 @@ import {
   ShellBackdrop,
   MenuButton,
   AccountMenu,
+  PlatformsLink,
   navLinkClassName,
   useShell,
 } from '../naf/ui/app-shell';
@@ -76,7 +77,9 @@ function CloseDrawerOnNavigate() {
 }
 
 function ShellBody({ children }: { children: ReactNode }) {
-  const { user, logout, can } = useAuth();
+  const { user, center, logout, can } = useAuth();
+  // شبكة المنصات جذرُ المركز. بلا مركز لا زرّ (PlatformsLink لا يعرض شيئاً).
+  const platformsHref = center ? `${center.replace(/\/+$/, '')}/` : null;
   const sz = 24; // مقاس التنقّل — naf-icons.md «المقاسات»
 
   /* أربعُ مجموعاتٍ بدل ثلاثة عشر عنصراً في عمودٍ واحد. من يبحث عن
@@ -175,6 +178,8 @@ function ShellBody({ children }: { children: ReactNode }) {
           </HeaderStart>
           <HeaderEnd>
             <NotificationBell />
+            {/* «كل المنصات» قبل قائمة الحساب مباشرةً — الطريق إلى الأخوات */}
+            <PlatformsLink href={platformsHref} />
             {/* الخروج داخل القائمة لا أيقونةً مفردة بجوار الجرس: كانت
                 أيقونةً وحدها بلا نصّ، فتُقرأ سهماً غامضاً وتُنقر سهواً —
                 وإنهاء الجلسة لا رجعة فيه. */}
