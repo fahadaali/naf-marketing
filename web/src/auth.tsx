@@ -11,6 +11,8 @@ export type User = {
 type AuthState = {
   user: User | null;
   permissions: Record<string, boolean>;
+  /** عنوان المركز (`AUTH_ISSUER`) لزرّ «كل المنصات» — null حين لا مركز. */
+  center: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
   logout: () => void;
@@ -22,6 +24,7 @@ const AuthContext = createContext<AuthState>(null as any);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
+  const [center, setCenter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function refresh() {
@@ -36,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await api.get('/auth/me');
       setUser(me.user);
       setPermissions(me.permissions || {});
+      setCenter(me.center || null);
     } catch {
       setUser(null);
     } finally {
@@ -74,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const can = (key: string) => !!permissions[key];
 
   return (
-    <AuthContext.Provider value={{ user, permissions, loading, refresh, logout, can }}>
+    <AuthContext.Provider value={{ user, permissions, center, loading, refresh, logout, can }}>
       {children}
     </AuthContext.Provider>
   );
