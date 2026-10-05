@@ -66,11 +66,16 @@ describe('naf-icons.md', () => {
        — وشعارات العلامات حذفتها Lucide 1.x بلا بديل، وذكرُها في قسم
          «شعارات المنصات» هو بيانُ حذفها نفسه وسببُ وجود `naf-brand-marks`.
        — و`Money` مكوّن `naf-currency` لا أيقونة: يُذكر في «حالات الحملة»
-         تعليلاً لعدم تسجيل أيقونةٍ للميزانية — المبلغ يقوله رمزُه. */
+         تعليلاً لعدم تسجيل أيقونةٍ للميزانية — المبلغ يقوله رمزُه.
+       — وأسماءٌ دخلت مع مزامنة الخريطة بالسجلّ، وكلها نثرٌ لا صفّ:
+         `EyeDropper` واجهةُ المتصفح لا أيقونة، و`CurrencyDollar` اسمٌ يُنهى
+         عنه، و`Inactive`/`Disabled` حالتان في مصطلحات المنصة، و
+         `HighlighterOff` رمزٌ لا وجود له يُعلَّل به غيابُ أيقونة. */
     const documented = new Set([
       'AlignLeft', 'AlignRight',
       'Facebook', 'Instagram', 'Youtube', 'Linkedin',
       'Money',
+      'EyeDropper', 'CurrencyDollar', 'Inactive', 'Disabled', 'HighlighterOff',
     ]);
     const unknown = [...known].filter((n) => !documented.has(n) && !(n in mod));
     expect(unknown, 'اسمٌ مسجَّل لا تعرفه lucide-react المثبّتة').toEqual([]);
