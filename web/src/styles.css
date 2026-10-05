@@ -49,7 +49,9 @@ a:hover { text-decoration: underline; }
   position: absolute; inset-inline-start: var(--space-3); top: 50%;
   transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none;
 }
-.top-search-input { padding-inline-start: var(--space-9); }
+/* بصنفين لا صنفٍ واحد: `.input` بعده بالقوّة نفسها فكان يغلبه، فيقع النصّ
+   تحت الأيقونة. */
+.input.top-search-input { padding-inline-start: var(--space-9); }
 
 /* ===== الإشعارات ===== */
 .notif-dot {

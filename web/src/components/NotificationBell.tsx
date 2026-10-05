@@ -39,7 +39,8 @@ export default function NotificationBell() {
       render={({ toggle }) => (
         <button className="naf-icon-btn" onClick={toggle} title="الإشعارات" style={{ position: 'relative' }}>
           <Bell size={20} />
-          {unread > 0 && <span className="notif-dot">{unread > 9 ? '9+' : unread}</span>}
+          {/* معزولٌ اتجاهياً: بلا عزلٍ تقرؤه العربية «+9» */}
+          {unread > 0 && <span className="notif-dot"><bdi>{unread > 9 ? '9+' : unread}</bdi></span>}
         </button>
       )}
     >
