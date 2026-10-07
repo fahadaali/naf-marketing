@@ -66,3 +66,28 @@ export function extractMediaIds(html: string): string[] {
   }
   return out;
 }
+
+/* ═══ النصّ الفارغ ═══
+
+   المحرر يترك بعد مسح ما فيه وسوماً بلا نصّ — `<br>` أو `<div><br></div>` —
+   فلا يُعرف المحتوى الفارغ بمقارنة نصّه بـ''. و«فكرة» حالةٌ مشتقّة من
+   `status = 'draft' AND body = ''`، فيُطبَّع الفارغ إلى '' عند كل كتابة ويصحّ
+   الاشتقاق في SQL كما في الواجهة. والوسيط وحده محتوى: منشورٌ بصورةٍ بلا
+   كلمة ليس فارغاً. ومحارف الاتجاه والوصل لا تُرى، فلا تُعدّ نصّاً.
+   و`&nbsp;` وحدها — ما يتركه مسافةٌ في محررٍ فارغ — لا يفكّها `htmlToText`
+   حين لا وسم معها، فتُفكّ هنا. */
+const INVISIBLE = /[​-‏⁠-⁩﻿]/g;
+
+export function isBlankBody(html: unknown): boolean {
+  if (typeof html !== 'string' || !html) return true;
+  if (/data-media-id=|<(img|video|audio|iframe|embed|object)\b/i.test(html) || extractMediaIds(html).length) {
+    return false;
+  }
+  const text = htmlToText(html.replace(/&nbsp;|&#160;|&#xa0;/gi, ' '));
+  return text.replace(INVISIBLE, '').trim() === '';
+}
+
+/** ما يُخزَّن في `body`: النصّ كما هو، أو '' إن كان فارغاً في المعنى. */
+export function normalizeBody(v: unknown): string {
+  return typeof v === 'string' && !isBlankBody(v) ? v : '';
+}

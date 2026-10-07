@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { htmlToText, extractMediaIds } from '../src/util';
+import { htmlToText, extractMediaIds, isBlankBody, normalizeBody } from '../src/util';
 
 // تجريد HTML قبل النشر — كان محتوى المحرر يُنشر خاماً فتظهر الوسوم حرفياً
 describe('htmlToText', () => {
@@ -66,5 +66,44 @@ describe('extractMediaIds', () => {
 
   it('يُعيد فارغاً عند غياب الوسائط', () => {
     expect(extractMediaIds('<p>نص فقط</p>')).toEqual([]);
+  });
+});
+
+// النصّ الفارغ في المعنى — عليه تُشتقّ «فكرة»: مسودةٌ لم يُكتب نصّها
+describe('isBlankBody', () => {
+  it('ما يتركه المحرر بعد المسح فارغ', () => {
+    for (const html of ['', '<br>', '<p><br></p>', '<div><br></div>', '&nbsp;', ' \n ', '\u200f', '<p>\u2068\u2069</p>']) {
+      expect(isBlankBody(html), JSON.stringify(html)).toBe(true);
+    }
+  });
+
+  it('غير النصّ فارغ', () => {
+    expect(isBlankBody(undefined)).toBe(true);
+    expect(isBlankBody(null)).toBe(true);
+    expect(isBlankBody(42)).toBe(true);
+  });
+
+  it('كلمةٌ واحدة نصّ', () => {
+    expect(isBlankBody('<p>عقد</p>')).toBe(false);
+  });
+
+  it('الوسيط وحده محتوى — وإن جُرّد اسمه من النصّ', () => {
+    const embed =
+      '<div class="media-embed media-img" contenteditable="false" data-media-id="med_1" data-media-url="/api/media/med_1">' +
+      '<img class="media-thumb" src="/api/media/med_1" alt="a.png"/><div class="media-cap">a.png</div></div>';
+    expect(htmlToText(embed)).toBe('');
+    expect(isBlankBody(embed)).toBe(false);
+    expect(isBlankBody('<img src="https://example.com/a.png">')).toBe(false);
+  });
+});
+
+describe('normalizeBody', () => {
+  it('الفارغ في المعنى يُخزَّن فارغاً حرفياً', () => {
+    expect(normalizeBody('<div><br></div>')).toBe('');
+    expect(normalizeBody(undefined)).toBe('');
+  });
+
+  it('النصّ يُخزَّن كما هو', () => {
+    expect(normalizeBody('<p>نص</p>')).toBe('<p>نص</p>');
   });
 });

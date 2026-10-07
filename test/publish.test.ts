@@ -150,6 +150,21 @@ describe('ما ترفضه المنصة قبل أن يصلها', () => {
   });
 });
 
+describe('يوم النشر المستهدف لا يَنشر', () => {
+  it('معتمدٌ ومجدولٌ مضى يومهما المستهدف بلا موعد: لا نشر ولا طلب', async () => {
+    // المجدوِل يقرأ صفوف schedules وحدها — والخطة عمودٌ في المحتوى لا يقرؤه
+    for (const [id, status] of [['p_appr', 'approved'], ['p_sch', 'scheduled'], ['p_idea', 'draft']]) {
+      db.prepare(
+        "INSERT INTO content_posts (id, title, body, status, author_id, planned_on, planned_platforms) VALUES (?, 'عنوان', '<p>نص</p>', ?, 'u1', '2026-01-01', '[\"linkedin\"]')",
+      ).run(id, status);
+    }
+    const r = await runDuePublishes(env);
+    expect(r).toEqual({ published: 0, failed: 0, pending: 0 });
+    expect(calls).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) n FROM schedules').get().n).toBe(0);
+  });
+});
+
 describe('المزوّد غير المضبوط', () => {
   it('يكتب سببه على كل موعد بدل أن يتركه معلّقاً صامتاً', async () => {
     env.SOCIALAPI_API_KEY = '';

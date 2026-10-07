@@ -2,19 +2,32 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { hasPermission } from '../permissions';
-import { newId, nowIso } from '../util';
+import { newId, nowIso, normalizeBody } from '../util';
 import { generateText } from '../services/claude';
 import { transition, type Action } from '../services/workflow';
 import { syncPostSafe, trashPostTaskSafe } from '../services/basecampSync';
 import { notifyStageReached } from '../services/notify';
 import { snapshotVersion } from '../services/versions';
 import { logAudit } from '../services/audit';
+import {
+  resolveFormat, isYmd, cleanDay, cleanPlatforms, cleanText, isIdeaRow,
+  PILLAR_MAX, BRIEF_MAX, PLANNED_CAP,
+} from '../services/planning';
 
 export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 postRoutes.use('*', requireAuth);
 
-// قائمة المنشورات مع فلاتر (status, campaign_id, mine)
+/** مسؤول التنفيذ: معرّفُ مستخدمٍ موجود، أو `null` يمسحه، أو `undefined` يُهمل. */
+async function cleanAssignee(env: Env, v: unknown): Promise<string | null | undefined> {
+  if (v === null || v === '') return null;
+  if (typeof v !== 'string') return undefined;
+  const row = await env.DB.prepare('SELECT 1 AS x FROM users WHERE id = ?').bind(v).first();
+  return row ? v : undefined;
+}
+
+// قائمة المنشورات مع فلاتر (status, campaign_id, mine)، أو قائمة الخطة بنطاق
+// اليوم المستهدف (planned=1&planned_from&planned_to).
 postRoutes.get('/', async (c) => {
   const status = c.req.query('status');
   const campaign = c.req.query('campaign_id');
@@ -35,21 +48,56 @@ postRoutes.get('/', async (c) => {
     where.push('p.author_id = ?');
     binds.push(user.id);
   }
+
+  /* قائمة الخطة لا تقف عند المئتين الأحدث تعديلاً: تلك تُسقط من الربع القادم
+     ما لم يُلمس مؤخراً، وعرضُ «حجم العمل» يعدّ ما يصله — فيعدّ ناقصاً بلا
+     إشارة. فهي بنطاق اليوم المستهدف وترتيبه، وسقفُها يُقال إن بُلغ. */
+  const planned = c.req.query('planned') === '1';
+  if (planned) {
+    where.push('p.planned_on IS NOT NULL');
+    const from = c.req.query('planned_from');
+    const to = c.req.query('planned_to');
+    if (isYmd(from)) {
+      where.push('p.planned_on >= ?');
+      binds.push(from);
+    }
+    if (isYmd(to)) {
+      where.push('p.planned_on <= ?');
+      binds.push(to);
+    }
+  }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const order = planned ? 'p.planned_on ASC, p.created_at ASC' : 'p.updated_at DESC';
+  const limit = planned ? PLANNED_CAP + 1 : 200;
 
   const { results } = await c.env.DB.prepare(
-    `SELECT p.*, u.name AS author_name, cm.name AS campaign_name,
+    `SELECT p.*, u.name AS author_name, ua.name AS assignee_name, cm.name AS campaign_name,
             (SELECT MIN(s.scheduled_at) FROM schedules s
                WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at
      FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
+     LEFT JOIN users ua ON ua.id = p.assignee_id
      LEFT JOIN campaigns cm ON cm.id = p.campaign_id
      ${clause}
-     ORDER BY p.updated_at DESC LIMIT 200`,
+     ORDER BY ${order} LIMIT ${limit}`,
   )
     .bind(...binds)
     .all();
+  if (planned) {
+    return c.json({ posts: results.slice(0, PLANNED_CAP), truncated: results.length > PLANNED_CAP });
+  }
   return c.json({ posts: results });
+});
+
+// من يُسند إليه التنفيذ — لكل من يكتب المحتوى. ولا تُستعمل `GET /users`
+// (تتطلّب `users.manage`) ولا `/campaigns/meta/owners` (تتطلّب
+// `content.schedule`): كلتاهما تردّ ٤٠٣ على الكاتب، وهو ممّن يُخطّط فكرةً
+// ويُسندها. مسجّلةٌ قبل `/:id` كأختها في الحملات.
+postRoutes.get('/meta/assignees', requirePermission('draft.edit'), async (c) => {
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, name FROM users WHERE is_active = 1 ORDER BY name',
+  ).all();
+  return c.json({ assignees: results });
 });
 
 // طابور الاعتماد — حسب الحالة الحالية للمستخدم
@@ -67,8 +115,9 @@ postRoutes.get('/queue', requirePermission('content.review'), async (c) => {
 postRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
   const post = await c.env.DB.prepare(
-    `SELECT p.*, u.name AS author_name, cm.name AS campaign_name
+    `SELECT p.*, u.name AS author_name, ua.name AS assignee_name, cm.name AS campaign_name
      FROM content_posts p LEFT JOIN users u ON u.id = p.author_id
+     LEFT JOIN users ua ON ua.id = p.assignee_id
      LEFT JOIN campaigns cm ON cm.id = p.campaign_id WHERE p.id = ?`,
   )
     .bind(id)
@@ -96,31 +145,46 @@ postRoutes.get('/:id', async (c) => {
   });
 });
 
-// إنشاء مسودة
+// إنشاء مسودة — أو فكرةٍ في الخطة: مسودةٌ بلا نصّ، بيومها ومنصاتها ومسؤولها
 postRoutes.post('/', requirePermission('draft.edit'), async (c) => {
   const user = c.get('user');
   const body = await c.req.json<{
     title?: string;
     body?: string;
     content_type?: string;
+    format?: string;
     source?: string;
     campaign_id?: string;
     news_item_id?: string;
+    planned_on?: string | null;
+    planned_platforms?: string[] | null;
+    assignee_id?: string | null;
+    pillar?: string | null;
+    brief?: string | null;
   }>();
 
   const id = newId('post');
+  const text = normalizeBody(body.body);
+  const fmt = resolveFormat(body) ?? { format: 'text', content_type: 'text' };
   await c.env.DB.prepare(
-    `INSERT INTO content_posts (id, title, body, content_type, source, author_id, campaign_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO content_posts (id, title, body, content_type, format, source, author_id, campaign_id,
+                                planned_on, planned_platforms, assignee_id, pillar, brief)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       body.title || 'مسودة بدون عنوان',
-      body.body || '',
-      body.content_type || 'text',
+      text,
+      fmt.content_type,
+      fmt.format,
       body.source || 'manual',
       user.id,
       body.campaign_id || null,
+      cleanDay(body.planned_on) ?? null,
+      cleanPlatforms(body.planned_platforms) ?? null,
+      (await cleanAssignee(c.env, body.assignee_id)) ?? null,
+      cleanText(body.pillar, PILLAR_MAX) ?? null,
+      cleanText(body.brief, BRIEF_MAX) ?? null,
     )
     .run();
 
@@ -132,26 +196,46 @@ postRoutes.post('/', requirePermission('draft.edit'), async (c) => {
   }
   // مزامنة بيسكامب في الخلفية (بطاقة مهمة في قائمة المسودات)
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
-  return c.json({ ok: true, id });
+  return c.json({ ok: true, id, idea: text === '' });
 });
 
 // استيراد جماعي: إنشاء مسودات دفعةً واحدة من ملف مستورد (CSV/JSON محوّلين في الواجهة).
+// وبحقول الخطة تُستورد خطةُ ربعٍ كاملة أفكاراً من جدول.
 postRoutes.post('/import', requirePermission('draft.edit'), async (c) => {
   const user = c.get('user');
   const { items } = await c.req.json<{ items: any[] }>();
   if (!Array.isArray(items) || items.length === 0) return c.json({ error: 'لا توجد عناصر للاستيراد' }, 400);
+  const batch = items.slice(0, 500);
 
-  const types = ['text', 'image', 'video'];
+  /* المسؤولون الموجودون فعلاً، باستعلامٍ لكل تسعين: D1 يقبل مئة معاملٍ في
+     العبارة الواحدة، وخمس مئة صفٍّ قد تحمل خمس مئة معرّف. */
+  const wanted = [...new Set(batch.map((it) => it?.assignee_id).filter((v): v is string => typeof v === 'string' && !!v))];
+  const known = new Set<string>();
+  for (let i = 0; i < wanted.length; i += 90) {
+    const chunk = wanted.slice(i, i + 90);
+    const { results } = await c.env.DB.prepare(
+      `SELECT id FROM users WHERE id IN (${chunk.map(() => '?').join(',')})`,
+    ).bind(...chunk).all<{ id: string }>();
+    for (const r of results) known.add(r.id);
+  }
+
   const stmts = [];
-  for (const it of items.slice(0, 500)) {
+  for (const it of batch) {
     const title = String(it.title ?? '').trim() || 'مسودة مستوردة';
-    const bodyVal = String(it.body ?? '');
-    const ct = types.includes(it.content_type) ? it.content_type : 'text';
+    const fmt = resolveFormat(it) ?? { format: 'text', content_type: 'text' };
     stmts.push(
       c.env.DB.prepare(
-        `INSERT INTO content_posts (id, title, body, content_type, source, author_id, campaign_id)
-         VALUES (?, ?, ?, ?, 'manual', ?, ?)`,
-      ).bind(newId('post'), title, bodyVal, ct, user.id, it.campaign_id || null),
+        `INSERT INTO content_posts (id, title, body, content_type, format, source, author_id, campaign_id,
+                                    planned_on, planned_platforms, assignee_id, pillar, brief)
+         VALUES (?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        newId('post'), title, normalizeBody(String(it.body ?? '')), fmt.content_type, fmt.format, user.id, it.campaign_id || null,
+        cleanDay(it.planned_on) ?? null,
+        cleanPlatforms(it.planned_platforms) ?? null,
+        known.has(it.assignee_id) ? it.assignee_id : null,
+        cleanText(it.pillar, PILLAR_MAX) ?? null,
+        cleanText(it.brief, BRIEF_MAX) ?? null,
+      ),
     );
   }
   if (stmts.length) await c.env.DB.batch(stmts);
@@ -162,9 +246,11 @@ postRoutes.post('/import', requirePermission('draft.edit'), async (c) => {
 postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const user = c.get('user');
-  const post = await c.env.DB.prepare('SELECT author_id, status FROM content_posts WHERE id = ?')
+  const post = await c.env.DB.prepare(
+    'SELECT author_id, assignee_id, status, body, format FROM content_posts WHERE id = ?',
+  )
     .bind(id)
-    .first<{ author_id: string; status: string }>();
+    .first<{ author_id: string; assignee_id: string | null; status: string; body: string; format: string }>();
   if (!post) return c.json({ error: 'غير موجود' }, 404);
 
   // الكاتب يعدّل مسوّداته فقط؛ من يملك صلاحية المراجعة يعدّل الجميع
@@ -173,19 +259,53 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
     return c.json({ error: 'لا يمكنك تعديل محتوى غيرك' }, 403);
   }
 
-  const b = await c.req.json<{ title?: string; body?: string; content_type?: string; campaign_id?: string | null }>();
+  const b = await c.req.json<{
+    title?: string;
+    body?: string;
+    content_type?: string;
+    format?: string;
+    campaign_id?: string | null;
+    planned_on?: string | null;
+    planned_platforms?: string[] | null;
+    assignee_id?: string | null;
+    pillar?: string | null;
+    brief?: string | null;
+  }>();
   const fields: string[] = [];
   const binds: unknown[] = [];
-  if (b.title !== undefined) (fields.push('title = ?'), binds.push(b.title));
-  if (b.body !== undefined) (fields.push('body = ?'), binds.push(b.body));
-  if (b.content_type !== undefined) (fields.push('content_type = ?'), binds.push(b.content_type));
-  if (b.campaign_id !== undefined) (fields.push('campaign_id = ?'), binds.push(b.campaign_id));
-  if (!fields.length) return c.json({ ok: true });
-  fields.push('updated_at = ?');
-  binds.push(nowIso(), id);
+  const set = (column: string, value: unknown) => {
+    fields.push(`${column} = ?`);
+    binds.push(value);
+  };
 
-  // لقطة نسخة قبل التعديل عند تغيّر المحتوى الفعلي (عنوان/نص/نوع)
-  if (b.title !== undefined || b.body !== undefined || b.content_type !== undefined) {
+  if (b.title !== undefined) set('title', b.title);
+  const body = b.body === undefined ? undefined : normalizeBody(b.body);
+  if (body !== undefined) set('body', body);
+  // الشكل يقرّر النوع، والنوع وحده يُبقي الشكل إن وافقه
+  const fmt = b.format !== undefined || b.content_type !== undefined ? resolveFormat(b, post.format) : null;
+  if (fmt) {
+    set('format', fmt.format);
+    set('content_type', fmt.content_type);
+  }
+  if (b.campaign_id !== undefined) set('campaign_id', b.campaign_id);
+  const day = b.planned_on === undefined ? undefined : cleanDay(b.planned_on);
+  if (day !== undefined) set('planned_on', day);
+  const platforms = b.planned_platforms === undefined ? undefined : cleanPlatforms(b.planned_platforms);
+  if (platforms !== undefined) set('planned_platforms', platforms);
+  const assignee = b.assignee_id === undefined ? undefined : await cleanAssignee(c.env, b.assignee_id);
+  if (assignee !== undefined) set('assignee_id', assignee);
+  const pillar = b.pillar === undefined ? undefined : cleanText(b.pillar, PILLAR_MAX);
+  if (pillar !== undefined) set('pillar', pillar);
+  const brief = b.brief === undefined ? undefined : cleanText(b.brief, BRIEF_MAX);
+  if (brief !== undefined) set('brief', brief);
+
+  const idea = isIdeaRow({ status: post.status, body: body ?? post.body });
+  if (!fields.length) return c.json({ ok: true, idea });
+  set('updated_at', nowIso());
+  binds.push(id);
+
+  // لقطة نسخة قبل التعديل عند تغيّر المحتوى الفعلي (عنوان/نص/شكل)
+  if (b.title !== undefined || body !== undefined || fmt) {
     await snapshotVersion(c.env, id, user.id);
   }
 
@@ -193,7 +313,7 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
     .bind(...binds)
     .run();
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
-  return c.json({ ok: true });
+  return c.json({ ok: true, idea });
 });
 
 // سجل نسخ المنشور
@@ -212,9 +332,9 @@ postRoutes.get('/:id/versions', async (c) => {
 postRoutes.post('/:id/versions/:versionId/restore', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const user = c.get('user');
-  const post = await c.env.DB.prepare('SELECT author_id, status FROM content_posts WHERE id = ?')
+  const post = await c.env.DB.prepare('SELECT author_id, status, format FROM content_posts WHERE id = ?')
     .bind(id)
-    .first<{ author_id: string; status: string }>();
+    .first<{ author_id: string; status: string; format: string }>();
   if (!post) return c.json({ error: 'غير موجود' }, 404);
   const canReviewOthers = user.role_name !== 'writer';
   if (post.author_id !== user.id && !canReviewOthers) {
@@ -228,11 +348,15 @@ postRoutes.post('/:id/versions/:versionId/restore', requirePermission('draft.edi
     .first<{ title: string; body: string; content_type: string }>();
   if (!version) return c.json({ error: 'النسخة غير موجودة' }, 404);
 
+  /* النسخ لا تحفظ الشكل — قبل 0033 لم يكن، وبعدها يكفي النوع: الشكل الحاليّ
+     يبقى إن وافق نوعَ النسخة، وإلا الشكلُ الأساسيّ لنوعها. */
+  const fmt = resolveFormat({ content_type: version.content_type }, post.format)
+    ?? { format: post.format, content_type: version.content_type };
   await snapshotVersion(c.env, id, user.id);
   await c.env.DB.prepare(
-    'UPDATE content_posts SET title = ?, body = ?, content_type = ?, updated_at = ? WHERE id = ?',
+    'UPDATE content_posts SET title = ?, body = ?, content_type = ?, format = ?, updated_at = ? WHERE id = ?',
   )
-    .bind(version.title, version.body, version.content_type, nowIso(), id)
+    .bind(version.title, normalizeBody(version.body), fmt.content_type, fmt.format, nowIso(), id)
     .run();
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true });
