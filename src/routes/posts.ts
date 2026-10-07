@@ -11,7 +11,7 @@ import { snapshotVersion } from '../services/versions';
 import { logAudit } from '../services/audit';
 import {
   resolveFormat, isYmd, cleanDay, cleanPlatforms, cleanText, isIdeaRow,
-  PILLAR_MAX, BRIEF_MAX, PLANNED_CAP,
+  PILLAR_MAX, BRIEF_MAX, PLANNED_CAP, SCHEDULED_PLATFORMS_SQL,
 } from '../services/planning';
 
 export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -94,7 +94,8 @@ postRoutes.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT p.*, u.name AS author_name, ua.name AS assignee_name, cm.name AS campaign_name,
             (SELECT MIN(s.scheduled_at) FROM schedules s
-               WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at
+               WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at,
+            ${SCHEDULED_PLATFORMS_SQL}
      FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
      LEFT JOIN users ua ON ua.id = p.assignee_id
@@ -124,7 +125,7 @@ postRoutes.get('/meta/assignees', requirePermission('draft.edit'), async (c) => 
 // طابور الاعتماد — حسب الحالة الحالية للمستخدم
 postRoutes.get('/queue', requirePermission('content.review'), async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT p.*, u.name AS author_name FROM content_posts p
+    `SELECT p.*, u.name AS author_name, ${SCHEDULED_PLATFORMS_SQL} FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
      WHERE p.status IN ('pending_marketing','pending_gm')
      ORDER BY p.updated_at ASC`,

@@ -343,3 +343,30 @@ describe('مسؤول التنفيذ', () => {
     expect((await call('DELETE', '/posts/p1')).status).toBe(403);
   });
 });
+
+describe('منصات المحتوى المجدولة في القوائم', () => {
+  beforeEach(() => {
+    seedPost('p1', { status: 'scheduled', body: '<p>نص</p>' });
+    seedPost('p2', { status: 'pending_marketing', body: '<p>نص</p>' });
+    const s = db.prepare("INSERT INTO schedules (id,post_id,platform,scheduled_at,status) VALUES (?,?,?,'2026-11-01T09:00:00Z',?)");
+    s.run('s1', 'p1', 'x', 'pending');
+    s.run('s2', 'p1', 'instagram', 'failed');
+    s.run('s3', 'p1', 'x', 'published'); // منصةٌ جُدولت مرتين تُعدّ مرة
+  });
+
+  it('القائمة: كل منصة مرةً واحدة، والمحتوى بلا موعدٍ بلا منصات', async () => {
+    const posts = (await call('GET', '/posts')).json.posts;
+    const by = Object.fromEntries(posts.map((p: any) => [p.id, p.scheduled_platforms]));
+    expect(by.p1.split(',').sort()).toEqual(['instagram', 'x']);
+    expect(by.p2).toBeNull();
+  });
+
+  it('وقائمة الخطة والطابور كذلك', async () => {
+    db.prepare("UPDATE content_posts SET planned_on = '2026-11-01'").run();
+    const planned = (await call('GET', '/posts?planned=1')).json.posts;
+    expect(planned.find((p: any) => p.id === 'p1').scheduled_platforms.split(',').sort()).toEqual(['instagram', 'x']);
+    db.prepare("INSERT INTO schedules (id,post_id,platform,scheduled_at,status) VALUES ('s4','p2','linkedin','2026-11-02T09:00:00Z','pending')").run();
+    const queue = (await call('GET', '/posts/queue')).json.posts;
+    expect(queue.map((p: any) => [p.id, p.scheduled_platforms])).toEqual([['p2', 'linkedin']]);
+  });
+});

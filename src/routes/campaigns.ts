@@ -4,6 +4,7 @@ import { CAMPAIGN_TRANSITIONS } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
 import { logAudit } from '../services/audit';
+import { SCHEDULED_PLATFORMS_SQL } from '../services/planning';
 
 export const campaignRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -75,7 +76,8 @@ campaignRoutes.get('/:id', async (c) => {
   const posts = await c.env.DB.prepare(
     `SELECT p.*, u.name AS author_name,
             (SELECT MIN(s.scheduled_at) FROM schedules s
-               WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at
+               WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at,
+            ${SCHEDULED_PLATFORMS_SQL}
      FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
      WHERE p.campaign_id = ? ORDER BY p.updated_at DESC`,
