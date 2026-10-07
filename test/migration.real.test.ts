@@ -23,6 +23,7 @@ import { USER_REFERENCES } from '../src/sso';
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 const OLD = 'usr_old01';
 const SUB = 'sub-from-naf-id-9f2c';
+const FILLER = 'usr_colleague';
 
 /** يبني القاعدة من ملفات الهجرة نفسها — لا من مخطّط مكتوب في الاختبار. */
 function build(): DatabaseSync {
@@ -44,18 +45,29 @@ function allowedValue(db: DatabaseSync, table: string, column: string): string |
 }
 
 /**
- * يزرع صفّاً في كل جدول من الأحد عشر، بأعمدة مستنبطة من المخطّط.
+ * يزرع صفّاً لكل عمودٍ في USER_REFERENCES، بأعمدة مستنبطة من المخطّط.
  * المفاتيح مطفأة أثناء الزرع، فالمقصود وجود صفوف مرتبطة لا واقعيّتها.
+ *
+ * إلا عموداً إلزامياً آخر يشير إلى users: يُملأ بمستخدمٍ حقيقيّ لا بنصٍّ
+ * معلّق. صفُّ `content_posts.assignee_id` يحمل `author_id` إلزامياً، ونصٌّ
+ * معلّق فيه يُحسب مرجعاً متروكاً إلى users فيُسقط الاختبار الذي يعدّها.
  */
 function seed(db: DatabaseSync): number {
   db.prepare('INSERT INTO users (id,name,email,password_hash,role_name) VALUES (?,?,?,?,?)')
     .run(OLD, 'فهد', 'fahad@naf.sa', 'hash', 'general_manager');
+  db.prepare('INSERT INTO users (id,name,email,password_hash,role_name) VALUES (?,?,?,?,?)')
+    .run(FILLER, 'زميل', 'colleague@naf.sa', 'hash', 'writer');
   db.prepare("INSERT INTO sessions (id,user_id,expires_at) VALUES ('sess_legacy',?,'2030-01-01T00:00:00Z')")
     .run(OLD);
 
   USER_REFERENCES.forEach(([table, column], i) => {
     const cols: string[] = [];
     const vals: (string | number)[] = [];
+    const userFks = new Set(
+      (db.prepare(`PRAGMA foreign_key_list(${table})`).all() as any[])
+        .filter((f) => f.table === 'users')
+        .map((f) => f.from),
+    );
     for (const c of db.prepare(`PRAGMA table_info(${table})`).all() as any[]) {
       const isInt = String(c.type || '').toUpperCase().includes('INT');
       if (c.name === column) {
@@ -64,7 +76,11 @@ function seed(db: DatabaseSync): number {
         continue; // rowid يتولّى نفسه
       } else if (c.pk || (c.notnull && c.dflt_value === null)) {
         cols.push(c.name);
-        vals.push(allowedValue(db, table, c.name) ?? (isInt ? i + 1 : `${table.slice(0, 6)}_${i}`));
+        vals.push(
+          userFks.has(c.name)
+            ? FILLER
+            : allowedValue(db, table, c.name) ?? (isInt ? i + 1 : `${table.slice(0, 6)}_${i}`),
+        );
       }
     }
     db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...vals);

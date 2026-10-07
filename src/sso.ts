@@ -79,6 +79,7 @@ const DEFAULT_ROLE = 'writer';
 
 const USER_REFERENCES: Array<[table: string, column: string]> = [
   ['content_posts', 'author_id'],
+  ['content_posts', 'assignee_id'],
   ['approvals', 'actor_id'],
   ['notifications', 'user_id'],
   ['media_assets', 'uploaded_by'],
