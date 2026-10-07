@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search as SearchIcon } from 'lucide-react';
+import { PlatformIcons, platformsOf } from '../platforms';
 import { api } from '../api';
 
 // بحث نصي كامل عبر المحتوى وخلاصة الأخبار (FTS5)
@@ -45,6 +46,7 @@ export default function Search() {
             <h3 style={{ marginTop: 0 }}>المحتوى ({posts.length})</h3>
             {posts.map((p) => (
               <button type="button" key={p.id} className="row-link" style={{ padding: '9px 0', borderBottom: '1px solid var(--border)' }} onClick={() => navigate(`/editor/${p.id}`)}>
+                <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
                 <div style={{ fontWeight: 600 }}>{p.title}</div>
                 <div className="muted" style={{ fontSize: 'var(--text-xs)' }} dangerouslySetInnerHTML={{ __html: p.snippet }} />
               </button>

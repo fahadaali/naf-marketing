@@ -500,6 +500,8 @@ h3, h4 { letter-spacing: -0.01em; }
 .sort-on { opacity: 1; }
 .sort-on.asc { transform: rotate(180deg); }
 .platform-row { gap: var(--space-1); }
+/* شعارات منصات المحتوى فوق عنوانه — في خانة الجدول وأعلى البطاقة */
+.platforms-above { margin-bottom: var(--space-1); }
 
 /* الخطّ الزمني للحملة: نقطةٌ لكل منشور على مدّة الحملة، لا شريطُ مدّة —
    المنشور لحظةُ نشرٍ لا فترةٌ ممتدّة. */

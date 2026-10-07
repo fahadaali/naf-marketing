@@ -17,7 +17,7 @@ import Modal from '../components/Modal';
 import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
 import CampaignForm from '../components/CampaignForm';
 import { Money } from '../components/Money';
-import { PlatformIcon, platformLabel } from '../platforms';
+import { PlatformIcon, PlatformIcons, platformLabel, platformsOf } from '../platforms';
 import { CAMPAIGN_STATUS_LABELS, daysRemaining, parsePlatforms } from '../campaigns';
 
 /* صفحة الحملة.
@@ -454,6 +454,7 @@ function Timeline({ posts, campaign, late }: { posts: any[]; campaign: any; late
             <div className="gantt-row" key={p.id}>
               <div className="gantt-label" title={p.title}>
                 <StatusBadge status={st} size={16} iconOnly />
+                <PlatformIcons platforms={platformsOf(p)} />
                 {p.title}
               </div>
               <div className="gantt-track">

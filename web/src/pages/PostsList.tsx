@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, TYPE_LABELS, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
+import { PlatformIcons, platformsOf } from '../platforms';
 import PostKanban, { moveAction } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -396,6 +397,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
               <td style={{ fontWeight: 500 }}>
+                <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
                 <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
               </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
@@ -460,6 +462,7 @@ function GanttView({ rows, navigate }: any) {
           <div className="gantt-row" key={p.id}>
             <div className="gantt-label" title={p.title}>
               <StatusBadge status={st} size={16} iconOnly />
+              <PlatformIcons platforms={platformsOf(p)} />
               {p.title}
             </div>
             <div className="gantt-track">

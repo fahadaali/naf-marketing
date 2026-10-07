@@ -114,13 +114,13 @@ export function usePlatformLabels(): Record<string, string> | undefined {
  * الواحد بمنصاته بطاقةً واحدة لا بطاقةً لكل منصة. لا شيء حين لا منصات.
  */
 export function PlatformIcons({
-  platforms, size = 16, custom,
-}: { platforms: string[]; size?: number; custom?: Record<string, string> }) {
+  platforms, size = 16, custom, className,
+}: { platforms: string[]; size?: number; custom?: Record<string, string>; className?: string }) {
   const fetched = usePlatformLabels();
   if (!platforms.length) return null;
   const labels = custom ?? fetched;
   return (
-    <span className="row platform-row">
+    <span className={`row platform-row${className ? ` ${className}` : ''}`}>
       {platforms.map((p) => <PlatformIcon key={p} platform={p} size={size} title={platformLabel(p, labels)} />)}
     </span>
   );
