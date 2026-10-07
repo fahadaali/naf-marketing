@@ -296,9 +296,11 @@ analyticsRoutes.get('/best-times', async (c) => {
 
 // لوحة أداء الفريق: إنتاجية الكتّاب وسرعة اعتماد المراجعين/المديرين
 analyticsRoutes.get('/performance', async (c) => {
+  /* الفكرة لا تُعدّ إنتاجاً: عنوانٌ في الخطة لم يُكتب منه حرف، ونسبتُه إلى
+     من خطّطه تجعل مدير التسويق أكثر الكتّاب إنتاجاً بخطة ربعٍ واحدة. */
   const writers = await c.env.DB.prepare(
     `SELECT u.id, u.name,
-            COUNT(p.id) AS created_count,
+            COUNT(CASE WHEN NOT (p.status = 'draft' AND p.body = '') THEN p.id END) AS created_count,
             SUM(CASE WHEN p.status = 'published' THEN 1 ELSE 0 END) AS published_count,
             SUM(CASE WHEN p.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
      FROM users u
@@ -310,6 +312,11 @@ analyticsRoutes.get('/performance', async (c) => {
 
   // سرعة الاعتماد لكل مراجع: متوسط الفترة بالساعات بين إجراء الاعتماد والإجراء السابق عليه لنفس المنشور
   // (أو تاريخ إنشاء المنشور إن كان أول إجراء)
+  /* وقرارات المراجعة وحدها: الاعتماد بمرحلتيه والرفض. كان كل صفٍّ في
+     approvals يُعدّ — وأوّلها إرسال الكاتب للمراجعة، يُقاس من إنشاء المنشور
+     لأنه أول إجراء — فيظهر الكاتب «معتمِداً» ويُقاس وقتُ كتابته سرعةَ اعتماد.
+     وفكرةٌ خُطّطت قبل ثلاثة أشهر تجعل ذلك الرقم ألفي ساعة. والجدولة والأرشفة
+     ليستا اعتماداً كذلك. والإرسال يبقى «إجراءً سابقاً» يُقاس منه القرار. */
   const approvers = await c.env.DB.prepare(
     `WITH ranked AS (
        SELECT a.id, a.post_id, a.actor_id, a.to_status, a.created_at,
@@ -318,6 +325,7 @@ analyticsRoutes.get('/performance', async (c) => {
               p.created_at AS post_created_at
        FROM approvals a
        JOIN content_posts p ON p.id = a.post_id
+       WHERE a.to_status IN ('pending_gm', 'approved', 'rejected')
      )
      SELECT u.id, u.name,
             COUNT(r.id) AS actions_count,

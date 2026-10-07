@@ -5,6 +5,7 @@ import {
   getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment, getComments,
 } from './basecamp';
 import { notifyUsers, usersWithPermission } from './notify';
+import { isIdeaRow } from './planning';
 
 // مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
 
@@ -117,19 +118,26 @@ export async function syncPost(env: Env, postId: string): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
 
-  const post = await env.DB.prepare('SELECT id, title, body, status FROM content_posts WHERE id = ?')
-    .bind(postId).first<{ id: string; title: string; body: string; status: string }>();
+  const post = await env.DB.prepare('SELECT id, title, body, status, planned_on FROM content_posts WHERE id = ?')
+    .bind(postId).first<{ id: string; title: string; body: string; status: string; planned_on: string | null }>();
   if (!post || !STAGE_LIST[post.status]) return;
-
-  const columnId = await ensureStageColumn(env, projectId, post.status);
-  const content = await buildDescription(env, post.body);
-  const due_on = await computeDue(env, postId);
-  const assignee_ids = await getProjectPeopleIds(env, projectId);
-  const input = { title: post.title || 'منشور بدون عنوان', content, due_on, assignee_ids };
 
   // (نعيد استخدام أعمدة الجدول: todo_id = معرّف البطاقة، list_id = معرّف العمود)
   const map = await env.DB.prepare('SELECT todo_id, stage FROM basecamp_tasks WHERE post_id = ?')
     .bind(postId).first<{ todo_id: string; stage: string }>();
+
+  /* الفكرة لا بطاقة لها حتى يُكتب نصّها. خطةُ ربعٍ تسعون فكرة، وتسعون بطاقةً
+     مسندةً لكل أعضاء المشروع تُغرق عمود المسودات قبل أن يُكتب منها حرف.
+     وأوّلُ نصٍّ يُحفظ يجعلها مسودةً فتُنشأ بطاقتها حينئذٍ. ومن له بطاقةٌ
+     — مسودةٌ مُسح نصّها — تبقى بطاقته تُحدَّث. */
+  if (!map && isIdeaRow(post)) return;
+
+  const columnId = await ensureStageColumn(env, projectId, post.status);
+  const content = await buildDescription(env, post.body);
+  // الاستحقاق أقرب موعد نشر، وما لم يُجدول بعدُ فيومُه المستهدف
+  const due_on = (await computeDue(env, postId)) || post.planned_on || null;
+  const assignee_ids = await getProjectPeopleIds(env, projectId);
+  const input = { title: post.title || 'منشور بدون عنوان', content, due_on, assignee_ids };
 
   if (!map) {
     const cardId = await createCard(env, projectId, columnId, input);
