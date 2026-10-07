@@ -326,9 +326,10 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
     if (!platforms.length) return setMsg('اختر منصة واحدة على الأقل');
     try {
       const d = await api.post(`/newsletters/${id}/social`, { platforms });
-      const okAll = d.results.filter((r: any) => r.ok).map((r: any) => r.platform);
+      // أسماء المنصات لا مفاتيحها — كانت الرسالة تقول «نُشر على x، linkedin»
+      const okAll = d.results.filter((r: any) => r.ok).map((r: any) => platformLabel(r.platform));
       const bad = d.results.filter((r: any) => !r.ok);
-      setMsg(bad.length ? `نُشر: ${okAll.join('، ') || 'لا شيء'} · فشل: ${bad.map((b: any) => b.platform + ' (' + b.error + ')').join('، ')}`
+      setMsg(bad.length ? `نُشر: ${okAll.join('، ') || 'لا شيء'} · فشل: ${bad.map((b: any) => platformLabel(b.platform) + ' (' + b.error + ')').join('، ')}`
                         : `نُشر على ${okAll.join('، ')}`);
     } catch (e: any) { setMsg(e.message); }
   }
@@ -506,7 +507,16 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
       {confirming === 'social' && (
         <ConfirmModal
           title="النشر على التواصل"
-          message={`تُنشر المقالة على: ${Object.keys(socialPick).filter((p) => socialPick[p]).map((p) => platformLabel(p)).join('، ')}.`}
+          message={
+            <>
+              تُنشر المقالة على:
+              <span className="row platform-row">
+                {Object.keys(socialPick).filter((p) => socialPick[p]).map((p) => (
+                  <span key={p} className="row platform-row"><PlatformIcon platform={p} size={16} /> {platformLabel(p)}</span>
+                ))}
+              </span>
+            </>
+          }
           actionLabel="نشر"
           onConfirm={publishSocial}
           onClose={() => setConfirming(null)}
@@ -691,8 +701,8 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                         قَبولٍ لا ذوق: تجاوزه يعني بتر المنشور أو رفضه. */}
                     {(social.targets || []).filter((p: string) => p !== 'x' && socialPick[p]).map((p: string) => (
                       <div key={p}>
-                        <div className="muted" style={{ margin: '8px 0 4px' }}>
-                          {platformLabel(p)} — <bdi>{(social.drafts?.[p] || '').length}</bdi>/<bdi>{social.limits?.[p]}</bdi>
+                        <div className="muted row platform-row" style={{ margin: '8px 0 4px' }}>
+                          <PlatformIcon platform={p} size={16} /> {platformLabel(p)} — <bdi>{(social.drafts?.[p] || '').length}</bdi>/<bdi>{social.limits?.[p]}</bdi>
                         </div>
                         <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.drafts?.[p]}</div>
                       </div>

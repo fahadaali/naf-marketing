@@ -394,7 +394,7 @@ function Platforms() {
               >
                 <option value="">— بدون ربط —</option>
                 {acctList.map((a) => (
-                  <option key={a.id} value={a.id}>{a.service} — {a.username}</option>
+                  <option key={a.id} value={a.id}>{platformLabel(a.service)} — {a.username}</option>
                 ))}
                 {acctMap[p] && !acctList.some((a) => a.id === acctMap[p]) && (
                   <option value={acctMap[p]}>{acctMap[p]} (محفوظ)</option>
