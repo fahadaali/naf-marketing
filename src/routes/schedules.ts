@@ -28,12 +28,27 @@ scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), 
   return c.json({ ok: true, ...result });
 });
 
-// التقويم الموحّد — كل الجداول ضمن نطاق زمني
+// التقويم الموحّد — الجداول ضمن نطاقٍ زمني (from و to لحظتان بصيغة ISO)
 scheduleRoutes.get('/', async (c) => {
+  /* كان يردّ أقدمَ خمس مئة موعدٍ بلا نطاق، فلمّا تجاوز السجلّ خمس مئة خرجت
+     الأشهر القادمة من التقويم بلا إشارة. والنطاق اختياري: بدونه كما كان. */
+  const where: string[] = [];
+  const binds: string[] = [];
+  for (const [key, op] of [['from', '>='], ['to', '<']] as const) {
+    const v = c.req.query(key);
+    if (v && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v))) {
+      where.push(`s.scheduled_at ${op} ?`);
+      binds.push(new Date(v).toISOString()); // بصيغة المخزَّن نفسها، فتصحّ المقارنة نصّاً
+    }
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const { results } = await c.env.DB.prepare(
     `SELECT s.*, p.title FROM schedules s JOIN content_posts p ON p.id = s.post_id
-     ORDER BY s.scheduled_at ASC LIMIT 500`,
-  ).all();
+     ${clause}
+     ORDER BY s.scheduled_at ASC LIMIT ${where.length ? 1000 : 500}`,
+  )
+    .bind(...binds)
+    .all();
   return c.json({ schedules: results });
 });
 
