@@ -18,6 +18,27 @@ export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 postRoutes.use('*', requireAuth);
 
+/**
+ * من يعدّل المحتوى: كاتبه، ومن أُسند إليه تنفيذه، ومن يراجع.
+ *
+ * وبغير الإسناد يقف الكاتب عند فكرةٍ خطّطها غيره وأسندها إليه: يراها في
+ * الخطة ويردّه الخادم بـ٤٠٣ عند أول حفظ.
+ */
+function mayEdit(user: { id: string; role_name: string }, post: { author_id: string; assignee_id: string | null }) {
+  return post.author_id === user.id || post.assignee_id === user.id || user.role_name !== 'writer';
+}
+
+/**
+ * أوّل من يكتب نصّ الفكرة يصير كاتبها.
+ *
+ * الكاتب في هذه المنصة من كتب النصّ، وعليه تقوم قاعدة «لا يعتمد المحتوى
+ * كاتبُه» (`workflow.ts`). ولو بقي كاتبُ الفكرة من خطّطها لما اعتمد مديرُ
+ * التسويق عملاً كتبه غيره لأنه خطّط عنوانه — ولنُسب النصّ إلى من لم يكتبه.
+ */
+function takesAuthorship(user: { id: string }, post: { author_id: string; status: string; body: string }, newBody: string) {
+  return isIdeaRow(post) && newBody !== '' && post.author_id !== user.id;
+}
+
 /** مسؤول التنفيذ: معرّفُ مستخدمٍ موجود، أو `null` يمسحه، أو `undefined` يُهمل. */
 async function cleanAssignee(env: Env, v: unknown): Promise<string | null | undefined> {
   if (v === null || v === '') return null;
@@ -253,9 +274,8 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
     .first<{ author_id: string; assignee_id: string | null; status: string; body: string; format: string }>();
   if (!post) return c.json({ error: 'غير موجود' }, 404);
 
-  // الكاتب يعدّل مسوّداته فقط؛ من يملك صلاحية المراجعة يعدّل الجميع
-  const canReviewOthers = user.role_name !== 'writer';
-  if (post.author_id !== user.id && !canReviewOthers) {
+  // الكاتب يعدّل مسوّداته وما أُسند إليه تنفيذه؛ من يملك صلاحية المراجعة يعدّل الجميع
+  if (!mayEdit(user, post)) {
     return c.json({ error: 'لا يمكنك تعديل محتوى غيرك' }, 403);
   }
 
@@ -298,6 +318,7 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   if (pillar !== undefined) set('pillar', pillar);
   const brief = b.brief === undefined ? undefined : cleanText(b.brief, BRIEF_MAX);
   if (brief !== undefined) set('brief', brief);
+  if (body !== undefined && takesAuthorship(user, post, body)) set('author_id', user.id);
 
   const idea = isIdeaRow({ status: post.status, body: body ?? post.body });
   if (!fields.length) return c.json({ ok: true, idea });
@@ -332,12 +353,13 @@ postRoutes.get('/:id/versions', async (c) => {
 postRoutes.post('/:id/versions/:versionId/restore', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const user = c.get('user');
-  const post = await c.env.DB.prepare('SELECT author_id, status, format FROM content_posts WHERE id = ?')
+  const post = await c.env.DB.prepare(
+    'SELECT author_id, assignee_id, status, body, format FROM content_posts WHERE id = ?',
+  )
     .bind(id)
-    .first<{ author_id: string; status: string; format: string }>();
+    .first<{ author_id: string; assignee_id: string | null; status: string; body: string; format: string }>();
   if (!post) return c.json({ error: 'غير موجود' }, 404);
-  const canReviewOthers = user.role_name !== 'writer';
-  if (post.author_id !== user.id && !canReviewOthers) {
+  if (!mayEdit(user, post)) {
     return c.json({ error: 'لا يمكنك تعديل محتوى غيرك' }, 403);
   }
 
@@ -352,11 +374,14 @@ postRoutes.post('/:id/versions/:versionId/restore', requirePermission('draft.edi
      يبقى إن وافق نوعَ النسخة، وإلا الشكلُ الأساسيّ لنوعها. */
   const fmt = resolveFormat({ content_type: version.content_type }, post.format)
     ?? { format: post.format, content_type: version.content_type };
+  const body = normalizeBody(version.body);
+  // استرجاعُ نصٍّ على فكرةٍ كتابةٌ لها كالحفظ تماماً
+  const author = takesAuthorship(user, post, body) ? user.id : post.author_id;
   await snapshotVersion(c.env, id, user.id);
   await c.env.DB.prepare(
-    'UPDATE content_posts SET title = ?, body = ?, content_type = ?, format = ?, updated_at = ? WHERE id = ?',
+    'UPDATE content_posts SET title = ?, body = ?, content_type = ?, format = ?, author_id = ?, updated_at = ? WHERE id = ?',
   )
-    .bind(version.title, normalizeBody(version.body), fmt.content_type, fmt.format, nowIso(), id)
+    .bind(version.title, body, fmt.content_type, fmt.format, author, nowIso(), id)
     .run();
   c.executionCtx.waitUntil(syncPostSafe(c.env, id));
   return c.json({ ok: true });

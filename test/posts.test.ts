@@ -287,3 +287,59 @@ describe('استرجاع نسخة', () => {
     expect(row('p1')).toMatchObject({ format: 'video', content_type: 'video' });
   });
 });
+
+describe('مسؤول التنفيذ', () => {
+  it('يعدّل الفكرة المسندة إليه، وأوّل نصٍّ يكتبه يجعله كاتبها', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    actor = 'usr_wri';
+    const r = await call('PATCH', '/posts/p1', { body: '<p>نص</p>' });
+    expect(r.status).toBe(200);
+    expect(r.json.idea).toBe(false);
+    expect(row('p1').author_id).toBe('usr_wri');
+  });
+
+  it('وتعديلُ حقول الخطة ونصٌّ فارغ لا ينقلان الكتابة', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    actor = 'usr_wri';
+    await call('PATCH', '/posts/p1', { planned_on: '2026-11-20', body: '<div><br></div>' });
+    expect(row('p1')).toMatchObject({ author_id: 'usr_mgr', planned_on: '2026-11-20' });
+  });
+
+  it('ومن خطّط فكرته وكتبها بقي كاتبها', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    await call('PATCH', '/posts/p1', { body: '<p>نص</p>' });
+    expect(row('p1').author_id).toBe('usr_mgr');
+  });
+
+  it('والمكتوبُ قبل الإسناد لا تنتقل كتابته بتحريره', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri', body: '<p>كتبه المدير</p>' });
+    actor = 'usr_wri';
+    await call('PATCH', '/posts/p1', { body: '<p>تحرير</p>' });
+    expect(row('p1').author_id).toBe('usr_mgr');
+  });
+
+  it('فيعتمده مخطّطه بعد أن يكتبه المسؤول — لا يعتمد المحتوى كاتبُه، والكاتب غيره', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    actor = 'usr_wri';
+    await call('PATCH', '/posts/p1', { body: '<p>نص</p>' });
+    expect((await call('POST', '/posts/p1/action', { action: 'submit' })).json.status).toBe('pending_marketing');
+    actor = 'usr_mgr';
+    const r = await call('POST', '/posts/p1/action', { action: 'approve' });
+    expect(r.status).toBe(200);
+    expect(r.json.status).toBe('pending_gm');
+  });
+
+  it('واسترجاعُ نسخةٍ بنصٍّ على فكرةٍ كتابةٌ لها كالحفظ', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    db.prepare("INSERT INTO content_versions (id,post_id,title,body,content_type,edited_by) VALUES ('v1','p1','قديم','<p>نص</p>','text','usr_mgr')").run();
+    actor = 'usr_wri';
+    expect((await call('POST', '/posts/p1/versions/v1/restore')).status).toBe(200);
+    expect(row('p1').author_id).toBe('usr_wri');
+  });
+
+  it('ولا يحذفها — الحذف لكاتبها وللمدير العام', async () => {
+    seedPost('p1', { author_id: 'usr_mgr', assignee_id: 'usr_wri' });
+    actor = 'usr_wri';
+    expect((await call('DELETE', '/posts/p1')).status).toBe(403);
+  });
+});
