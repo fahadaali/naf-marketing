@@ -7,6 +7,8 @@
    إلى مارس فيتخطّى التقويم فبراير. والحساب بـ`Date.UTC` وحده، والرياض +03:00
    ثابتةٌ بلا توقيتٍ صيفي. */
 
+import { sortPlatforms } from './platformKeys';
+
 export type YearMonth = { year: number; month: number }; // الشهر ١–١٢
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -68,4 +70,46 @@ export function monthCells(ym: YearMonth): { day: number | null; ymd: string | n
 /** تاريخٌ محلّيّ يحمل اليوم نفسه، لدوالّ `naf-format` التي تقرأ بالتوقيت المحلّي. */
 export function localDateOf({ year, month }: YearMonth, day = 1): Date {
   return new Date(year, month - 1, day);
+}
+
+/** صفّ موعدٍ كما يُرجعه `GET /schedules`: محتوى × منصة. */
+export type ScheduleRow = { id: string; post_id: string; platform: string; scheduled_at: string; title?: string };
+
+/** بطاقة المحتوى في يومه: منصاته وأوقاتها، لا بطاقةٌ لكل منصة. */
+export type DayCard = {
+  key: string;
+  post_id: string;
+  title: string;
+  /** أبكر موعدٍ للمحتوى في يومه — به تُرتَّب البطاقات. */
+  first_at: string;
+  platforms: string[];
+  slots: { platform: string; at: string }[];
+};
+
+/**
+ * المواعيد مجمّعةً بالمحتوى ويومه بتقويم الرياض: محتوى على ثلاث منصات بطاقةٌ
+ * واحدة بشعاراتها الثلاثة لا ثلاث بطاقات. ومحتوى نُقل موعدُ إحدى منصاته إلى يومٍ
+ * آخر يظهر في اليومين، كلٌّ بمنصاته فيه.
+ */
+export function groupByPostDay(rows: ScheduleRow[]): Record<string, DayCard[]> {
+  const cards = new Map<string, DayCard & { day: string }>();
+  for (const r of rows) {
+    const day = riyadhYmd(r.scheduled_at);
+    const key = `${r.post_id}|${day}`;
+    let c = cards.get(key);
+    if (!c) {
+      c = { key, day, post_id: r.post_id, title: r.title || '', first_at: r.scheduled_at, platforms: [], slots: [] };
+      cards.set(key, c);
+    }
+    c.slots.push({ platform: r.platform, at: r.scheduled_at });
+    if (Date.parse(r.scheduled_at) < Date.parse(c.first_at)) c.first_at = r.scheduled_at;
+  }
+  const byDay: Record<string, DayCard[]> = {};
+  for (const { day, ...c } of cards.values()) {
+    c.slots.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    c.platforms = sortPlatforms(c.slots.map((s) => s.platform));
+    (byDay[day] ||= []).push(c);
+  }
+  for (const list of Object.values(byDay)) list.sort((a, b) => Date.parse(a.first_at) - Date.parse(b.first_at));
+  return byDay;
 }

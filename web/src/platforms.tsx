@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Globe, MapPin } from 'lucide-react';
 import {
   XMark, TikTokMark, SnapchatMark, ThreadsMark,
   FacebookMark, YouTubeMark, InstagramMark, LinkedInMark,
 } from './components/brand/brand-marks';
 import { type PlatformKey, normalizePlatform } from './platformKeys';
+import { api } from './api';
 
 export { normalizePlatform, platformsOf, sortPlatforms } from './platformKeys';
 
@@ -90,6 +91,24 @@ export function PlatformIcon({ platform, size = 24, title }: { platform: string;
   return <span style={style} {...name}>{meta ? meta.glyph(size) : <Globe size={g(size)} />}</span>;
 }
 
+/* تسميات المنصات المخصّصة من الإعدادات (`platform_labels`) — تُجلب مرّةً في الجلسة
+   وتتشاركها كل الصفوف. وبدونها تُسمّى المنصة المخصّصة بمفتاحها الخام. والصمت قرار:
+   غيابُها يُبقي المفتاح ولا يُسقط شاشة. */
+let labelsOnce: Promise<Record<string, string>> | null = null;
+
+export function usePlatformLabels(): Record<string, string> | undefined {
+  const [labels, setLabels] = useState<Record<string, string>>();
+  useEffect(() => {
+    let live = true;
+    labelsOnce ||= api.get('/settings')
+      .then((d) => (d.settings?.platform_labels as Record<string, string>) || {})
+      .catch(() => ({}));
+    labelsOnce.then((l) => { if (live) setLabels(l); });
+    return () => { live = false; };
+  }, []);
+  return labels;
+}
+
 /**
  * صفّ شعارات منصات المحتوى — أعلى بطاقته أو فوق عنوانه في الجدول، فيُعرف المحتوى
  * الواحد بمنصاته بطاقةً واحدة لا بطاقةً لكل منصة. لا شيء حين لا منصات.
@@ -97,10 +116,12 @@ export function PlatformIcon({ platform, size = 24, title }: { platform: string;
 export function PlatformIcons({
   platforms, size = 16, custom,
 }: { platforms: string[]; size?: number; custom?: Record<string, string> }) {
+  const fetched = usePlatformLabels();
   if (!platforms.length) return null;
+  const labels = custom ?? fetched;
   return (
     <span className="row platform-row">
-      {platforms.map((p) => <PlatformIcon key={p} platform={p} size={size} title={platformLabel(p, custom)} />)}
+      {platforms.map((p) => <PlatformIcon key={p} platform={p} size={size} title={platformLabel(p, labels)} />)}
     </span>
   );
 }

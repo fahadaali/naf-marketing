@@ -354,7 +354,9 @@ h3, h4 { letter-spacing: -0.01em; }
 .auth-card p.sub { text-align: center; color: var(--muted-foreground); margin: var(--space-1) 0 var(--space-6); font-size: var(--text-sm); }
 
 /* ===== التقويم ===== */
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--space-2); }
+/* أعمدةٌ لا يوسّعها محتواها: بـ1fr وحده كان عنوانٌ طويل يمدّ عموده فتخرج الشبكة
+   عن شاشة الجوال. والعنوان يُقصّ بثلاث نقاط داخل عموده. */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--space-2); }
 .cal-head { text-align: center; font-weight: 600; color: var(--muted-foreground); font-size: var(--text-xs); padding: var(--space-2) 0; }
 .cal-cell { min-height: 96px; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-2); background: var(--card); font-size: var(--text-xs); }
 .cal-cell.other { background: color-mix(in oklab, var(--muted) 40%, transparent); opacity: .6; }
@@ -366,6 +368,13 @@ h3, h4 { letter-spacing: -0.01em; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cal-event:hover { background: var(--primary); color: var(--primary-foreground); }
+/* بطاقة المحتوى: شعارات منصاته أعلاها ثم عنوانه */
+.cal-event .platform-row { margin-bottom: var(--space-1); }
+.cal-event-title { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* على الشاشة الضيّقة تُمرَّر الشبكة أفقياً داخل بطاقتها كلوحة الكانبان، ولا تنضغط
+   أيامُها حتى يختفي العنوان. والحدّ الأدنى عرضُ الصفحة الضيّقة من رموز الثيم. */
+.cal-scroll { overflow-x: auto; }
+.cal-scroll .cal-grid { min-width: var(--page-narrow); }
 
 /* ===== Kanban ===== */
 .kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
