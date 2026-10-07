@@ -701,7 +701,7 @@ function NewsletterEditor({ id, onBack }: { id: string; onBack: () => void }) {
                         قَبولٍ لا ذوق: تجاوزه يعني بتر المنشور أو رفضه. */}
                     {(social.targets || []).filter((p: string) => p !== 'x' && socialPick[p]).map((p: string) => (
                       <div key={p}>
-                        <div className="muted row platform-row" style={{ margin: '8px 0 4px' }}>
+                        <div className="muted row platform-row" style={{ margin: 'var(--space-2) 0 var(--space-1)' }}>
                           <PlatformIcon platform={p} size={16} /> {platformLabel(p)} — <bdi>{(social.drafts?.[p] || '').length}</bdi>/<bdi>{social.limits?.[p]}</bdi>
                         </div>
                         <div className="card" style={{ padding: 8, whiteSpace: 'pre-wrap' }}>{social.drafts?.[p]}</div>
