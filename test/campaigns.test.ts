@@ -287,6 +287,16 @@ describe('تفاصيل الحملة', () => {
     expect(g.json.posts[0].author_name).toBe('مدير التسويق');
   });
 
+  it('يُرجع منصات المحتوى المجدولة لصفّ شعاراته', async () => {
+    const r = await newCampaign();
+    seedPost('p1', 'scheduled', r.json.id);
+    const s = db.prepare('INSERT INTO schedules (id,post_id,platform,scheduled_at,status) VALUES (?,?,?,?,?)');
+    s.run('s1', 'p1', 'x', '2026-11-01T09:00:00Z', 'pending');
+    s.run('s2', 'p1', 'linkedin', '2026-11-01T09:00:00Z', 'published');
+    const g = await call('GET', `/campaigns/${r.json.id}`);
+    expect(g.json.posts[0].scheduled_platforms.split(',').sort()).toEqual(['linkedin', 'x']);
+  });
+
   it('حملةٌ غير موجودة تعود ٤٠٤', async () => {
     expect((await call('GET', '/campaigns/camp_لا-شيء')).status).toBe(404);
   });

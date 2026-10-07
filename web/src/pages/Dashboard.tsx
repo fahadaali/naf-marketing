@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatNumber } from '../lib/format';
 import { api, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
+import { PlatformIcons, platformsOf } from '../platforms';
 import MetricCard, { type MetricReading } from '../components/MetricCard';
 import { useAuth } from '../auth';
 
@@ -134,7 +135,10 @@ export default function Dashboard() {
             <tbody>
               {posts.slice(0, 8).map((p) => (
                 <tr key={p.id}>
-                  <td><Link to={`/editor/${p.id}`}>{p.title}</Link></td>
+                  <td>
+                    <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                    <Link to={`/editor/${p.id}`}>{p.title}</Link>
+                  </td>
                   <td><StatusBadge status={displayStatus(p)} /></td>
                   <td>{p.author_name}</td>
                   <td className="muted"><bdi>{formatRiyadh(p.updated_at)}</bdi></td>

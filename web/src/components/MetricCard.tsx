@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { formatNumber } from '../lib/format';
 import { Money } from './Money';
 import TargetBadge from './TargetBadge';
+import { PLATFORM_META, PlatformIcon, normalizePlatform, platformLabel, usePlatformLabels } from '../platforms';
 import {
   CLASS_LABELS, REFERENCE_LABELS, SOURCE_LABELS,
   TREND_LABELS, UNIT_SUFFIX, dimensionLabel, targetStatus, trendIsGood, trendOf, trendPercent,
@@ -234,7 +235,7 @@ export default function MetricCard({
         <ul className="metric-breakdown">
           {m.breakdown.slice(0, 6).map((b) => (
             <li key={b.dim_value}>
-              <span>{dimensionLabel(m.dim_key, b.dim_value)}</span>
+              <DimensionLabel dimKey={m.dim_key} value={b.dim_value} />
               <div className="spacer" />
               <span className="metric-breakdown-value">
                 <MetricValue value={b.value} unit={m.unit} />
@@ -251,5 +252,21 @@ export default function MetricCard({
     <button type="button" className="card metric-card" onClick={() => onPick(m)}>
       {body}
     </button>
+  );
+}
+
+/**
+ * قيمة البُعد في تفصيل المؤشّر. ما وُزّع على المنصات يظهر بشعارها واسمها — كانت
+ * مفاتيحها تظهر خاماً («instagram»). والقناة منصةٌ حين تكون مفتاح منصةٍ معروفة
+ * (المحادثات المباشرة)، وإلا فهي قناة زيارةٍ تُعرض كما سمّاها مصدرها.
+ */
+function DimensionLabel({ dimKey, value }: { dimKey: string; value: string }) {
+  const labels = usePlatformLabels();
+  const isPlatform = dimKey === 'platform' || (dimKey === 'channel' && !!PLATFORM_META[normalizePlatform(value)]);
+  if (!isPlatform) return <span>{dimensionLabel(dimKey, value)}</span>;
+  return (
+    <span className="row platform-row">
+      <PlatformIcon platform={value} size={16} /> {platformLabel(value, labels)}
+    </span>
   );
 }

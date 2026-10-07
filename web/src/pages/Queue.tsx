@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatRiyadh } from '../api';
 import StatusBadge from '../components/StatusBadge';
+import { PlatformIcons, platformsOf } from '../platforms';
 
 // طابور الاعتماد — المنشورات بانتظار مراجعة/اعتماد.
 export default function Queue() {
@@ -46,7 +47,10 @@ export default function Queue() {
             <tbody>
               {posts.map((p) => (
                 <tr key={p.id}>
-                  <td>{p.title}</td>
+                  <td>
+                    <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                    {p.title}
+                  </td>
                   <td>{p.author_name}</td>
                   <td><StatusBadge status={p.status} /></td>
                   <td className="muted">{formatRiyadh(p.updated_at)}</td>

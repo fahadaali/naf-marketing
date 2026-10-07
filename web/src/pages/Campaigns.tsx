@@ -9,7 +9,7 @@ import { useAuth } from '../auth';
 import { formatDate, formatNumber, isolate } from '../lib/format';
 import { saveText } from '../lib/download';
 import { CampaignBadge } from '../components/StateBadge';
-import { PlatformIcon, platformLabel } from '../platforms';
+import { PlatformIcons, platformLabel, sortPlatforms } from '../platforms';
 import ConfirmModal from '../components/ConfirmModal';
 import { Popover } from '../components/Popover';
 import { DateRangePicker } from '../components/DatePicker';
@@ -413,12 +413,8 @@ function TableView({
               <td><CampaignBadge state={c.status} /></td>
               <td className="muted">{c.owner_name || '—'}</td>
               <td>
-                <span className="row platform-row">
-                  {parsePlatforms(c.target_platforms).map((p) => (
-                    <PlatformIcon key={p} platform={p} size={16} />
-                  ))}
-                  {parsePlatforms(c.target_platforms).length === 0 && <span className="muted">—</span>}
-                </span>
+                <PlatformIcons platforms={sortPlatforms(parsePlatforms(c.target_platforms))} />
+                {parsePlatforms(c.target_platforms).length === 0 && <span className="muted">—</span>}
               </td>
               <td>
                 <Duration from={c.start_date} to={c.end_date} />
@@ -491,6 +487,7 @@ function CampaignBoard({
                   onDragEnd={() => { setDragId(null); setOverCol(null); }}
                   onClick={() => onOpen(c.id)}
                 >
+                  <PlatformIcons platforms={sortPlatforms(parsePlatforms(c.target_platforms))} className="platforms-above" />
                   <div className="kanban-card-title">{c.name}</div>
                   <div className="row kanban-card-meta">
                     <span className="muted">

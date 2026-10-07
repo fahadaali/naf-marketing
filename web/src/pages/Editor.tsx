@@ -656,6 +656,7 @@ export default function Editor() {
         <ScheduleModal
           postId={postId}
           platforms={platforms}
+          labels={platLabels}
           onClose={() => setShowSchedule(false)}
           onDone={async (issues) => {
             setShowSchedule(false);
@@ -1205,7 +1206,7 @@ function RejectModal({ onClose, onReject }: { onClose: () => void; onReject: (re
 
 type ScheduleIssue = { platform: string; error: string };
 
-function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string; platforms: string[]; onClose: () => void; onDone: (issues: ScheduleIssue[]) => void }) {
+function ScheduleModal({ postId, platforms, labels, onClose, onDone }: { postId: string; platforms: string[]; labels: Record<string, string>; onClose: () => void; onDone: (issues: ScheduleIssue[]) => void }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [when, setWhen] = useState('');
   const [err, setErr] = useState('');
@@ -1235,8 +1236,8 @@ function ScheduleModal({ postId, platforms, onClose, onDone }: { postId: string;
         <label>المنصات</label>
         <div className="row">
           {platforms.map((p) => (
-            <button key={p} type="button" className={`btn sm ${selected.includes(p) ? '' : 'ghost'}`} onClick={() => toggle(p)}>
-              <PlatformIcon platform={p} size={20} /> {platformLabel(p)}
+            <button key={p} type="button" className={`btn sm ${selected.includes(p) ? '' : 'ghost'}`} aria-pressed={selected.includes(p)} onClick={() => toggle(p)}>
+              <PlatformIcon platform={p} size={20} /> {platformLabel(p, labels)}
             </button>
           ))}
         </div>

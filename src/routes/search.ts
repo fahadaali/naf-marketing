@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
+import { SCHEDULED_PLATFORMS_SQL } from '../services/planning';
 import { requireAuth } from '../middleware';
 
 export const searchRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -23,7 +24,8 @@ searchRoutes.get('/', async (c) => {
   const match = ftsQuery(q);
 
   const posts = await c.env.DB.prepare(
-    `SELECT p.id, p.title, p.status, snippet(content_search, 1, '«', '»', '…', 12) AS snippet
+    `SELECT p.id, p.title, p.status, p.planned_platforms, ${SCHEDULED_PLATFORMS_SQL},
+            snippet(content_search, 1, '«', '»', '…', 12) AS snippet
      FROM content_search cs
      JOIN content_posts p ON p.rowid = cs.rowid
      WHERE content_search MATCH ?

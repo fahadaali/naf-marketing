@@ -87,6 +87,15 @@ export const BRIEF_MAX = 2000;
 /** سقف قائمة الخطة — وما زاد عليه يُقال (`truncated`) ولا يُسقط صامتاً. */
 export const PLANNED_CAP = 1000;
 
+/**
+ * منصات المحتوى المجدولة فعلاً، مفصولةً بفاصلة («linkedin,x») — لصفّ الشعارات
+ * فوق عنوانه في القوائم، فيُعرف المحتوى بمنصاته بطاقةً واحدة لا بطاقةً لكل
+ * منصة. استعلامٌ فرعيّ على `p` بفهرس `idx_schedules_post` (0033)، ويجاور
+ * `planned_platforms` الذي تقرؤه الواجهة معه.
+ */
+export const SCHEDULED_PLATFORMS_SQL =
+  '(SELECT group_concat(DISTINCT sp.platform) FROM schedules sp WHERE sp.post_id = p.id) AS scheduled_platforms';
+
 /** «فكرة»: مسودةٌ لم يُكتب نصّها. والنصّ الفارغ مطبَّعٌ إلى '' عند كل كتابة. */
 export function isIdeaRow(p: { status: string; body: string | null }): boolean {
   return p.status === 'draft' && (p.body ?? '') === '';

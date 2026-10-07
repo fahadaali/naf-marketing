@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Lightbulb } from 'lucide-react';
 import { SOURCE_LABELS, displayStatus } from '../api';
 import StatusBadge from './StatusBadge';
+import { PlatformIcons, platformsOf } from '../platforms';
 
 /* لوحة المحتوى — أعمدةٌ بحالاته الثماني، بالسحب والإفلات.
 
@@ -96,6 +97,7 @@ export default function PostKanban({
                 onDragEnd={() => { setDragId(null); setOverCol(null); }}
                 onClick={() => onOpen(p)}
               >
+                <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
                 <div className="kanban-card-title">{p.title}</div>
                 <div className="row kanban-card-meta">
                   <span className="muted">{SOURCE_LABELS[p.source] || p.source}</span>
