@@ -169,14 +169,21 @@ export default function MetricCard({
   m,
   onPick,
   series,
+  compact = false,
 }: {
   m: MetricReading;
   onPick?: (m: MetricReading) => void;
   /** سلسلة المؤشر عبر فتراته — أقدمُها أوّلاً. تصل من نداءٍ واحد للوحة كلّها. */
   series?: number[];
+  /** الاسم والرقم واتجاهه وحدها — للوحة التحكم. والمرجعيات والتوزيع في التحليلات. */
+  compact?: boolean;
 }) {
   const ClassIcon = CLASS_ICON[m.class];
   const hasValue = m.value !== null;
+  /* مؤشرٌ موزّعٌ بلا مجموع — «مصدر كل عميل مؤهل» — رقمُه توزيعُه. فلا يُقال
+     عنه «لا قيمة مسجّلة» وتحته قيمه، والمختصرة تُبقي أوّل ثلاثة منه. */
+  const hasBreakdown = m.breakdown.length > 0;
+  const showBreakdown = hasBreakdown && (!compact || !hasValue);
 
   const body = (
     <>
@@ -194,7 +201,7 @@ export default function MetricCard({
         <div className="metric-value">
           <MetricValue value={m.value as number} unit={m.unit} />
         </div>
-      ) : (
+      ) : hasBreakdown ? null : (
         /* «لا قيمة مسجّلة» لا «لا توجد بيانات» — الشاشة الفارغة تدعو إلى فعل،
            وهذه تسمّي الفعلين المتاحين: التسجيل أو الربط. */
         <p className="metric-empty">
@@ -204,7 +211,7 @@ export default function MetricCard({
         </p>
       )}
 
-      <div className="row metric-foot">
+      {!compact && <div className="row metric-foot">
         <TargetChip m={m} />
         {/* المعيار القطاعي — المرجعية الثالثة. غير المستهدف: هذا ما عليه
             القطاع وذاك ما نلتزم به، وشركةٌ تبلغ مستهدفه وهو دون القطاع بلغ
@@ -228,14 +235,14 @@ export default function MetricCard({
             {REFERENCE_LABELS.review_due}
           </span>
         )}
-      </div>
+      </div>}
 
       {/* لا تقس ما لا تنوي التصرف بناءً عليه — أوّل ملاحظات الدليل الختامية. */}
-      {m.decision && <p className="metric-decision">{m.decision}</p>}
+      {!compact && m.decision && <p className="metric-decision">{m.decision}</p>}
 
-      {m.breakdown.length > 0 && (
+      {showBreakdown && (
         <ul className="metric-breakdown">
-          {m.breakdown.slice(0, 6).map((b) => (
+          {m.breakdown.slice(0, compact ? 3 : 6).map((b) => (
             <li key={b.dim_value}>
               <DimensionLabel metricKey={m.key} dimKey={m.dim_key} value={b.dim_value} />
               <div className="spacer" />

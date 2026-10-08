@@ -792,6 +792,11 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 .unlinked-toggle > .row > .muted { font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .unlinked-body { margin-block-start: var(--space-4); }
 
+/* خطّ الإنتاج في الرئيسية — المراحل سطراً واحداً يلتفّ على الشاشة الضيّقة */
+.pipeline-strip { column-gap: var(--space-5); row-gap: var(--space-3); }
+.pipeline-stage { gap: var(--space-2); }
+.pipeline-stage strong { font-variant-numeric: tabular-nums; }
+
 /* الشيفرون الأفقي يُقلب مع الاتجاه («قواعد القلب» في naf-icons.md). يُرسم
    للعربية، ويُقلب حين تُعرض الشاشة من اليسار وحده. */
 [dir="ltr"] .chev-dir { transform: scaleX(-1); }

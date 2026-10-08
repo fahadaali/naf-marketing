@@ -14,7 +14,15 @@ import { useAuth } from '../auth';
    تصف اتساع وصول — ولا واحد منها يقول إن كان الشهر أنتج عملاء.
 
    فصدرُ الشاشة الآن العشرةُ التي يقول الدليل إنها تُراجَع أسبوعياً، وخطُّ
-   الإنتاج تحتها: هو عملُ اليوم لمن يفتح اللوحة، لا مقياسُ نتيجته. */
+   الإنتاج تحتها: هو عملُ اليوم لمن يفتح اللوحة، لا مقياسُ نتيجته.
+
+   ثم صارت العشرةُ بتوزيعها ومرجعياتها وقراراتها، وسبعُ بطاقاتٍ للإنتاج،
+   شاشةَ تحليلاتٍ ثانية. فالرئيسية تحمل أوّل أربعةٍ مربوطة بترتيبها المعتمد
+   — الاسم والرقم واتجاهه — وخطَّ الإنتاج سطراً واحداً. والتفصيل كلّه، وما لم
+   يُربط مصدره، في التحليلات. */
+
+/** كم مؤشراً من اللوحة المختصرة تحمله الرئيسية. */
+const HOME_METRICS = 4;
 
 const STATUS_ORDER = ['idea', 'draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published', 'rejected'];
 
@@ -49,7 +57,10 @@ export default function Dashboard() {
     if (can('analytics.view')) {
       api.get('/metrics/board?period=weekly')
         .then((d) => {
-          const rows: MetricReading[] = d.metrics || [];
+          // الردّ مرتّبٌ بترتيب اللوحة المعتمد — فالأوائل من المربوط هم الأهمّ
+          const rows: MetricReading[] = (d.metrics || [])
+            .filter((m: MetricReading) => m.connected)
+            .slice(0, HOME_METRICS);
           setBoard(rows);
           if (!rows.length) return;
           const keys = rows.map((r) => r.key).join(',');
@@ -76,8 +87,8 @@ export default function Dashboard() {
       <p className="page-sub">نظرة عامة على المؤشرات القيادية وخط إنتاج المحتوى</p>
 
       {can('analytics.view') && (
-        <section style={{ marginBottom: 24 }}>
-          <div className="row" style={{ marginBottom: 12 }}>
+        <section style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="row" style={{ marginBottom: 'var(--space-3)' }}>
             <h3 style={{ margin: 0 }}>اللوحة المختصرة</h3>
             <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>هذا الأسبوع</span>
             <div className="spacer" />
@@ -97,32 +108,35 @@ export default function Dashboard() {
               </p>
             </div>
           ) : (
-            <div className="grid cols-3">
+            <div className="grid cols-4">
               {board.map((m) => (
-                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
+                <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} compact />
               ))}
             </div>
           )}
         </section>
       )}
 
-      <section style={{ marginBottom: 24 }}>
-        <h3 style={{ marginTop: 0, marginBottom: 12 }}>خط إنتاج المحتوى</h3>
+      <section style={{ marginBottom: 'var(--space-6)' }}>
+        <h3 style={{ marginTop: 0, marginBottom: 'var(--space-3)' }}>خط إنتاج المحتوى</h3>
         {postsErr ? (
           /* لا أصفارٌ حين لا تصل القائمة: صفرٌ في كل مرحلة رقمٌ يُقرأ
              حقيقةً، وهو هنا غيابُ خبرٍ لا خبرُ غياب. */
           <div className="card">
             <p className="err" style={{ margin: 0 }}>{postsErr}</p>
-            <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={loadPosts}>إعادة المحاولة</button>
+            <button className="btn ghost sm" style={{ marginTop: 'var(--space-2)' }} onClick={loadPosts}>إعادة المحاولة</button>
           </div>
         ) : (
-          <div className="grid cols-4">
-            {pipeline.map((p) => (
-              <div className="card stat" key={p.status}>
-                <div className="num"><bdi>{formatNumber(p.count)}</bdi></div>
-                <div className="label"><StatusBadge status={p.status} /></div>
-              </div>
-            ))}
+          /* سطرٌ واحد لا سبعُ بطاقات: المراحل تُقرأ متجاورةً كما تجري */
+          <div className="card">
+            <div className="row pipeline-strip">
+              {pipeline.map((p) => (
+                <span className="row pipeline-stage" key={p.status}>
+                  <StatusBadge status={p.status} />
+                  <strong><bdi>{formatNumber(p.count)}</bdi></strong>
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </section>
