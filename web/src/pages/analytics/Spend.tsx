@@ -3,8 +3,8 @@ import { Save } from 'lucide-react';
 import { api } from '../../api';
 import { formatNumber } from '../../lib/format';
 import { Money } from '../../components/Money';
-import { SOURCE_LABELS } from '../../metrics';
-import { PlatformIcon, platformLabel } from '../../platforms';
+import { SOURCE_LABELS, spendChannelOptions } from '../../metrics';
+import { PlatformIcon, spendChannelLabel, usePlatformLabels } from '../../platforms';
 
 /* الإنفاق الإعلاني — تقف عليه الطبقة الخامسة كلها.
 
@@ -25,6 +25,7 @@ export default function Spend({ canManage, period, start, onSaved }: {
   const [form, setForm] = useState({ platform: '', amount: '', impressions: '', clicks: '' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const labels = usePlatformLabels();
 
   function load() {
     api.get(`/metrics/spend?period=${period}&start=${start}`)
@@ -33,12 +34,14 @@ export default function Spend({ canManage, period, start, onSaved }: {
   }
   useEffect(load, [period, start]);
   useEffect(() => {
-    api.get('/settings').then((d) => {
-      const list: string[] = d.settings?.enabled_platforms || [];
+    const apply = (enabled: string[]) => {
+      const list = spendChannelOptions(enabled);
       setPlatforms(list);
       setForm((f) => (f.platform ? f : { ...f, platform: list[0] ?? '' }));
-      // الصمت قرار: قائمةُ منصاتٍ لحقل اختيار — والقراءة الأساسية أعلاه تُبلّغ
-    }).catch(() => {});
+    };
+    // الصمت قرار: قائمةُ منصاتٍ لحقل اختيار — والقراءة الأساسية أعلاه تُبلّغ.
+    // وبلا الإعدادات تبقى القناتان «إعلانات Google» و«أخرى»
+    api.get('/settings').then((d) => apply(d.settings?.enabled_platforms || [])).catch(() => apply([]));
   }, []);
 
   const total = rows.reduce((s, r) => s + (r.amount || 0), 0);
@@ -83,7 +86,7 @@ export default function Spend({ canManage, period, start, onSaved }: {
               <tr key={r.id}>
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <PlatformIcon platform={r.platform} size={16} /> {platformLabel(r.platform)}
+                    <PlatformIcon platform={r.platform} size={16} /> {spendChannelLabel(r.platform, labels)}
                   </span>
                 </td>
                 <td><Money value={r.amount} /></td>
@@ -107,9 +110,7 @@ export default function Spend({ canManage, period, start, onSaved }: {
           <div className="field" style={{ margin: 0, minWidth: 150 }}>
             <label htmlFor="sp-platform">المنصة</label>
             <select id="sp-platform" className="select" value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
-              {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
-              <option value="google">جوجل</option>
-              <option value="other">أخرى</option>
+              {platforms.map((p) => <option key={p} value={p}>{spendChannelLabel(p, labels)}</option>)}
             </select>
           </div>
           <div className="field" style={{ margin: 0, maxWidth: 140 }}>

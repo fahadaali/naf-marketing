@@ -112,6 +112,54 @@ export const SYNC_STATUS_LABELS: Record<string, string> = {
   sync_failed: 'تعذّر السحب',
 };
 
+/**
+ * اسم البُعد الذي يُفصَّل به المؤشّر — naf-terms §١٣ «أبعاد تفصيل المؤشّر».
+ * تسميةُ حقله في نموذج تسجيل القيمة؛ وكان الحقل يحمل مفتاحه (`platform`).
+ */
+export const DIMENSION_LABELS: Record<string, string> = {
+  platform: 'المنصة',
+  channel: 'القناة',
+  device: 'الجهاز',
+  source: 'المصدر',
+  keyword: 'الكلمة المفتاحية',
+  city: 'المدينة',
+  cohort: 'الدفعة',
+  company_size: 'حجم المنشأة',
+  content_type: 'نوع المحتوى',
+  industry: 'القطاع',
+  interest: 'الاهتمام',
+  job_title: 'المسمى الوظيفي',
+  page: 'الصفحة',
+  reason: 'السبب',
+  segment: 'الشريحة',
+  seniority: 'الأقدمية الوظيفية',
+  sentiment: 'المشاعر',
+  service: 'الخدمة',
+  signal: 'الإشارة',
+  stage: 'المرحلة',
+  time_slot: 'التوقيت',
+  test: 'الاختبار',
+};
+
+/**
+ * قنوات الإنفاق الإعلاني غير منصات التواصل — naf-terms §١٣. و`google` في سجلّ
+ * الإنفاق إعلاناتٌ لا الملف التجاري: لا إنفاق على الملف، فالمفتاح واحدٌ والمعنى
+ * يتبع سجلَّه. واسم العلامة لاتينيٌّ معزول الاتجاه (CLAUDE.md §٢).
+ */
+export const SPEND_CHANNEL_LABELS: Record<string, string> = {
+  google: 'إعلانات ⁨Google⁩',
+  other: 'أخرى',
+};
+
+/**
+ * خيارات قناة الإنفاق: المنصات المفعّلة ثم القناتان. و`google` المفعّلة ملفٌّ
+ * تجاري لا يُنفَق عليه، فتسقط من الأولى كي لا يظهر الحرف G مرّتين باسمين.
+ */
+export function spendChannelOptions(enabled: readonly string[]): string[] {
+  const own = Object.keys(SPEND_CHANNEL_LABELS);
+  return [...enabled.filter((p) => !own.includes(p)), ...own];
+}
+
 /** أسماء الأيام — لبُعد «التفاعل حسب التوقيت» المخزَّن `يوم-ساعة` رقمين. */
 const DAY_NAMES = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 

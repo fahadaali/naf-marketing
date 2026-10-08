@@ -13,6 +13,7 @@ import {
   PLATFORM_AR, platformName, platformNames, normalizePlatformKey, scheduleNote, noteForDisplay, customPlatformLabels,
 } from '../src/platformLabels';
 import { normalizePlatform, PLATFORM_KEYS } from '../web/src/platformKeys';
+import { DIMENSION_LABELS, SPEND_CHANNEL_LABELS, spendChannelOptions } from '../web/src/metrics';
 import { scheduleRoutes } from '../src/routes/schedules';
 import { postRoutes } from '../src/routes/posts';
 import { notifyPublishFailed } from '../src/services/notify';
@@ -210,5 +211,27 @@ describe('التقرير المرفوع', () => {
     expect(byPlatform.sort()).toEqual(['إكس', 'نشاطي التجاري (⁨Google⁩)'].sort());
     const byPost = sheet('تحليلات المنشورات').slice(1).map((r) => r[1]);
     expect(byPost.sort()).toEqual(['إكس', 'نشاطي التجاري (⁨Google⁩)'].sort());
+  });
+});
+
+describe('مفردات المؤشّرات في الواجهة', () => {
+  it('أسماء أبعاد التفصيل نسخة السجلّ حرفياً', () => {
+    expect(DIMENSION_LABELS).toEqual(termsTable('أبعاد تفصيل المؤشّر'));
+  });
+
+  it('لكل بُعدٍ في تعريفات المؤشّرات اسمٌ — فلا يظهر مفتاحه تسميةً', () => {
+    const dims = db.prepare("SELECT DISTINCT dim_key FROM metric_definitions WHERE dim_key <> ''").all().map((r: any) => r.dim_key);
+    expect(dims.length).toBeGreaterThan(0);
+    expect(dims.filter((k: string) => !DIMENSION_LABELS[k])).toEqual([]);
+  });
+
+  it('قنوات الإنفاق نسخة السجلّ — و`google` فيها إعلاناتٌ لا الملف التجاري', () => {
+    const copy = Object.fromEntries(Object.entries(SPEND_CHANNEL_LABELS).map(([k, v]) => [k, v.replace(ISOLATES, '')]));
+    expect(copy).toEqual(termsTable('قنوات الإنفاق الإعلاني'));
+  });
+
+  it('خيارات قناة الإنفاق: المفعّلة ثم القناتان، والحرف G مرّةً واحدة', () => {
+    expect(spendChannelOptions(['linkedin', 'google', 'x'])).toEqual(['linkedin', 'x', 'google', 'other']);
+    expect(spendChannelOptions([])).toEqual(['google', 'other']);
   });
 });

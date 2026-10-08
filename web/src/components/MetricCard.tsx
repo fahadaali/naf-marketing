@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { formatNumber } from '../lib/format';
 import { Money } from './Money';
 import TargetBadge from './TargetBadge';
-import { PLATFORM_META, PlatformIcon, normalizePlatform, platformLabel, usePlatformLabels } from '../platforms';
+import { PLATFORM_META, PlatformIcon, normalizePlatform, platformLabel, spendChannelLabel, usePlatformLabels } from '../platforms';
 import {
   CLASS_LABELS, REFERENCE_LABELS, SOURCE_LABELS,
   TREND_LABELS, UNIT_SUFFIX, dimensionLabel, targetStatus, trendIsGood, trendOf, trendPercent,
@@ -235,7 +235,7 @@ export default function MetricCard({
         <ul className="metric-breakdown">
           {m.breakdown.slice(0, 6).map((b) => (
             <li key={b.dim_value}>
-              <DimensionLabel dimKey={m.dim_key} value={b.dim_value} />
+              <DimensionLabel metricKey={m.key} dimKey={m.dim_key} value={b.dim_value} />
               <div className="spacer" />
               <span className="metric-breakdown-value">
                 <MetricValue value={b.value} unit={m.unit} />
@@ -258,15 +258,17 @@ export default function MetricCard({
 /**
  * قيمة البُعد في تفصيل المؤشّر. ما وُزّع على المنصات يظهر بشعارها واسمها — كانت
  * مفاتيحها تظهر خاماً («instagram»). والقناة منصةٌ حين تكون مفتاح منصةٍ معروفة
- * (المحادثات المباشرة)، وإلا فهي قناة زيارةٍ تُعرض كما سمّاها مصدرها.
+ * (المحادثات المباشرة)، وإلا فهي قناة زيارةٍ تُعرض كما سمّاها مصدرها. والإنفاق
+ * الإعلاني بقناته: `google` فيه «إعلانات Google» لا الملف التجاري (naf-terms §١٣).
  */
-function DimensionLabel({ dimKey, value }: { dimKey: string; value: string }) {
+function DimensionLabel({ metricKey, dimKey, value }: { metricKey: string; dimKey: string; value: string }) {
   const labels = usePlatformLabels();
   const isPlatform = dimKey === 'platform' || (dimKey === 'channel' && !!PLATFORM_META[normalizePlatform(value)]);
   if (!isPlatform) return <span>{dimensionLabel(dimKey, value)}</span>;
+  const name = metricKey === 'ad_spend' ? spendChannelLabel(value, labels) : platformLabel(value, labels);
   return (
     <span className="row platform-row">
-      <PlatformIcon platform={value} size={16} /> {platformLabel(value, labels)}
+      <PlatformIcon platform={value} size={16} /> {name}
     </span>
   );
 }
