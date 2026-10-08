@@ -22,6 +22,12 @@ export const PLATFORM_AR: Record<string, string> = {
   threads: 'ثريدز',
 };
 
+/* قنوات القياس غير منصات التواصل — naf-terms §١٣ «قنوات القياس». أرقام النشرات
+   تُقيَّد في التحليلات بقناة `email`، وكان المفتاح يُكتب في التقرير المرفوع خاماً. */
+export const MEASUREMENT_CHANNEL_AR: Record<string, string> = {
+  email: 'النشرة البريدية',
+};
+
 // مرادفات المزوّدين ← مفاتيحنا — الخريطة نفسها في `web/src/platformKeys.ts`
 const ALIASES: Record<string, string> = {
   twitter: 'x',
@@ -43,11 +49,12 @@ export function normalizePlatformKey(key: string): string {
 
 /**
  * اسم المنصة كما يُكتب للقارئ: الاسم المخصّص من الإعدادات أولاً (منصةٌ أضافها
- * المدير العام)، ثم الاسم المسجّل، ثم المفتاح نفسه لمنصةٍ لا اسم لها.
+ * المدير العام)، ثم الاسم المسجّل — منصةً أو قناة قياس — ثم المفتاح نفسه لمنصةٍ
+ * لا اسم لها.
  */
 export function platformName(key: string, custom: Record<string, string> = {}): string {
   const k = normalizePlatformKey(key);
-  return custom[key] || custom[k] || PLATFORM_AR[k] || key;
+  return custom[key] || custom[k] || PLATFORM_AR[k] || MEASUREMENT_CHANNEL_AR[k] || key;
 }
 
 /** أسماء منصاتٍ متعدّدة بالفاصلة العربية — naf-terms «ملاحظة الجدولة». */

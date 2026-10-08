@@ -10,10 +10,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  PLATFORM_AR, platformName, platformNames, normalizePlatformKey, scheduleNote, noteForDisplay, customPlatformLabels,
+  PLATFORM_AR, MEASUREMENT_CHANNEL_AR, platformName, platformNames, normalizePlatformKey, scheduleNote, noteForDisplay,
+  customPlatformLabels,
 } from '../src/platformLabels';
 import { normalizePlatform, PLATFORM_KEYS } from '../web/src/platformKeys';
-import { DIMENSION_LABELS, SPEND_CHANNEL_LABELS, spendChannelOptions } from '../web/src/metrics';
+import { DIMENSION_LABELS, MEASUREMENT_CHANNEL_LABELS, SPEND_CHANNEL_LABELS, spendChannelOptions } from '../web/src/metrics';
 import { scheduleRoutes } from '../src/routes/schedules';
 import { postRoutes } from '../src/routes/posts';
 import { notifyPublishFailed } from '../src/services/notify';
@@ -95,6 +96,12 @@ describe('أسماء المنصات في الخادم', () => {
     const web: Record<string, string> = {};
     for (const m of src.matchAll(/^ {2}(\w+): \{\s*label: '([^']+)'/gm)) web[m[1]] = m[2].replace(/\\u(\w{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
     expect(web).toEqual(PLATFORM_AR);
+  });
+
+  it('قنوات القياس نسخة السجلّ، والواجهة والخادم على الاسم نفسه', () => {
+    expect(MEASUREMENT_CHANNEL_AR).toEqual(termsTable('قنوات القياس'));
+    expect(MEASUREMENT_CHANNEL_LABELS).toEqual(MEASUREMENT_CHANNEL_AR);
+    expect(platformName('email')).toBe('النشرة البريدية');
   });
 
   it('مرادفات المزوّدين تتوحّد كما في الواجهة', () => {
@@ -197,6 +204,7 @@ describe('التقرير المرفوع', () => {
     const snap = db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, title, reach, impressions, engagement, captured_at) VALUES (?, ?, ?, 'دليل الاشتراك', 10, 20, 3, ?)");
     snap.run('s1', 'pp1', 'twitter', now);
     snap.run('s2', 'pp2', 'googlebusiness', now);
+    snap.run('s3', 'pp3', 'email', now);
 
     const { sheets } = await buildReportWorkbook(env(), 'week');
     const sheet = (name: string) => sheets.find((s) => s.name === name)!.rows;
@@ -207,10 +215,9 @@ describe('التقرير المرفوع', () => {
 
     expect(sheet('سجل الاعتمادات')[1][4]).toBe('جدولة على: إكس، لينكدإن');
 
-    const byPlatform = sheet('تحليلات المنصات').slice(1).map((r) => r[0]);
-    expect(byPlatform.sort()).toEqual(['إكس', 'نشاطي التجاري (⁨Google⁩)'].sort());
-    const byPost = sheet('تحليلات المنشورات').slice(1).map((r) => r[1]);
-    expect(byPost.sort()).toEqual(['إكس', 'نشاطي التجاري (⁨Google⁩)'].sort());
+    const names = ['إكس', 'نشاطي التجاري (⁨Google⁩)', 'النشرة البريدية'].sort();
+    expect(sheet('تحليلات المنصات').slice(1).map((r) => r[0]).sort()).toEqual(names);
+    expect(sheet('تحليلات المنشورات').slice(1).map((r) => r[1]).sort()).toEqual(names);
   });
 });
 

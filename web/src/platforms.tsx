@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Globe } from 'lucide-react';
+import { Globe, Mails } from 'lucide-react';
 import {
   XMark, TikTokMark, SnapchatMark, ThreadsMark,
   FacebookMark, YouTubeMark, InstagramMark, LinkedInMark, GoogleMark,
 } from './components/brand/brand-marks';
 import { type PlatformKey, normalizePlatform } from './platformKeys';
-import { SPEND_CHANNEL_LABELS } from './metrics';
+import { MEASUREMENT_CHANNEL_LABELS, SPEND_CHANNEL_LABELS } from './metrics';
 import { api } from './api';
 
 export { normalizePlatform, platformsOf, sortPlatforms } from './platformKeys';
@@ -65,8 +65,14 @@ export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
 
 export function platformLabel(key: string, custom?: Record<string, string>): string {
   const k = normalizePlatform(key);
-  return custom?.[key] || custom?.[k] || PLATFORM_META[k]?.label || key;
+  return custom?.[key] || custom?.[k] || PLATFORM_META[k]?.label || MEASUREMENT_CHANNEL_LABELS[k] || key;
 }
+
+/* قناة القياس ليست علامة: أيقونتها المسجّلة على سطح المنصة غير المعروفة نفسه —
+   naf-icons «شعارات المنصات»، والنشرة `Mails` «نشرة بريدية» لا `Globe`. */
+const CHANNEL_GLYPH: Record<string, (size: number) => ReactNode> = {
+  email: (s) => <Mails size={g(s)} />,
+};
 
 /** قناة الإنفاق الإعلاني باسمها: `google` «إعلانات Google» هنا، وسواها منصةٌ باسمها. */
 export function spendChannelLabel(key: string, custom?: Record<string, string>): string {
@@ -79,7 +85,8 @@ export function spendChannelLabel(key: string, custom?: Record<string, string>):
 // الاسم مرتين. ووحدها يُمرَّر لها `title`: فتصير صورةً مسمّاةً وتلميحاً عند المرور
 // — الاسم يبقى تسميةً حين يغيب نصّه (naf-terms.md، «كل المنصات»).
 export function PlatformIcon({ platform, size = 24, title }: { platform: string; size?: number; title?: string }) {
-  const meta = PLATFORM_META[normalizePlatform(platform)];
+  const key = normalizePlatform(platform);
+  const meta = PLATFORM_META[key];
   const style: React.CSSProperties = {
     width: size,
     height: size,
@@ -95,7 +102,8 @@ export function PlatformIcon({ platform, size = 24, title }: { platform: string;
     flexShrink: 0,
   };
   const name = title ? { role: 'img', 'aria-label': title, title } : { 'aria-hidden': true };
-  return <span style={style} {...name}>{meta ? meta.glyph(size) : <Globe size={g(size)} />}</span>;
+  const glyph = meta ? meta.glyph(size) : CHANNEL_GLYPH[key]?.(size) ?? <Globe size={g(size)} />;
+  return <span style={style} {...name}>{glyph}</span>;
 }
 
 /* تسميات المنصات المخصّصة من الإعدادات (`platform_labels`) — تُجلب مرّةً في الجلسة
