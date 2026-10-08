@@ -234,7 +234,8 @@ async function pullWithLimits(
     } else if (history) {
       // سجلُّ المزوّدين الآخرين يُقرأ مع كل سحبٍ معتاد — لا مسار له مستقلّ
     } else if (providerName === 'buffer') captured = await pullAllBuffer(env);
-    else captured = await pullViaSchedules(env);
+    // التجريبي لا يقيس — لا لقطة تُكتب منه (انظر `adapters/mock.ts`)
+    else if (providerName !== 'mock') captured = await pullViaSchedules(env);
   } catch (err) {
     report.errors.push(errorText(err));
   }

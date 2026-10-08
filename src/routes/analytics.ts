@@ -114,8 +114,8 @@ analyticsRoutes.get('/dashboard', async (c) => {
     topPosts: topPosts.results,
     pipeline: pipeline.results,
     campaigns: campaigns.results,
-    /* ألواح المنصة كلُّها من لقطات المزوّد — والتجريبي يولّدها من بصمة
-       المعرّف. فالشاشة تُنزلها إلى «غير مربوط» ما لم يكن المزوّد حقيقياً. */
+    /* ألواح المنصة كلُّها من لقطات المزوّد — والتجريبي لا يكتب لقطة. فالشاشة
+       تُنزلها إلى «غير مربوط» ما لم يكن المزوّد حقيقياً. */
     provider_connected: await publishingProviderConnected(c.env),
   });
 });
