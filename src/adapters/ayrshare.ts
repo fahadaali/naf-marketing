@@ -1,5 +1,5 @@
 import type {
-  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult,
+  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult, ModerateAction,
 } from './provider';
 import { BudgetExhausted, CallBudget, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
@@ -185,7 +185,19 @@ export async function ayrshareCall<T = any>(
    والاسم يختلف موضعه: يوتيوب `channelTitle` (و`displayName` فيه اسم صاحب
    حساب جوجل لا القناة)، ولينكدإن `type` يفرّق الصفحة من الحساب الشخصي. */
 
-export type AyrshareAccount = { id: string; platform: string; name: string; messaging: boolean };
+export type AyrshareAccount = {
+  id: string;
+  platform: string;
+  name: string;
+  messaging: boolean;
+  /** معرّفات الحساب وأسماؤه بحروفٍ صغيرة — بها يُعرف ردٌّ كتبه حسابُنا. */
+  ownerKeys: string[];
+};
+
+/** مفتاحٌ موحَّد للمقارنة: بحروفٍ صغيرة وبلا «@». */
+export function ownerKey(v: unknown): string {
+  return String(v ?? '').trim().replace(/^@/, '').toLowerCase();
+}
 
 /** مفتاح المنصة عندنا من حسابٍ في `displayNames`. */
 export function ayrshareAccountPlatform(entry: any): string {
@@ -205,6 +217,9 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
       platform: ayrshareAccountPlatform(e),
       name: String(e.channelTitle || e.pageName || e.displayName || e.username || ''),
       messaging: e.messagingActive === true,
+      ownerKeys: [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle]
+        .map(ownerKey)
+        .filter(Boolean),
     }));
 }
 
@@ -347,11 +362,90 @@ export class AyrshareProvider implements PublishingProvider {
     try { await this.call('DELETE', '/post', { id: providerPostId }); } catch { /* لا يُعطّل */ }
   }
 
-  /* ═══ التحليلات — مسارٌ أوّليّ ═══
-     `POST /analytics/post` بمعرّف Ayrshare، والردّ خريطةٌ باسم المنصة.
-     والتعليقات والرسائل والمراجعات لها دفعتها: الردّ على تعليقٍ لم يُنشر
-     عبر Ayrshare يشترط المنصة ومعرّفاً خاصاً بلينكدإن وتيك توك، وكان المسار
-     القديم يرسله بلا شيءٍ منها. فبقي المزوّد بلا صندوقٍ حتى يُبنى كاملاً. */
+  /* ═══ الردّ والإشراف ═══
+
+     بمعرّفات المنصة لا بمعرّفات Ayrshare: التعليق كُتب على المنصة لا عبره.
+     وما لا تتيحه المنصة بمعرّفها يُقال بسببه قبل أيّ طلب. */
+
+  private unsupported(what: string, platform: string): never {
+    throw new Error(`${what} على ${platformNames([ayrshareAccountPlatform({ platform })], this.labels)} غير متاح عبر Ayrshare. افعله من تطبيق المنصة`);
+  }
+
+  async replyComment(_providerPostId: string, commentId: string, text: string): Promise<string> {
+    const d = decodeAyrshareId(commentId);
+    if (!d) throw new Error('عنصرٌ لا يُعرف مصدره في Ayrshare — حدّث الصندوق ثم أعد المحاولة');
+
+    if (d.type === 'review') {
+      const res = await this.call<any>('POST', '/reviews', { platform: d.platform, reviewId: d.reviewId, reply: text });
+      return String(res?.[d.platform]?.id ?? '');
+    }
+    if (d.type === 'dm') {
+      if (!d.participantId) throw new Error('لا يُعرف المُراسِل في هذه المحادثة — حدّث الصندوق ثم أعد المحاولة');
+      const res = await this.call<any>('POST', `/messages/${d.platform}`, { recipientId: d.participantId, message: text });
+      return String(res?.messageId ?? '');
+    }
+    if (!REPLY_BY_SOCIAL_ID.has(d.platform)) this.unsupported('الردّ على التعليقات', d.platform);
+    const body: Record<string, unknown> = { platforms: [d.platform], comment: text, searchPlatformId: true };
+    if (d.platform === 'linkedin') body.commentUrn = d.urn || d.commentId;
+    if (d.platform === 'tiktok') body.videoId = d.postId;
+    const res = await this.call<any>('POST', `/comments/reply/${encodeURIComponent(d.commentId)}`, body);
+    // معرّف الردّ الجديد على المنصة — به يُعدَّل ويُحذف لاحقاً
+    return String(res?.[d.platform]?.commentId ?? '');
+  }
+
+  /** حذف تعليقٍ بمعرّفه على المنصة — ردُّنا أو تعليق عميل. */
+  private async deleteSocialComment(platform: string, socialCommentId: string): Promise<void> {
+    if (!DELETE_BY_SOCIAL_ID.has(platform)) this.unsupported('حذف التعليق', platform);
+    await this.call('DELETE', `/comments/${encodeURIComponent(socialCommentId)}`, { searchPlatformId: true, platform });
+  }
+
+  async editReply(commentId: string, replyProviderId: string | null, text: string): Promise<string> {
+    const d = decodeAyrshareId(commentId);
+    if (!d) throw new Error('عنصرٌ لا يُعرف مصدره في Ayrshare — حدّث الصندوق ثم أعد المحاولة');
+    // ردُّ الملف التجاري يُستبدل بإرسال ردٍّ جديد على المراجعة نفسها
+    if (d.type === 'review') {
+      if (d.platform !== 'gmb') this.unsupported('تعديل الردّ على المراجعة', d.platform);
+      return this.replyComment('', commentId, text);
+    }
+    if (d.type === 'dm') throw new Error('الرسالة الخاصة لا تُعدَّل بعد إرسالها. أرسل رسالةً جديدة');
+    /* المنصات لا تتيح تعديل التعليق: يُكتب الجديد ثم يُحذف القديم — بهذا
+       الترتيب، فلا يبقى التعليق بلا ردٍّ إن تعذّر الحذف. */
+    if (replyProviderId && !DELETE_BY_SOCIAL_ID.has(d.platform)) this.unsupported('تعديل الردّ', d.platform);
+    const fresh = await this.replyComment('', commentId, text);
+    if (replyProviderId) await this.deleteSocialComment(d.platform, replyProviderId);
+    return fresh;
+  }
+
+  async deleteReply(commentId: string, replyProviderId: string | null): Promise<void> {
+    const d = decodeAyrshareId(commentId);
+    if (!d) throw new Error('عنصرٌ لا يُعرف مصدره في Ayrshare — حدّث الصندوق ثم أعد المحاولة');
+    if (d.type === 'review') {
+      if (d.platform !== 'gmb') this.unsupported('حذف الردّ على المراجعة', d.platform);
+      await this.call('DELETE', '/reviews', { platform: 'gmb', reviewId: d.reviewId });
+      return;
+    }
+    if (d.type === 'dm') throw new Error('الرسالة الخاصة لا تُحذف عبر Ayrshare');
+    if (!replyProviderId) throw new Error('لا يُعرف معرّف الردّ على المنصة — احذفه من تطبيق المنصة');
+    await this.deleteSocialComment(d.platform, replyProviderId);
+  }
+
+  async moderateComment(commentId: string, action: ModerateAction): Promise<void> {
+    const d = decodeAyrshareId(commentId);
+    if (!d || d.type !== 'comment') throw new Error('الإشراف للتعليقات وحدها');
+    if (action === 'delete') return this.deleteSocialComment(d.platform, d.commentId);
+    // تيك توك وحده يُخفى عبر Ayrshare، ولا يُظهَر بعدها إلا من TikTok Studio
+    if (action === 'hide' && d.platform === 'tiktok') {
+      await this.call('DELETE', `/comments/${encodeURIComponent(d.commentId)}`, {
+        searchPlatformId: true, platform: 'tiktok', hide: true, videoId: d.postId,
+      });
+      return;
+    }
+    this.unsupported(action === 'hide' ? 'إخفاء التعليق' : action === 'unhide' ? 'إظهار التعليق' : 'الإعجاب بالتعليق', d.platform);
+  }
+
+  /* ═══ أرقام منشورٍ واحد ═══
+     تشترطها الواجهة، ولا يناديها السحب: Ayrshare يُسحب كلُّه في
+     `pullAllAyrshare` بمعرّفات المنصات مئةً في الطلب. */
 
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
     const data = await this.call<any>('POST', '/analytics/post', { id: providerPostId });
@@ -688,4 +782,219 @@ export async function ayrshareReviewSummary(auth: AyrshareAuth): Promise<{ count
   const count = num(data?.totalReviewCount);
   if (!count) return null;
   return { count, average: num(data?.averageRating) };
+}
+
+/* ═══ الصندوق: التعليقات والرسائل والمراجعات ═══
+
+   المعرّف المحفوظ لكل عنصر يحمل ما يلزم للردّ عليه لاحقاً، مفصولاً بـ «|»
+   (لا يرد في معرّفات المنصات، ومعرّفات لينكدإن فيها «:» و«,»):
+   - تعليق: `ayc|منصة|منشور|تعليق|urn` — لينكدإن يشترط `commentUrn` للردّ،
+     وتيك توك يشترط معرّف المقطع وهو المنشور نفسه.
+   - رسالة: `ayd|منصة|محادثة|مُراسِل` — الردّ يُرسل إلى المُراسِل.
+   - مراجعة: `ayr|منصة|مراجعة`.
+
+   وما تتيحه كل منصة بمعرّف المنصة (لا بمعرّف Ayrshare) من صفحات التوثيق:
+   الردّ لفيسبوك وإنستغرام ولينكدإن وتيك توك وإكس، والحذف لما سوى لينكدإن،
+   والإخفاء لتيك توك وحده. */
+
+export const AYRSHARE_COMMENT_PLATFORMS = new Set(['facebook', 'instagram', 'linkedin', 'tiktok', 'twitter', 'youtube', 'threads']);
+const REPLY_BY_SOCIAL_ID = new Set(['facebook', 'instagram', 'linkedin', 'tiktok', 'twitter']);
+const DELETE_BY_SOCIAL_ID = new Set(['facebook', 'instagram', 'tiktok', 'twitter', 'youtube', 'threads']);
+export const AYRSHARE_DM_PLATFORMS = new Set(['facebook', 'instagram', 'twitter']);
+export const AYRSHARE_REVIEW_PLATFORMS = new Set(['gmb', 'facebook']);
+
+type Decoded =
+  | { type: 'comment'; platform: string; postId: string; commentId: string; urn: string }
+  | { type: 'dm'; platform: string; conversationId: string; participantId: string }
+  | { type: 'review'; platform: string; reviewId: string };
+
+export function encodeAyrshareComment(platform: string, postId: string, commentId: string, urn = ''): string {
+  return ['ayc', platform, postId, commentId, urn].join('|');
+}
+
+export function decodeAyrshareId(id: string): Decoded | null {
+  const [tag, platform, a = '', b = '', c = ''] = String(id || '').split('|');
+  if (tag === 'ayc' && platform && b) return { type: 'comment', platform, postId: a, commentId: b, urn: c };
+  if (tag === 'ayd' && platform && a) return { type: 'dm', platform, conversationId: a, participantId: b };
+  if (tag === 'ayr' && platform && a) return { type: 'review', platform, reviewId: a };
+  return null;
+}
+
+/** عنصرٌ في الصندوق — بشكل `InboxItem` الذي تكتبه `writeItems`. */
+export type AyrshareInboxItem = {
+  id: string;
+  platform: string;
+  kind: 'comment' | 'dm' | 'review';
+  authorName: string;
+  body: string;
+  createdAt: string;
+  capabilities?: Record<string, boolean>;
+  isHidden?: boolean;
+  repliedBody?: string | null;
+  repliedAt?: string | null;
+  rating?: number | null;
+};
+
+function isoOr(v: unknown, fallback: string): string {
+  return isoOrNull(v) ?? fallback;
+}
+
+/**
+ * أكتبه حسابُنا؟ لا علامة واحدة عبر المنصات: ثريدز `isReplyOwnedByMe`،
+ * وتيك توك `owner` (كاتبه صاحب المقطع)، وفيسبوك `company` (الصفحة نفسها).
+ * وما سواها بمطابقة الكاتب على معرّفات الحساب وأسمائه.
+ */
+export function isOwnAyrshareComment(c: any, ownerKeys: string[]): boolean {
+  if (c?.isReplyOwnedByMe === true || c?.owner === true || c?.company === true) return true;
+  const keys = new Set(ownerKeys);
+  const authors = [c?.from?.id, c?.from?.username, c?.from?.name, c?.user?.id, c?.userId, c?.userName, c?.username]
+    .map(ownerKey)
+    .filter(Boolean);
+  return authors.some((a) => keys.has(a));
+}
+
+function authorOf(c: any): string {
+  return String(c?.from?.name || c?.from?.username || c?.displayName || c?.name || c?.userName || c?.username || 'مستخدم');
+}
+
+/**
+ * تعليقات منشورٍ من ردّ `GET /comments/:id` — ما كتبه عملاؤنا وحده، ومعه
+ * ردُّنا إن وُجد (كُتب من تطبيق المنصة أو من هنا). وإكس لا يُعشّش الردود:
+ * ردودُه مسطّحة، وردُّنا يُعرف بأنه من حسابنا ويُشير إلى التعليق.
+ */
+export function mapAyrshareComments(platform: string, postId: string, data: any, ownerKeys: string[]): AyrshareInboxItem[] {
+  const list: any[] = Array.isArray(data?.[platform]) ? data[platform] : [];
+  const now = new Date().toISOString();
+
+  // إكس: ردودنا مسطّحة — تُفهرس بالتعليق الذي تردّ عليه
+  const ownByParent = new Map<string, any>();
+  for (const c of list) {
+    if (!isOwnAyrshareComment(c, ownerKeys)) continue;
+    const parents = [
+      ...(Array.isArray(c?.referencedTweets) ? c.referencedTweets.filter((r: any) => r?.type === 'replied_to').map((r: any) => r.id) : []),
+      c?.parentId,
+    ].filter(Boolean).map(String);
+    for (const p of parents) ownByParent.set(p, c);
+  }
+
+  const out: AyrshareInboxItem[] = [];
+  for (const c of list) {
+    const commentId = String(c?.commentId ?? c?.id ?? '');
+    const body = String(c?.comment ?? c?.text ?? '').trim();
+    if (!commentId || !body || isOwnAyrshareComment(c, ownerKeys)) continue;
+
+    const replies: any[] = Array.isArray(c?.replies) ? c.replies : [];
+    const own = replies.filter((r) => isOwnAyrshareComment(r, ownerKeys))
+      .sort((a, b) => String(a?.created ?? a?.createTime ?? '').localeCompare(String(b?.created ?? b?.createTime ?? '')))
+      .pop() ?? ownByParent.get(commentId);
+
+    out.push({
+      id: encodeAyrshareComment(platform, postId, commentId, typeof c?.commentUrn === 'string' ? c.commentUrn : ''),
+      platform,
+      kind: 'comment',
+      authorName: authorOf(c),
+      body,
+      createdAt: isoOr(c?.created ?? c?.createTime, now),
+      isHidden: c?.hidden === true,
+      capabilities: {
+        can_like: false,
+        can_hide: platform === 'tiktok',
+        can_delete: platform === 'facebook' || platform === 'instagram' || platform === 'youtube',
+        can_private_reply: false,
+      },
+      repliedBody: own ? String(own.comment ?? own.text ?? '').trim() || null : null,
+      repliedAt: own ? isoOrNull(own.created ?? own.createTime) : null,
+    });
+  }
+  return out;
+}
+
+/** تعليقات منشورٍ بمعرّفه على منصته. */
+export async function ayrshareComments(
+  auth: AyrshareAuth,
+  platform: string,
+  postId: string,
+  budget?: CallBudget,
+): Promise<any> {
+  const q = new URLSearchParams({ searchPlatformId: 'true', platform });
+  return ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(postId)}?${q}`, undefined, budget);
+}
+
+/** رسالةٌ خاصة كما يردّها `GET /messages/:platform` — `action` اتجاهها. */
+export type AyrshareMessage = {
+  conversationId: string;
+  senderId: string;
+  recipientId: string;
+  senderName: string;
+  text: string;
+  created: string | null;
+  direction: 'in' | 'out';
+};
+
+/** رسائل منصةٍ — الأحدث أوّلاً، صفحاتٍ بمؤشّر `next`. */
+export async function ayrshareMessages(
+  auth: AyrshareAuth,
+  platform: string,
+  opts: { pages: number; budget?: CallBudget },
+): Promise<AyrshareMessage[]> {
+  const out: AyrshareMessage[] = [];
+  let next: string | null = null;
+  for (let page = 0; page < opts.pages; page++) {
+    const q = new URLSearchParams();
+    if (next) q.set('next', next);
+    const qs = q.toString();
+    const data: any = await ayrshareCall<any>(auth, 'GET', `/messages/${platform}${qs ? `?${qs}` : ''}`, undefined, opts.budget);
+    for (const m of Array.isArray(data?.messages) ? data.messages : []) {
+      if (!m?.conversationId) continue;
+      const attachment = Array.isArray(m.attachments) && m.attachments.length ? `[${m.attachments[0]?.type || 'مرفق'}]` : '';
+      out.push({
+        conversationId: String(m.conversationId),
+        senderId: String(m.senderId ?? ''),
+        recipientId: String(m.recipientId ?? ''),
+        senderName: String(m.senderDetails?.name || m.senderDetails?.username || ''),
+        text: String(m.message ?? '').trim() || attachment,
+        created: isoOrNull(m.created),
+        direction: m.action === 'sent' ? 'out' : 'in',
+      });
+    }
+    const pg = data?.meta?.pagination;
+    next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+    if (!next) break;
+  }
+  return out;
+}
+
+const STARS: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+
+/**
+ * المراجعات من `GET /reviews?platform=` — النصّ في `review`، والتقييم في
+ * الملف التجاري «ONE»…«FIVE». وتوصيات فيسبوك «positive»/«negative» لا نجوم
+ * فيها، فلا يُخترع لها رقم.
+ */
+export async function ayrshareReviews(auth: AyrshareAuth, platform: string, budget?: CallBudget): Promise<AyrshareInboxItem[]> {
+  let data: any;
+  try {
+    data = await ayrshareCall<any>(auth, 'GET', `/reviews?platform=${platform}`, undefined, budget);
+  } catch (err) {
+    if (err instanceof AyrshareError && errorCodes(err.body).includes(350)) return [];
+    throw err;
+  }
+  const list: any[] = Array.isArray(data?.[platform]) ? data[platform] : [];
+  const now = new Date().toISOString();
+  return list
+    .filter((r) => r?.id)
+    .map((r) => {
+      const reply = r?.reviewReply && typeof r.reviewReply === 'object' ? r.reviewReply : {};
+      return {
+        id: `ayr|${platform}|${r.id}`,
+        platform,
+        kind: 'review' as const,
+        authorName: String(r?.reviewer?.name || 'مستخدم'),
+        body: String(r?.review ?? '').trim(),
+        createdAt: isoOr(r?.created, now),
+        rating: STARS[String(r?.rating || '').toUpperCase()] ?? null,
+        repliedBody: typeof reply.reply === 'string' && reply.reply.trim() ? reply.reply.trim() : null,
+        repliedAt: isoOrNull(reply.updated),
+      };
+    });
 }

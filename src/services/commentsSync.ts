@@ -1,6 +1,11 @@
 import type { Env } from '../types';
 import type { ModerateAction } from '../adapters/provider';
-import { getProvider, providerKey } from '../adapters';
+import { ayrshareAuth, getProvider, providerKey } from '../adapters';
+import {
+  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareMessages,
+  ayrsharePlatform, ayrshareReviews, ayrshareUser, mapAyrshareComments,
+  type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
+} from '../adapters/ayrshare';
 import {
   BudgetExhausted, CallBudget, conversationLatest, isNotFound, isOwnAuthor, isUnsupported, listCommentReplies,
   listConversations, listInboxPosts, listMentions, listPostComments, listReviews,
@@ -220,6 +225,7 @@ export async function syncComments(
 
     try {
       if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
+      else if (provider === 'ayrshare') await syncAyrshareInbox(env, report, limits.deadline);
       // المزوّدون الآخرون يُقرأ صندوقهم كلُّه في كل دورة — لا سجلّ له مستقلّ
       else if (!history) await syncPerPost(env, report);
     } catch (err) {
@@ -1106,6 +1112,294 @@ async function syncMentions(
   report.added += res.added;
 }
 
+/* ============================================================
+   Ayrshare — التعليقات بمنشوراتها، والرسائل والمراجعات بمنصاتها
+
+   لا صندوق موحّداً في Ayrshare يسرد «المنشورات التي عليها تعليقات» كما في
+   SocialAPI: التعليقات تُطلب لكل منشورٍ بمعرّفه على منصته. فالمنشورات من
+   لقطات التحليلات (وفيها ما نُشر من خارج المنصة)، ويُختار منها ما تغيّر:
+   - لم يُقرأ قطّ — أوّلاً.
+   - تغيّر عدد تعليقاته في أرقامه منذ آخر قراءة — البصمة عدد التعليقات.
+   - عليه تعليقاتٌ بلا ردّ — تُفحص ردودها كل ستّ ساعات، فما ردّ عليه حسابُنا
+     من تطبيق المنصة ينتقل إلى «تم الرد».
+   والمعتاد منشورات الثلاثين يوماً؛ والسجلّ ما قبلها مرّةً لكلٍّ.
+   ============================================================ */
+
+const AYRSHARE_RECENT_DAYS = 30;
+const AYRSHARE_RECHECK_MS = 6 * 3_600_000;
+
+async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: number): Promise<void> {
+  const auth = ayrshareAuth(env);
+  if (!auth) {
+    report.errors.push('مفتاح Ayrshare غير مضبوط. اضبط AYRSHARE_API_KEY.');
+    return;
+  }
+  const budget = new CallBudget(report.budget, deadline);
+
+  await env.DB.prepare(
+    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL",
+  ).run();
+
+  const fail = (kind: InboxKind | null, err: unknown) => {
+    if (err instanceof BudgetExhausted) {
+      report.complete = false;
+      return;
+    }
+    const message = errorText(err);
+    if (kind) {
+      report.kinds[kind].ok = false;
+      report.kinds[kind].error = message;
+    }
+    report.errors.push(message);
+  };
+
+  let accounts: AyrshareAccount[] = [];
+  let messagingEnabled = false;
+  try {
+    ({ accounts, messagingEnabled } = await ayrshareUser(auth, budget));
+  } catch (err) {
+    fail(null, err);
+    report.calls = budget.used;
+    return;
+  }
+  if (!(auth.x?.key && auth.x.secret) && accounts.some((a) => a.platform === 'x')) {
+    report.errors.push('إكس عبر Ayrshare يشترط مفتاحَي تطبيق المطوّر. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET.');
+    accounts = accounts.filter((a) => a.platform !== 'x');
+  }
+
+  const history = report.mode === 'history';
+  const deepAt = history ? await getSetting(env, HISTORY_DEEP_KEY) : null;
+  const deep = history && (!deepAt || Date.now() - Date.parse(deepAt) > DAY);
+  const others = !history || deep;
+
+  // الرسائل تشترط تفعيلها في الحساب وعلى كل منصة (`messagingActive`)
+  const dmAccounts = messagingEnabled
+    ? accounts.filter((a) => a.messaging && AYRSHARE_DM_PLATFORMS.has(ayrsharePlatform(a.platform)))
+    : [];
+  const reviewAccounts = accounts.filter((a) => a.platform === 'google' || a.platform === 'facebook');
+  const reserve = others ? (dmAccounts.length + reviewAccounts.length) * (deep ? 3 : 1) : 0;
+
+  try {
+    await syncAyrshareComments(env, auth, budget, report, accounts, reserve, history);
+  } catch (err) {
+    fail('comment', err);
+  }
+
+  const fresh: InboxItem[] = [];
+  if (others) {
+    try {
+      for (const acc of reviewAccounts) {
+        if (budget.left <= 0) {
+          report.complete = false;
+          break;
+        }
+        const items = (await ayrshareReviews(auth, ayrsharePlatform(acc.platform), budget)).map((it) => ({ ...it, platform: acc.platform }));
+        report.kinds.review.ok = true;
+        report.kinds.review.items += items.length;
+        const res = await writeItems(env, items);
+        report.added += res.added;
+        report.externalReplies += res.externalReplies;
+        fresh.push(...res.fresh);
+      }
+    } catch (err) {
+      fail('review', err);
+    }
+
+    try {
+      for (const acc of dmAccounts) {
+        if (budget.left <= 0) {
+          report.complete = false;
+          break;
+        }
+        const messages = await ayrshareMessages(auth, ayrsharePlatform(acc.platform), { pages: deep ? 5 : 1, budget });
+        report.kinds.dm.ok = true;
+        report.kinds.dm.items += await writeAyrshareConversations(env, report, acc.platform, ayrsharePlatform(acc.platform), messages);
+      }
+    } catch (err) {
+      fail('dm', err);
+    }
+    if (deep && budget.left > 0) await setSetting(env, HISTORY_DEEP_KEY, nowIso());
+  }
+
+  report.calls = budget.used;
+  report.stoppedBy = budget.stoppedBy;
+  if (budget.stoppedBy) report.complete = false;
+  const since = Date.now() - 7 * DAY;
+  const negative = history ? [] : fresh.filter((it) => it.rating != null && it.rating <= 2 && Date.parse(it.createdAt) >= since);
+  if (negative.length) await notifyNegative(env, negative);
+}
+
+async function syncAyrshareComments(
+  env: Env,
+  auth: AyrshareAuth,
+  budget: CallBudget,
+  report: InboxSyncReport,
+  accounts: AyrshareAccount[],
+  reserve: number,
+  history: boolean,
+): Promise<void> {
+  const byInternal = new Map(accounts.filter((a) => AYRSHARE_COMMENT_PLATFORMS.has(ayrsharePlatform(a.platform))).map((a) => [a.platform, a]));
+  if (!byInternal.size) return;
+  report.kinds.comment.ok = true;
+
+  const platforms = [...byInternal.keys()];
+  const cutoff = new Date(Date.now() - AYRSHARE_RECENT_DAYS * DAY).toISOString();
+  const { results: posts } = await env.DB.prepare(
+    `SELECT provider_post_id, platform, metrics_json FROM analytics_snapshots
+     WHERE platform IN (${platforms.map(() => '?').join(',')})
+       AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
+     ORDER BY sent_at DESC
+     LIMIT 400`,
+  )
+    .bind(...platforms, cutoff)
+    .all<{ provider_post_id: string; platform: string; metrics_json: string | null }>();
+
+  const { results: states } = await env.DB.prepare(
+    "SELECT inbox_post_id, account_id, signature, synced_at FROM inbox_post_state WHERE account_id LIKE 'ayrshare:%'",
+  ).all<{ inbox_post_id: string; account_id: string; signature: string; synced_at: string | null }>();
+  const stateOf = new Map(states.map((st) => [`${st.account_id}|${st.inbox_post_id}`, st]));
+
+  // منشوراتٌ عليها تعليقاتٌ بلا ردّ — من معرّفاتها المحفوظة `ayc|منصة|منشور|…`
+  const { results: open } = await env.DB.prepare(
+    "SELECT provider_comment_id FROM platform_comments WHERE kind = 'comment' AND reply_body IS NULL AND substr(provider_comment_id, 1, 4) = 'ayc|'",
+  ).all<{ provider_comment_id: string }>();
+  const unreplied = new Set(open.map((r) => r.provider_comment_id.split('|').slice(1, 3).join('|')));
+
+  const commentsOf = (json: string | null): string => {
+    try {
+      const raw = JSON.parse(json || '[]');
+      const c = Array.isArray(raw) ? raw.find((m: any) => m?.type === 'comments') : null;
+      return c ? String(c.value) : '';
+    } catch {
+      return '';
+    }
+  };
+
+  const now = Date.now();
+  const queue: { postId: string; internal: string; ayr: string; signature: string; rank: number }[] = [];
+  for (const p of posts) {
+    const ayr = ayrsharePlatform(p.platform);
+    const st = stateOf.get(`ayrshare:${ayr}|${p.provider_post_id}`);
+    const signature = commentsOf(p.metrics_json);
+    const age = st?.synced_at ? now - Date.parse(st.synced_at) : Infinity;
+    let rank: number | null = null;
+    if (!st?.synced_at) rank = 0;
+    else if (!history && signature && signature !== st.signature) rank = 1;
+    else if (unreplied.has(`${ayr}|${p.provider_post_id}`) && age > (history ? 7 * DAY : AYRSHARE_RECHECK_MS)) rank = 2;
+    else if (report.mode === 'full' && age > 30 * 60_000) rank = 3;
+    if (rank !== null) queue.push({ postId: p.provider_post_id, internal: p.platform, ayr, signature, rank });
+  }
+  queue.sort((a, b) => a.rank - b.rank);
+
+  let cut = false;
+  for (const q of queue) {
+    if (budget.left <= reserve) {
+      cut = true;
+      break;
+    }
+    let data: any;
+    try {
+      data = await ayrshareComments(auth, q.ayr, q.postId, budget);
+    } catch (err) {
+      if (err instanceof BudgetExhausted) {
+        cut = true;
+        break;
+      }
+      // منشورٌ حُذف أو لا تُقرأ تعليقاته — يُختم كي لا يأكل حصّة كل دورة
+      if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500 && err.status !== 429)) throw err;
+      data = null;
+    }
+    if (data) {
+      const keys = byInternal.get(q.internal)?.ownerKeys ?? [];
+      const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
+      report.kinds.comment.items += items.length;
+      const res = await writeItems(env, items);
+      report.added += res.added;
+      report.externalReplies += res.externalReplies;
+    }
+    await env.DB.prepare(
+      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET signature = excluded.signature, synced_at = excluded.synced_at`,
+    ).bind(q.postId, `ayrshare:${q.ayr}`, q.internal, q.signature, nowIso(), nowIso()).run();
+  }
+  if (cut) report.complete = false;
+  // السجلّ اكتمل حين لا يبقى منشورٌ قديم لم يُقرأ
+  if (history && !cut && posts.length < 400) await setSetting(env, HISTORY_DONE_KEY, nowIso());
+}
+
+/**
+ * محادثات منصةٍ من رسائلها — عنصرٌ لكل محادثة كما في SocialAPI: نصُّه آخرُ ما
+ * كتبه العميل، وردُّنا آخرُ ما أرسلناه بعده. وعميلٌ كتب بعد آخر ردٍّ يُعيد
+ * المحادثة إلى «بلا رد». يعود بعدد المحادثات.
+ */
+async function writeAyrshareConversations(
+  env: Env,
+  report: InboxSyncReport,
+  internal: string,
+  ayr: string,
+  messages: AyrshareMessage[],
+): Promise<number> {
+  type Conv = { lastIn: AyrshareMessage | null; lastOut: AyrshareMessage | null };
+  const convs = new Map<string, Conv>();
+  // الأحدث أوّلاً — فأوّلُ ما يُرى من كل اتجاهٍ هو الأخير
+  for (const m of messages) {
+    const cv = convs.get(m.conversationId) ?? { lastIn: null, lastOut: null };
+    if (m.direction === 'in' && !cv.lastIn) cv.lastIn = m;
+    if (m.direction === 'out' && !cv.lastOut) cv.lastOut = m;
+    convs.set(m.conversationId, cv);
+  }
+
+  const keyOf = (id: string, cv: Conv) => `ayd|${ayr}|${id}|${cv.lastIn?.senderId || cv.lastOut?.recipientId || ''}`;
+  const existing = await rowsByIds(env, [...convs].map(([id, cv]) => keyOf(id, cv)));
+  const items: InboxItem[] = [];
+  const replies: { key: string; reply: ExternalReply }[] = [];
+  const reopen: { key: string; text: string; at: string }[] = [];
+
+  for (const [id, cv] of convs) {
+    if (!cv.lastIn?.created) continue; // محادثةٌ بدأناها نحن — لا عميلَ ينتظر
+    const key = keyOf(id, cv);
+    const row = existing.get(key);
+    const lastIn = { text: cv.lastIn.text, at: cv.lastIn.created };
+    items.push({ id: key, platform: internal, kind: 'dm', authorName: cv.lastIn.senderName || 'مستخدم', body: lastIn.text, createdAt: lastIn.at });
+    const out = cv.lastOut?.created && cv.lastOut.created >= lastIn.at ? cv.lastOut : null;
+    if (out) {
+      if (!row || row.reply_body === null) replies.push({ key, reply: { text: out.text, at: out.created, id: null } });
+    } else if (row && row.reply_body !== null && (!row.replied_at || row.replied_at < lastIn.at)) {
+      reopen.push({ key, text: lastIn.text, at: lastIn.at });
+    }
+  }
+
+  const written = await writeItems(env, items, existing);
+  report.added += written.added;
+
+  if (replies.length || reopen.length) {
+    const after = await rowsByIds(env, [...replies.map((x) => x.key), ...reopen.map((x) => x.key)]);
+    const stmts: D1PreparedStatement[] = [];
+    for (const { key, reply } of replies) {
+      const row = after.get(key);
+      if (row && row.reply_body === null) {
+        stmts.push(externalReplyStmt(env, row.id, reply));
+        report.externalReplies++;
+      }
+    }
+    for (const { key, text, at } of reopen) {
+      const row = after.get(key);
+      if (!row) continue;
+      stmts.push(
+        env.DB.prepare(
+          `UPDATE platform_comments
+           SET body = ?, created_at = ?, reply_body = NULL, replied_at = NULL, replied_by = NULL,
+               reply_provider_id = NULL, reply_source = NULL
+           WHERE id = ?`,
+        ).bind(text, at, row.id),
+      );
+    }
+    await runBatch(env, stmts);
+  }
+  return items.length;
+}
+
 // يُشعِر مسؤولي التعليقات بالتفاعلات السلبية الجديدة فور رصدها
 async function notifyNegative(
   env: Env,
@@ -1126,7 +1420,7 @@ async function notifyNegative(
   } catch { /* التنبيه أفضل جهد — لا يُعطّل المزامنة */ }
 }
 
-// مزوّدون يعتمدون getComments لكل منشور نُشر عبر المنصة (Ayrshare/Mock)
+// مزوّدون يعتمدون getComments لكل منشور نُشر عبر المنصة — ما سوى SocialAPI وAyrshare
 async function syncPerPost(env: Env, report: InboxSyncReport): Promise<void> {
   const provider = await getProvider(env);
   if (!provider.getComments) return;
