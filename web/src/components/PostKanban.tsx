@@ -6,7 +6,7 @@ import StatusBadge from './StatusBadge';
 import { PlatformIcons, platformsOf } from '../platforms';
 import { KANBAN_COLS } from '../contentFlow';
 
-export { moveAction } from '../contentFlow';
+export { moveAction, opensScheduling } from '../contentFlow';
 
 /* لوحة المحتوى — أعمدةٌ بحالاته، بالسحب والإفلات.
 

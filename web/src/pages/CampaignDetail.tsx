@@ -11,7 +11,7 @@ import type { TargetStatus } from '../metrics';
 import { CampaignBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
 import TargetBadge from '../components/TargetBadge';
-import PostKanban, { moveAction } from '../components/PostKanban';
+import PostKanban, { moveAction, opensScheduling } from '../components/PostKanban';
 import Bar from '../components/Bar';
 import Modal from '../components/Modal';
 import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
@@ -116,6 +116,11 @@ export default function CampaignDetail() {
     setErr(''); setMsg('');
     const from = displayStatus(post);
     const action = moveAction(from, toCol);
+    // المعتمد يُجدوَل من المحرّر — فالسحب إلى «مجدول» يفتح نافذته هناك
+    if (!action && opensScheduling(from, toCol) && can('content.schedule')) {
+      navigate(`/editor/${post.id}?schedule=1`);
+      return;
+    }
     if (!action) {
       setErr(from === 'idea' && toCol === 'pending_marketing'
         ? IDEA_NO_TEXT

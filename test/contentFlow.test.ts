@@ -1,7 +1,7 @@
 // «فكرة» في الواجهة: حالةُ عرضٍ مشتقّة، وأوّل أعمدة اللوحة، ولا تُنقل بسحب.
 
 import { describe, it, expect } from 'vitest';
-import { KANBAN_COLS, moveAction, isBlankHtml } from '../web/src/contentFlow';
+import { KANBAN_COLS, moveAction, opensScheduling, isBlankHtml } from '../web/src/contentFlow';
 import { displayStatus, isIdea, STATUS_LABELS, STATUS_BADGE } from '../web/src/api';
 
 describe('displayStatus', () => {
@@ -41,6 +41,15 @@ describe('لوحة المحتوى', () => {
       expect(moveAction('idea', col.key)).toBeNull();
       expect(moveAction('draft', 'idea')).toBeNull();
     }
+  });
+
+  it('سحب المعتمد إلى «مجدول» يفتح الجدولة، وما لم يُعتمد يبقى ممنوعاً', () => {
+    expect(moveAction('approved', 'scheduled')).toBeNull(); // لا انتقال بسحب
+    expect(opensScheduling('approved', 'scheduled')).toBe(true);
+    for (const from of ['idea', 'draft', 'rejected', 'pending_marketing', 'pending_gm', 'scheduled', 'late', 'published']) {
+      expect(opensScheduling(from, 'scheduled')).toBe(false);
+    }
+    expect(opensScheduling('approved', 'published')).toBe(false);
   });
 
   it('المسودة تُرسَل للمراجعة كما كانت', () => {

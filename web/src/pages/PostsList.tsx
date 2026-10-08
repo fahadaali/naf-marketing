@@ -15,7 +15,7 @@ import PlanItemModal from '../components/PlanItemModal';
 import { KANBAN_COLS } from '../contentFlow';
 import { dayDate, exportDay, pivotWeeks } from '../planning';
 import PlanImportModal, { exportPlanFile, importSummary } from '../components/PlanImport';
-import PostKanban, { moveAction } from '../components/PostKanban';
+import PostKanban, { moveAction, opensScheduling } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
@@ -184,6 +184,11 @@ export default function ContentManagement() {
     setErr(''); setMsg('');
     const from = displayStatus(post);
     const action = moveAction(from, toCol);
+    // المعتمد يُجدوَل من المحرّر — فالسحب إلى «مجدول» يفتح نافذته هناك
+    if (!action && opensScheduling(from, toCol) && can('content.schedule')) {
+      navigate(`/editor/${post.id}?schedule=1`);
+      return;
+    }
     if (!action) {
       // الفكرة تصير مسودةً بكتابة نصّها لا بسحب — والرسالة رسالةُ الخادم نفسها
       setErr(from === 'idea' && toCol === 'pending_marketing'
