@@ -32,6 +32,17 @@ export function moveAction(from: string, toCol: string): 'submit' | 'approve' | 
   return null;
 }
 
+/**
+ * أيفتح سحبُ البطاقة إلى «مجدول» نافذةَ الجدولة في المحرر؟
+ *
+ * الجدولة لا تتمّ بسحب: تحتاج موعداً ومنصات. فسحبُ المعتمد إلى عمودها يوصل
+ * إلى حيث تُجدوَل بدل رسالة منع. وما لم يُعتمد بعد يبقى ممنوعاً — تجاوزٌ
+ * لمراحل الاعتماد — والمعتمد وحده هو ما يُظهر له المحرّر زرّ «جدولة النشر».
+ */
+export function opensScheduling(from: string, toCol: string): boolean {
+  return toCol === 'scheduled' && from === 'approved';
+}
+
 // محارف الاتجاه والفواصل الصفرية — لا تُرى ولا تُعدّ نصّاً
 const INVISIBLE = /[​-‏⁠-⁩﻿]/g;
 

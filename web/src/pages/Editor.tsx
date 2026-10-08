@@ -91,6 +91,8 @@ export default function Editor() {
   const [showAIMedia, setShowAIMedia] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  // `?schedule=1` من سحب البطاقة إلى «مجدول» — تُفتح النافذة مرّةً واحدة لا مع كل تحميل
+  const scheduleAsked = useRef(sp.get('schedule') === '1');
   const [showVersions, setShowVersions] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [viewer, setViewer] = useState<MediaInfo | null>(null);
@@ -119,6 +121,13 @@ export default function Editor() {
     setPlan(planFromPost(d.post));
     setAssigneeName(d.post.assignee_name || '');
     setStatus(d.post.status);
+    /* يُستهلك مع أوّل تحميل: محتوى لم يُعتمد بعد لا تُفتح له النافذة، ولا
+       تنفتح عليه فجأةً حين يُعتمد لاحقاً في الجلسة نفسها. والشرط شرطُ زرّ
+       «جدولة النشر» نفسه — فالمعامل لا يفتح ما لا يفتحه الزرّ. */
+    if (scheduleAsked.current) {
+      scheduleAsked.current = false;
+      if (['approved', 'scheduled'].includes(d.post.status) && can('content.schedule')) setShowSchedule(true);
+    }
     setAuthorId(d.post.author_id || '');
     setRejectReason(d.post.reject_reason || '');
     setApprovals(d.approvals);
