@@ -18,6 +18,24 @@ export function providerKey(env: Env, name: string): string {
   return (specific || env.PROVIDER_API_KEY || '').trim();
 }
 
+/** المزوّدون الذين ينشرون فعلاً — وما عداهم تجريبيٌّ أو غير مدعوم. */
+const REAL_PROVIDERS = ['socialapi', 'buffer', 'ayrshare'];
+
+/**
+ * أمزوّد النشر مربوطٌ بخدمةٍ حقيقية؟
+ *
+ * التجريبي يولّد أرقام وصولٍ وتفاعل ورسائلَ من بصمة المعرّف، وتُخزَّن كما
+ * تُخزَّن الحقيقية. فما حُسب منها لا يُعرض مربوطاً — والمزوّد الحقيقي بلا
+ * مفتاح لا يسحب شيئاً، فهو غير مربوط كذلك.
+ */
+export async function publishingProviderConnected(env: Env): Promise<boolean> {
+  const setting = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{
+    value: string;
+  }>();
+  const name = (setting?.value || env.PROVIDER_NAME || 'mock').toLowerCase();
+  return REAL_PROVIDERS.includes(name) && providerKey(env, name) !== '';
+}
+
 // مصنع المزوّد — يُحقَن المزوّد الفعلي حسب الإعدادات، ومفتاحه من Secrets.
 // إضافة مزوّد جديد (Zernio / Late): أنشئ ملفاً ينفّذ PublishingProvider وأضِفه هنا.
 export async function getProvider(env: Env): Promise<PublishingProvider> {

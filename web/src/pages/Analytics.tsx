@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ChevronLeft, ChevronRight, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { formatDate, isolate } from '../lib/format';
+import { formatDate, formatNumber, isolate } from '../lib/format';
 import MetricCard, { type MetricReading } from '../components/MetricCard';
 import { CADENCE_LABELS, LAYERS, PERIOD_LABELS } from '../metrics';
 import { DateRangePicker } from '../components/DatePicker';
@@ -37,6 +37,36 @@ type PeriodKind = (typeof PERIODS)[number];
 /** الطبقات التي تحمل ألواحاً من بيانات المنصة نفسها إضافةً إلى مؤشراتها. */
 const PANEL_LAYERS = new Set(['reach', 'engagement', 'operations', 'cost']);
 
+/** ألواحٌ تُبنى كلها من لقطات مزوّد النشر — فتتبع حاله. */
+const PROVIDER_PANEL_LAYERS = new Set(['reach', 'engagement']);
+
+/* ═══ غير مربوط ═══
+   الشاشة تعرض ما يُقاس فعلاً، وما لم يُربط مصدره لا يسقط منها: يبقى تحت
+   سطرٍ واحد مطويٍّ في آخر التبويب، يُفتح بنقرة. فالمؤشر الذي لا مصدر له
+   يظلّ معروفاً ثغرةً، ولا يزاحم الأرقام المقيسة في صدر الشاشة.
+
+   والنصوص الثلاثة مسجّلة: «غير مربوط» من حالات الربط، و«إظهار» و«إخفاء»
+   من الأزرار — والزرّ يقول ما سيحدث لا ما هو قائم، وأيقونته تتبعه. */
+function UnlinkedToggle({
+  count, open, onToggle, children,
+}: { count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <section className="unlinked-toggle">
+      <div className="row">
+        <span className="muted">
+          غير مربوط{count > 0 && <> · <bdi>{formatNumber(count)}</bdi></>}
+        </span>
+        <div className="spacer" />
+        <button type="button" className="btn ghost sm" aria-expanded={open} onClick={onToggle}>
+          {open ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}
+          {open ? 'إخفاء' : 'إظهار'}
+        </button>
+      </div>
+      {open && <div className="unlinked-body">{children}</div>}
+    </section>
+  );
+}
+
 export default function Analytics() {
   const { can } = useAuth();
   const canManage = can('metrics.manage');
@@ -53,6 +83,8 @@ export default function Analytics() {
   const [msg, setMsg] = useState('');
   // يُعاد به تحميل «مصادر الأرقام» بعد «سحب الآن»
   const [sourcesKey, setSourcesKey] = useState(0);
+  // «غير مربوط» مطويٌّ في كل تبويبٍ يُفتح — يُغلق مع تبديل التبويب
+  const [showUnlinked, setShowUnlinked] = useState(false);
 
   // ألواح المنصة — فلاترها الخاصة باقية كما كانت
   const [dash, setDash] = useState<DashboardData | null>(null);
@@ -65,6 +97,12 @@ export default function Analytics() {
 
   const isBoard = tab === 'board';
   const isCatalogue = tab === 'catalogue';
+
+  const linked = metrics.filter((m) => m.connected);
+  const unlinked = metrics.filter((m) => !m.connected);
+  // ردٌّ متعذّر لا يُخفي شيئاً — تبقى الألواح حيث كانت، وهي تُخفي نفسها بلا بيانات
+  const providerConnected = dash?.provider_connected !== false;
+  const panelsUnlinked = PROVIDER_PANEL_LAYERS.has(tab) && !providerConnected;
 
   function loadMetrics() {
     setLoading(true);
@@ -153,6 +191,54 @@ export default function Analytics() {
     }
   }
 
+  /** ألواح لقطات المزوّد بفلاترها — بين المربوط، أو تحت «غير مربوط» ما دام المزوّد تجريبياً. */
+  function providerPanels() {
+    if (!PROVIDER_PANEL_LAYERS.has(tab)) return null;
+    return (
+      <>
+        <div className="card" style={{ margin: 'var(--space-4) 0' }}>
+          <div className="row" style={{ gap: 'var(--space-4)', alignItems: 'flex-end' }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label>نطاق ألواح المنصة</label>
+              <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+            </div>
+            <div className="field" style={{ margin: 0, minWidth: 160 }}>
+              <label htmlFor="an-platform">المنصة</label>
+              <select id="an-platform" className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                <option value="">كل منصات التواصل</option>
+                {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0, minWidth: 160 }}>
+              <label htmlFor="an-campaign">الحملة</label>
+              <select id="an-campaign" className="select" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
+                <option value="">كل الحملات</option>
+                {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {tab === 'reach' && (
+          <div className="grid cols-2">
+            <PlatformBreakdown data={dash} />
+            <CampaignPerformance data={dash} />
+          </div>
+        )}
+
+        {tab === 'engagement' && (
+          <>
+            <BestTimesCard platform={platform} />
+            <TopPosts data={dash} />
+            <div style={{ marginTop: 'var(--space-4)' }}>
+              <ReputationCard />
+            </div>
+          </>
+        )}
+      </>
+    );
+  }
+
   return (
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
@@ -210,7 +296,7 @@ export default function Analytics() {
             type="button"
             className={tab === l.key ? 'on' : ''}
             aria-current={tab === l.key ? 'page' : undefined}
-            onClick={() => setTab(l.key)}
+            onClick={() => { setTab(l.key); setShowUnlinked(false); }}
           >
             {l.label}
           </button>
@@ -229,13 +315,13 @@ export default function Analytics() {
 
           {loading ? (
             <p className="muted">جارٍ التحميل…</p>
-          ) : metrics.length === 0 ? (
+          ) : linked.length === 0 ? (
             <div className="card">
               <p className="muted" style={{ margin: 0 }}>لا مؤشر في هذه الطبقة بعد. اربط مصدراً أو سجّل أول قيمة.</p>
             </div>
           ) : (
             <div className="grid cols-3">
-              {metrics.map((m) => (
+              {linked.map((m) => (
                 <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
               ))}
             </div>
@@ -244,48 +330,13 @@ export default function Analytics() {
           {/* ألواح المنصة — فلاترها الخاصة تظهر معها لا فوق الشاشة كلها */}
           {PANEL_LAYERS.has(tab) && (
             <>
-              {(tab === 'reach' || tab === 'engagement') && (
-                <div className="card" style={{ margin: '16px 0' }}>
-                  <div className="row" style={{ gap: 16, alignItems: 'flex-end' }}>
-                    <div className="field" style={{ margin: 0 }}>
-                      <label>نطاق ألواح المنصة</label>
-                      <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
-                    </div>
-                    <div className="field" style={{ margin: 0, minWidth: 160 }}>
-                      <label htmlFor="an-platform">المنصة</label>
-                      <select id="an-platform" className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-                        <option value="">كل منصات التواصل</option>
-                        {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
-                      </select>
-                    </div>
-                    <div className="field" style={{ margin: 0, minWidth: 160 }}>
-                      <label htmlFor="an-campaign">الحملة</label>
-                      <select id="an-campaign" className="select" value={campaign} onChange={(e) => setCampaign(e.target.value)}>
-                        <option value="">كل الحملات</option>
-                        {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {tab === 'reach' && (
-                <div className="grid cols-2">
-                  <PlatformBreakdown data={dash} />
-                  <CampaignPerformance data={dash} />
-                </div>
-              )}
+              {!panelsUnlinked && providerPanels()}
 
               {tab === 'engagement' && (
-                <>
-                  <BestTimesCard platform={platform} />
+                <div style={{ marginTop: 'var(--space-4)' }}>
                   <HeatmapLink />
-                  <TopPosts data={dash} />
-                  <div style={{ marginTop: 16 }}>
-                    <ReputationCard />
-                    <VideoAnalyticsExport onImported={loadMetrics} />
-                  </div>
-                </>
+                  <VideoAnalyticsExport onImported={loadMetrics} />
+                </div>
               )}
 
               {tab === 'cost' && (
@@ -293,13 +344,26 @@ export default function Analytics() {
               )}
 
               {tab === 'operations' && (
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 'var(--space-4)' }}>
                   <PipelineStatus data={dash} />
                   <StaleAlerts />
                   <TeamPerformance />
                 </div>
               )}
             </>
+          )}
+
+          {!loading && (unlinked.length > 0 || panelsUnlinked) && (
+            <UnlinkedToggle count={unlinked.length} open={showUnlinked} onToggle={() => setShowUnlinked((o) => !o)}>
+              {unlinked.length > 0 && (
+                <div className="grid cols-3">
+                  {unlinked.map((m) => (
+                    <MetricCard key={m.key} m={m} series={series[m.key]?.map((p) => p.value)} />
+                  ))}
+                </div>
+              )}
+              {panelsUnlinked && providerPanels()}
+            </UnlinkedToggle>
           )}
         </>
       )}

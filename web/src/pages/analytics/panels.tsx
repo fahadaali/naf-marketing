@@ -30,6 +30,8 @@ export type DashboardData = {
   }[];
   pipeline?: { status: string; count: number }[];
   campaigns?: { id: string; name: string; impressions: number; engagement: number }[];
+  /** أمزوّد النشر حقيقيٌّ بمفتاح؟ التجريبي يولّد هذه الألواح كلَّها. */
+  provider_connected?: boolean;
 };
 
 export function PlatformBreakdown({ data }: { data: DashboardData | null }) {
