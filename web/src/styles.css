@@ -854,3 +854,16 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 /* مبدّل العرض يُنقل إليه بلوحة المفاتيح كبقيّة الأزرار — §٤ */
 .seg button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .cal-plan-head .platform-row { margin-bottom: 0; }
+/* الشكل تصنيفٌ لا حالة: حدٌّ ونصّ بلا لون — المتغيّر outline في سجلّ الشارة */
+.badge.outline { background: transparent; border-color: var(--border); color: var(--foreground); }
+/* مبدّل العروض الأربعة يُمرَّر أفقياً على الشاشة الضيّقة بدل أن يخرج عنها */
+.seg-scroll { max-width: 100%; overflow-x: auto; }
+/* «حجم العمل»: سطر «التوزيع حسب» فوق الجدول، وأسبوعُ الصفّ في سطرٍ واحد */
+.workload { padding: 0; overflow: hidden; }
+.workload-bar { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.workload-select { width: auto; }
+.workload-hint { font-size: var(--text-xs); margin: 0; padding: 0 var(--space-4); }
+.workload-bar .workload-hint { padding: 0; }
+.workload-empty { text-align: center; padding: var(--space-6); margin: 0; }
+.workload-week { white-space: nowrap; font-weight: 500; color: var(--foreground); background: transparent; }
+.workload tfoot th, .workload tfoot td { border-top: 2px solid var(--border); }

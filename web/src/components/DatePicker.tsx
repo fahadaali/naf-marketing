@@ -3,6 +3,7 @@ import { ChevronRight, ChevronLeft, Calendar, Clock } from 'lucide-react';
 import { Popover } from './Popover';
 import { formatDate, formatMonth, formatDateTime } from '../lib/format';
 import { parseTime24, toLatinDigits } from '../lib/digits';
+import { forwardRange, monthBounds, monthOf, riyadhToday } from '../planning';
 
 // منتقي تواريخ عصري (شبكة تقويم) — نطاق «من/إلى» ومنتقي تاريخ+وقت.
 // التنقّل: النقر على العنوان يفتح شبكة الأشهر، ثم شبكة السنوات، للوصول السريع.
@@ -101,11 +102,15 @@ export function DateRangePicker({
   to,
   onChange,
   placeholder = 'كل التواريخ',
+  presets: direction = 'past',
 }: {
   from: string;
   to: string;
   onChange: (from: string, to: string) => void;
   placeholder?: string;
+  /** «past» الاختصارات التي نهايتها اليوم، و«future» الأماميّة التي بدايتها اليوم —
+      ليوم النشر المستهدف، وهو يومٌ قادم في الغالب. */
+  presets?: 'past' | 'future';
 }) {
   const [month, setMonth] = useState<Date>(() => parseYMD(from) || new Date());
 
@@ -127,7 +132,14 @@ export function DateRangePicker({
            والعدد فيها معزول الاتجاه كأيّ رقم. و«آخر 12 شهراً» لا «آخر سنة»: الثانية
            تُقرأ السنةَ التقويمية الماضية. */
         const lastDays = (n: number) => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - (n - 1)); onChange(ymd(s), ymd(e)); close(); };
-        const presets: [string, ReactNode, () => void][] = [
+        // الأماميّان بتقويم الرياض كاليوم المستهدف نفسه — naf-terms «الفترة المعروضة»
+        const ahead = (kind: 'next_month' | 'within_3_months') => { const r = forwardRange(kind, riyadhToday()); onChange(r.from, r.to); close(); };
+        const presets: [string, ReactNode, () => void][] = direction === 'future' ? [
+          ['next', 'الشهر القادم', () => ahead('next_month')],
+          ['3m', <>خلال <bdi>3</bdi> أشهر</>, () => ahead('within_3_months')],
+          ['month', 'هذا الشهر', () => { const { first, last } = monthBounds(monthOf(riyadhToday())); onChange(first, last); close(); }],
+          ['clear', 'مسح', () => { onChange('', ''); close(); }],
+        ] : [
           ['today', 'اليوم', () => { const t = ymd(new Date()); onChange(t, t); close(); }],
           ['7d', <>آخر <bdi>7</bdi> أيام</>, () => lastDays(7)],
           ['30d', <>آخر <bdi>30</bdi> يوماً</>, () => lastDays(30)],

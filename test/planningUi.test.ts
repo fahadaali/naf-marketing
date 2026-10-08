@@ -2,7 +2,10 @@
 // `web/src/planning.ts`، كما تُختبر أشهر التقويم في `planningCalendar.test.ts`.
 
 import { describe, it, expect } from 'vitest';
-import { pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN, groupByPlannedDay } from '../web/src/planning';
+import {
+  pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN, groupByPlannedDay,
+  addDays, weekStart, forwardRange, pivotWeeks, PIVOT_MAX_WEEKS,
+} from '../web/src/planning';
 import { FORMAT_LABELS } from '../web/src/api';
 import { FORMAT_TYPE, PILLAR_MAX as SERVER_PILLAR_MAX } from '../src/services/planning';
 
@@ -72,5 +75,74 @@ describe('groupByPlannedDay', () => {
     ]);
     expect(Object.keys(byDay)).toEqual(['2026-11-03', '2026-11-05']);
     expect(byDay['2026-11-03'].map((p) => p.id)).toEqual(['a', 'c']);
+  });
+});
+
+describe('الأيام والأسابيع', () => {
+  it('addDays يعبر الشهر والسنة والكبيسة', () => {
+    expect(addDays('2026-10-31', 1)).toBe('2026-11-01');
+    expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDays('2028-02-28', 1)).toBe('2028-02-29');
+    expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
+  });
+
+  it('weekStart أحدُ الأسبوع — والأحد نفسه بدايةُ أسبوعه', () => {
+    expect(weekStart('2026-10-08')).toBe('2026-10-04'); // خميس
+    expect(weekStart('2026-10-04')).toBe('2026-10-04'); // أحد
+    expect(weekStart('2026-10-10')).toBe('2026-10-04'); // سبت
+    expect(weekStart('2027-01-01')).toBe('2026-12-27'); // يعبر السنة
+  });
+});
+
+describe('forwardRange', () => {
+  it('«الشهر القادم» أوّله إلى آخره، ومن ديسمبر إلى يناير التالي', () => {
+    expect(forwardRange('next_month', '2026-10-08')).toEqual({ from: '2026-11-01', to: '2026-11-30' });
+    expect(forwardRange('next_month', '2026-12-31')).toEqual({ from: '2027-01-01', to: '2027-01-31' });
+  });
+
+  it('«خلال 3 أشهر» من اليوم، ونهاية شهرٍ أقصر تُقصّ', () => {
+    expect(forwardRange('within_3_months', '2026-10-08')).toEqual({ from: '2026-10-08', to: '2027-01-07' });
+    expect(forwardRange('within_3_months', '2026-11-30')).toEqual({ from: '2026-11-30', to: '2027-02-27' });
+  });
+});
+
+describe('pivotWeeks', () => {
+  const row = (planned_on: string | null, keys: string[]) => ({ planned_on, keys });
+  const keysOf = (r: { keys: string[] }) => r.keys;
+
+  it('أسابيع متّصلة والفارغ منها صفٌّ بأصفار', () => {
+    const { weeks } = pivotWeeks([row('2026-10-05', ['a']), row('2026-10-20', ['a'])], keysOf);
+    expect(weeks.map((w) => [w.start, w.end, w.total])).toEqual([
+      ['2026-10-04', '2026-10-10', 1],
+      ['2026-10-11', '2026-10-17', 0],
+      ['2026-10-18', '2026-10-24', 1],
+    ]);
+  });
+
+  it('متعدّد المفاتيح يُعدّ في كلٍّ منها ومرةً في الإجمالي، وبلا مفتاح في «بلا …»', () => {
+    const { weeks, keys } = pivotWeeks([row('2026-10-05', ['x', 'linkedin']), row('2026-10-06', [])], keysOf);
+    expect(weeks[0].counts).toEqual({ x: 1, linkedin: 1, '': 1 });
+    expect(weeks[0].total).toBe(2);
+    expect(keys.sort()).toEqual(['', 'linkedin', 'x']);
+  });
+
+  it('ما لا يومَ له خارج العرض، والنطاق يحدّ الأسابيع', () => {
+    const { weeks } = pivotWeeks(
+      [row(null, ['a']), row('2026-09-30', ['a']), row('2026-10-05', ['a'])],
+      keysOf,
+      { from: '2026-10-01', to: '2026-10-14' },
+    );
+    expect(weeks.map((w) => w.start)).toEqual(['2026-09-27', '2026-10-04', '2026-10-11']);
+    expect(weeks.map((w) => w.total)).toEqual([0, 1, 0]);
+  });
+
+  it('لا صفوف ولا نطاق: لا أسابيع', () => {
+    expect(pivotWeeks([], keysOf)).toEqual({ weeks: [], keys: [], truncated: false });
+  });
+
+  it('النطاق الأوسع من الحدّ يُقطع ويُقال', () => {
+    const r = pivotWeeks([row('2026-01-04', ['a']), row('2028-12-31', ['a'])], keysOf);
+    expect(r.weeks).toHaveLength(PIVOT_MAX_WEEKS);
+    expect(r.truncated).toBe(true);
   });
 });

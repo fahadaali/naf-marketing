@@ -73,6 +73,91 @@ export function localDateOf({ year, month }: YearMonth, day = 1): Date {
   return new Date(year, month - 1, day);
 }
 
+/** يومٌ بعد `n` يوماً (أو قبلها بسالب)، بحساب UTC فلا يتأثّر بتوقيت الجهاز. */
+export function addDays(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+
+/** أحدُ الأسبوع الذي فيه اليوم — الأسبوع يبدأ بالأحد كشبكة التقويم. */
+export function weekStart(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return addDays(ymd, -new Date(Date.UTC(y, m - 1, d)).getUTCDay());
+}
+
+/** اليوم نفسه بعد `n` شهراً، ويُقصّ إلى آخر الشهر حين لا يوجد (٣١ ← ٢٨). */
+function addMonths(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const target = shiftMonth({ year: y, month: m }, n);
+  return `${target.year}-${pad(target.month)}-${pad(Math.min(d, daysInMonth(target)))}`;
+}
+
+/**
+ * الاختصاران الأماميّان في منتقي النطاق (naf-terms «الفترة المعروضة»)، وبدايتهما
+ * اليوم — عكس الخمسة الخلفية التي نهايتها اليوم:
+ * «الشهر القادم» أوّلُه إلى آخره، و«خلال 3 أشهر» من اليوم إلى ما قبل يومه بعد
+ * ثلاثة أشهر — كما أن «آخر 12 شهراً» اثنا عشر شهراً تنتهي اليوم.
+ */
+export function forwardRange(kind: 'next_month' | 'within_3_months', today: string): { from: string; to: string } {
+  if (kind === 'next_month') {
+    const { first, last } = monthBounds(shiftMonth(monthOf(today), 1));
+    return { from: first, to: last };
+  }
+  return { from: today, to: addDays(addMonths(today, 3), -1) };
+}
+
+export type WeekRow = { start: string; end: string; counts: Record<string, number>; total: number };
+
+/** أقصى ما يُعرض من أسابيع — ما زاد يُقال «النطاق أوسع من أن يُعرض كاملاً». */
+export const PIVOT_MAX_WEEKS = 60;
+
+/**
+ * «حجم العمل»: المحتوى المخطَّط أسبوعاً بأسبوع (الأحد–السبت)، وفي كل أسبوع عددُه
+ * بحسب ما يُرجعه `keysOf` — مسؤولٌ أو منصةٌ أو شكلٌ أو محورٌ أو حالة.
+ *
+ * - المفتاح الفارغ '' خانةُ «بلا …»، وصفٌّ بلا مفاتيح يُعدّ فيها.
+ * - العنصر متعدّد المفاتيح (المنصات) يُعدّ في كل مفتاح، ومرةً واحدة في الإجمالي.
+ * - الأسابيع متّصلة من أوّل النطاق إلى آخره، والفارغ منها صفٌّ بأصفار: أسبوعٌ
+ *   بلا خطة معلومةٌ لمن يوزّع العمل لا فراغٌ يُطوى.
+ * - النطاق `range` إن جاء حدَّ الأسابيع، وإلا فأوّلُ يومٍ مخطَّط وآخرُه.
+ */
+export function pivotWeeks<T extends { planned_on?: string | null }>(
+  rows: T[],
+  keysOf: (row: T) => string[],
+  range: { from?: string; to?: string } = {},
+): { weeks: WeekRow[]; keys: string[]; truncated: boolean } {
+  const inRange = rows.filter((r): r is T & { planned_on: string } =>
+    !!r.planned_on && (!range.from || r.planned_on >= range.from) && (!range.to || r.planned_on <= range.to));
+  const days = inRange.map((r) => r.planned_on).sort();
+  const from = range.from || days[0];
+  const to = range.to || days[days.length - 1];
+  if (!from || !to || from > to) return { weeks: [], keys: [], truncated: false };
+
+  const weeks: WeekRow[] = [];
+  const index = new Map<string, WeekRow>();
+  let truncated = false;
+  for (let start = weekStart(from); start <= to; start = addDays(start, 7)) {
+    if (weeks.length === PIVOT_MAX_WEEKS) { truncated = true; break; }
+    const w = { start, end: addDays(start, 6), counts: {}, total: 0 };
+    weeks.push(w);
+    index.set(start, w);
+  }
+
+  const keys = new Set<string>();
+  for (const r of inRange) {
+    const w = index.get(weekStart(r.planned_on));
+    if (!w) continue; // ما بعد الأسابيع المعروضة حين يُقطع النطاق
+    const ks = [...new Set(keysOf(r))];
+    for (const k of ks.length ? ks : ['']) {
+      w.counts[k] = (w.counts[k] || 0) + 1;
+      keys.add(k);
+    }
+    w.total += 1;
+  }
+  return { weeks, keys: [...keys], truncated };
+}
+
 /** حقول خطة المحتوى كما تحرّرها الشاشة: '' للفارغ، ومصفوفةٌ للمنصات. */
 export type PlanDraft = {
   planned_on: string; // 'YYYY-MM-DD' أو '' = بلا يوم محدّد
