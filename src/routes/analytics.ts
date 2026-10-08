@@ -5,7 +5,7 @@ import { pullAnalytics, ingestExportVideos, readAnalyticsReport, readAnalyticsHi
 import { readInboxReport, inboxHistoryDoneAt } from '../services/commentsSync';
 import { parsePeriod, periodBoundsUtc, periodOf, isPeriodKind } from '../services/period';
 import { listStaleContent } from '../services/alerts';
-import { providerKey } from '../adapters';
+import { providerKey, publishingProviderConnected } from '../adapters';
 import { createAnalyticsExport, listAnalyticsExports, getAnalyticsExport, listSocialApiAccounts } from '../adapters/socialapi';
 
 export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -114,6 +114,9 @@ analyticsRoutes.get('/dashboard', async (c) => {
     topPosts: topPosts.results,
     pipeline: pipeline.results,
     campaigns: campaigns.results,
+    /* ألواح المنصة كلُّها من لقطات المزوّد — والتجريبي يولّدها من بصمة
+       المعرّف. فالشاشة تُنزلها إلى «غير مربوط» ما لم يكن المزوّد حقيقياً. */
+    provider_connected: await publishingProviderConnected(c.env),
   });
 });
 

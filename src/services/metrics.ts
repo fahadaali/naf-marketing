@@ -15,6 +15,8 @@
 
 import type { Env } from '../types';
 import { newId, nowIso } from '../util';
+import { publishingProviderConnected } from '../adapters';
+import { emailReadiness } from './email';
 import { periodBoundsUtc, periodDays, previousPeriod, type Period } from './period';
 
 export type MetricValueInput = {
@@ -956,7 +958,140 @@ export type MetricReading = MetricDefinition & {
   review_due: boolean;
   /** التوزيع على البُعد إن كان للمؤشر بُعد. */
   breakdown: { dim_value: string; value: number; sample: number | null }[];
+  /** أمصدرُه مربوط؟ مشتقٌّ من حال المصدر الآن — انظر `isConnected`. */
+  connected: boolean;
 };
+
+/* ═══ من أين يأتي المحتسب ═══
+
+   المحتسب لا مصدر له في تعريفه: `integration_key` فارغٌ فيه، وما يحسب منه
+   مكتوبٌ في دالّة احتسابه وحدها. فهذه الخريطة تقول لكل مؤشرٍ محتسب على أيّ
+   بياناتٍ يقوم — ومنها يُعرف أمربوطٌ هو أم لا:
+
+     provider — لقطات مزوّد النشر وصندوقه (`computeSocial` و`computeInbox`)
+     crm      — مرآة منصة إدارة الشركة، ومنها كلُّ ما يُقسم على العملاء أو الإيراد
+     email    — إرسال النشرات: الفتح والنقر لا يُقاسان إلا على إرسالٍ وقع
+     internal — بيانات المنصة نفسها: الجدولة والاعتماد وسجلّ المشتركين
+     entered  — قيمٌ تُدخَل باليد: الإنفاق الإعلاني وإجمالي المتابعين
+
+   ومؤشرٌ محتسبٌ جديد يُضاف هنا مع دالّته — والاختبار يرفض مفتاحاً غائباً. */
+export type AutoSource = 'provider' | 'crm' | 'email' | 'internal' | 'entered';
+
+export const AUTO_SOURCE: Record<string, AutoSource> = {
+  // الطبقتان الأولى والثانية — لقطات المزوّد
+  reach: 'provider',
+  impressions: 'provider',
+  engagement: 'provider',
+  frequency: 'provider',
+  engagement_rate_reach: 'provider',
+  likes: 'provider',
+  comments: 'provider',
+  shares: 'provider',
+  saves: 'provider',
+  ctr: 'provider',
+  avg_view_duration: 'provider',
+  completion_rate: 'provider',
+  engagement_by_content_type: 'provider',
+  engagement_by_time_slot: 'provider',
+  organic_paid_split: 'provider',
+  // صندوق التعليقات والرسائل
+  qualitative_comments: 'provider',
+  direct_conversations: 'provider',
+  first_reply_rate: 'provider',
+  first_response_minutes: 'provider',
+
+  // مسار البيع والإيراد والاحتفاظ — مرآة منصة إدارة الشركة
+  leads: 'crm',
+  leads_by_source: 'crm',
+  mql: 'crm',
+  mql_by_source: 'crm',
+  sql: 'crm',
+  lead_quality_ratio: 'crm',
+  stage_conversion: 'crm',
+  qualified_to_contract: 'crm',
+  win_rate: 'crm',
+  sales_cycle_days: 'crm',
+  loss_reasons: 'crm',
+  data_completeness: 'crm',
+  duplicate_rate: 'crm',
+  referral_rate: 'crm',
+  acv: 'crm',
+  expansion_revenue: 'crm',
+  retention_rate: 'crm',
+  churn_rate: 'crm',
+  ltv: 'crm',
+  arr: 'crm',
+  high_value_segments: 'crm',
+  cohort_retention: 'crm',
+  // التكلفة على العميل أو الإيراد — المقام من المرآة
+  cpl: 'crm',
+  cpql: 'crm',
+  cac: 'crm',
+  roas: 'crm',
+  romi: 'crm',
+  ltv_cac_ratio: 'crm',
+  cac_payback: 'crm',
+  spend_of_revenue: 'crm',
+
+  // البريد — على إرسالٍ وقع
+  email_open_rate: 'email',
+  email_click_rate: 'email',
+  email_ctor: 'email',
+  email_bounce_rate: 'email',
+  ab_test_lift: 'email',
+
+  // بيانات المنصة نفسها
+  calendar_adherence: 'internal',
+  approval_cycle_hours: 'internal',
+  list_growth_rate: 'internal',
+  email_unsubscribe_rate: 'internal',
+
+  // من قيمٍ مُدخَلة
+  ad_spend: 'entered',
+  cpm: 'entered',
+  cpc: 'entered',
+  follower_growth_rate: 'entered',
+};
+
+/** حال المصادر الآن — تُقرأ مرّةً لكل قراءة طبقة، لا مرّةً لكل مؤشر. */
+export type SourceState = {
+  integrations: Set<string>;
+  provider: boolean;
+  email: boolean;
+};
+
+export async function readSourceState(env: Env): Promise<SourceState> {
+  const { results } = await env.DB.prepare('SELECT key FROM integrations WHERE is_enabled = 1').all<{ key: string }>();
+  const email = await emailReadiness(env);
+  return {
+    integrations: new Set(results.map((r) => r.key)),
+    provider: await publishingProviderConnected(env),
+    // التجريبي يعلن النجاح ولا يرسل — فلا فتحَ ولا نقرَ يُقاس عليه
+    email: email.provider === 'resend' && email.configured,
+  };
+}
+
+/**
+ * أمصدرُ المؤشر مربوط؟
+ *
+ * المسحوب مربوطٌ بتكامله. والمُدخَل وما يُحسب من مُدخَلٍ مربوطٌ متى سُجّلت له
+ * قيمة — لا مصدر له غير من يسجّله. والمحتسب بمصدر بياناته في `AUTO_SOURCE`.
+ */
+export function isConnected(
+  d: Pick<MetricDefinition, 'key' | 'source' | 'integration_key'>,
+  hasData: boolean,
+  state: SourceState,
+): boolean {
+  if (d.source === 'integration') return !!d.integration_key && state.integrations.has(d.integration_key);
+  if (d.source === 'manual') return hasData;
+  switch (AUTO_SOURCE[d.key]) {
+    case 'provider': return state.provider;
+    case 'crm': return state.integrations.has('crm');
+    case 'email': return state.email;
+    case 'internal': return true;
+    default: return hasData; // `entered`، ومفتاحٌ لم يُسجَّل في الخريطة بعد
+  }
+}
 
 /** تعريفات المؤشرات كاملةً — الدليل كما هو، بلا تصفية. */
 export async function listDefinitions(env: Env, layer?: string): Promise<MetricDefinition[]> {
@@ -1015,6 +1150,7 @@ export async function readLayer(env: Env, p: Period, layer?: string): Promise<Me
     .all<{ metric_key: string; value: number }>();
 
   const prevMap = new Map(prevValues.map((r) => [r.metric_key, r.value]));
+  const state = await readSourceState(env);
 
   return defs.map((d) => {
     const rows = values.filter((v) => v.metric_key === d.key);
@@ -1034,6 +1170,7 @@ export async function readLayer(env: Env, p: Period, layer?: string): Promise<Me
       previous: prevMap.get(d.key) ?? null,
       review_due: isReviewDue(d.cadence, d.reviewed_at),
       breakdown,
+      connected: isConnected(d, rows.length > 0, state),
     };
   });
 }

@@ -18,7 +18,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
   DatabaseSync: new (path: string) => any;
 };
 
-import { readBoard, readLayer, upsertValue } from '../src/services/metrics';
+import { AUTO_SOURCE, readBoard, readLayer, upsertValue } from '../src/services/metrics';
 import { periodOf } from '../src/services/period';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -118,5 +118,73 @@ describe('القيمة والقيمة السابقة والتوزيع', () => {
     const reach = await readLayer(env, JULY, 'reach');
     expect(reach.find((m) => m.key === 'leads')).toBeUndefined();
     expect(reach.find((m) => m.key === 'reach')?.value).toBe(1500);
+  });
+});
+
+/* ═══ حال الربط ═══
+   الشاشة تُظهر المربوط وتُنزل ما عداه إلى «غير مربوط». والحال تُشتقّ من
+   المصدر الآن — تكاملٌ مفعّل، ومزوّد نشرٍ حقيقي بمفتاح، وبريدٌ يرسل — لا من
+   وجود رقم: التجريبي يكتب أرقاماً ولا يقيس شيئاً. */
+describe('حال ربط المؤشر', () => {
+  const find = async (key: string) => (await readLayer(env, JULY)).find((m) => m.key === key);
+  const enable = (key: string) => db.prepare('UPDATE integrations SET is_enabled = 1 WHERE key = ?').run(key);
+  const setting = (key: string, value: string) =>
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+
+  it('كل مؤشرٍ محتسب له مصدرٌ في الخريطة، ولا مفتاح فيها بلا مؤشر', () => {
+    const auto = (db.prepare("SELECT key FROM metric_definitions WHERE source = 'auto'").all() as { key: string }[])
+      .map((r) => r.key)
+      .sort();
+    expect(auto.filter((k) => !(k in AUTO_SOURCE))).toEqual([]);
+    expect(Object.keys(AUTO_SOURCE).sort()).toEqual(auto);
+  });
+
+  it('المسحوب مربوطٌ ما دام تكامله مفعّلاً', async () => {
+    expect((await find('sessions'))?.connected).toBe(false);
+    enable('web_analytics');
+    expect((await find('sessions'))?.connected).toBe(true);
+  });
+
+  it('المحتسب من المرآة يتبع منصة إدارة الشركة', async () => {
+    expect((await find('mql'))?.connected).toBe(false);
+    enable('crm');
+    expect((await find('mql'))?.connected).toBe(true);
+  });
+
+  it('المحتسب من لقطات المزوّد غير مربوطٍ على التجريبي ولو كتب رقماً', async () => {
+    await upsertValue(env, JULY, { metricKey: 'reach', value: 1500, source: 'auto' });
+    expect((await find('reach'))?.connected).toBe(false);
+
+    // مزوّدٌ حقيقي بلا مفتاح لا يسحب شيئاً
+    setting('provider_name', 'socialapi');
+    expect((await find('reach'))?.connected).toBe(false);
+
+    env.SOCIALAPI_API_KEY = 'key';
+    expect((await find('reach'))?.connected).toBe(true);
+  });
+
+  it('البريد على التجريبي غير مربوط، وبيانات المنصة نفسها مربوطةٌ دائماً', async () => {
+    expect((await find('email_open_rate'))?.connected).toBe(false);
+    expect((await find('list_growth_rate'))?.connected).toBe(true);
+
+    setting('email_provider', 'resend');
+    env.EMAIL_PROVIDER_API_KEY = 'key';
+    expect((await find('email_open_rate'))?.connected).toBe(true);
+  });
+
+  it('المُدخَل مربوطٌ متى سُجّلت له قيمة، بالتوزيع أو بالمجموع', async () => {
+    expect((await find('nps'))?.connected).toBe(false);
+    await upsertValue(env, JULY, { metricKey: 'nps', value: 42, source: 'manual' });
+    expect((await find('nps'))?.connected).toBe(true);
+
+    expect((await find('unfollows'))?.connected).toBe(false);
+    await upsertValue(env, JULY, { metricKey: 'unfollows', dimKey: 'platform', dimValue: 'x', value: 3, source: 'manual' });
+    expect((await find('unfollows'))?.connected).toBe(true);
+  });
+
+  it('المحتسب من قيمٍ مُدخَلة يتبع وجود قيمته', async () => {
+    expect((await find('ad_spend'))?.connected).toBe(false);
+    await upsertValue(env, JULY, { metricKey: 'ad_spend', value: 500, source: 'auto' });
+    expect((await find('ad_spend'))?.connected).toBe(true);
   });
 });
