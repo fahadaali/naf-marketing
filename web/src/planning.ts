@@ -139,6 +139,19 @@ export function pillarsFrom(settings: { content_pillars?: unknown } | null | und
   return out;
 }
 
+/**
+ * المحتوى المخطَّط مجمّعاً بيومه المستهدف، بترتيب الخادم (اليوم ثم الإنشاء).
+ * وما لا يومَ له لا يدخل التقويم — يبقى في الجدول («بلا يوم محدّد»).
+ */
+export function groupByPlannedDay<T extends { planned_on?: string | null }>(posts: T[]): Record<string, T[]> {
+  const byDay: Record<string, T[]> = {};
+  for (const p of posts) {
+    if (!p.planned_on) continue;
+    (byDay[p.planned_on] ||= []).push(p);
+  }
+  return byDay;
+}
+
 /** صفّ موعدٍ كما يُرجعه `GET /schedules`: محتوى × منصة. */
 export type ScheduleRow = { id: string; post_id: string; platform: string; scheduled_at: string; title?: string };
 

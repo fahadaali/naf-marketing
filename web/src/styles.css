@@ -835,3 +835,22 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 @media (width < 900px) {
   .editor-grid { grid-template-columns: minmax(0, 1fr); }
 }
+/* التقويم بطبقتيه: عدد عناصر الشهر بجوار المبدّل، وسطر التنبيه فوق الشبكة */
+.cal-count { font-size: var(--text-xs); }
+.cal-note { margin: 0 0 var(--space-3); font-size: var(--text-xs); }
+/* رأس الخانة: رقم اليوم وزرّ «إضافة فكرة» في يومٍ قادم */
+.cal-day-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
+.cal-add {
+  display: inline-grid; place-items: center; padding: var(--space-1);
+  border: none; border-radius: var(--radius); background: transparent; color: var(--muted-foreground); cursor: pointer;
+}
+.cal-add:hover { background: var(--accent); color: var(--foreground); }
+.cal-add:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* بطاقة الخطة: سطحٌ هادئ لا لون التأكيد — الحالة تقولها أيقونتها، وما جُدول
+   يبقى بلون «مواعيد النشر» */
+.cal-event.plan { background: var(--muted); color: var(--foreground); }
+.cal-event.plan:hover { background: var(--accent); color: var(--foreground); }
+.cal-plan-head { margin-bottom: var(--space-1); gap: var(--space-1); }
+/* مبدّل العرض يُنقل إليه بلوحة المفاتيح كبقيّة الأزرار — §٤ */
+.seg button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.cal-plan-head .platform-row { margin-bottom: 0; }

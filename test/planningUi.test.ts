@@ -2,7 +2,7 @@
 // `web/src/planning.ts`، كما تُختبر أشهر التقويم في `planningCalendar.test.ts`.
 
 import { describe, it, expect } from 'vitest';
-import { pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN } from '../web/src/planning';
+import { pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN, groupByPlannedDay } from '../web/src/planning';
 import { FORMAT_LABELS } from '../web/src/api';
 import { FORMAT_TYPE, PILLAR_MAX as SERVER_PILLAR_MAX } from '../src/services/planning';
 
@@ -58,5 +58,19 @@ describe('pillarsFrom', () => {
 
   it('الطول بحدّ الخادم', () => {
     expect(pillarsFrom({ content_pillars: ['م'.repeat(200)] })[0]).toHaveLength(PILLAR_MAX);
+  });
+});
+
+describe('groupByPlannedDay', () => {
+  it('بيومه المستهدف وبترتيب الخادم، وما لا يومَ له خارج التقويم', () => {
+    const byDay = groupByPlannedDay([
+      { id: 'a', planned_on: '2026-11-03' },
+      { id: 'b', planned_on: null },
+      { id: 'c', planned_on: '2026-11-03' },
+      { id: 'd', planned_on: '2026-11-05' },
+      { id: 'e' },
+    ]);
+    expect(Object.keys(byDay)).toEqual(['2026-11-03', '2026-11-05']);
+    expect(byDay['2026-11-03'].map((p) => p.id)).toEqual(['a', 'c']);
   });
 });
