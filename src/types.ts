@@ -24,6 +24,10 @@ export type Env = {
   BUFFER_API_KEY?: string;
   SOCIALAPI_API_KEY?: string;
   AYRSHARE_API_KEY?: string;
+  /* مفتاحا تطبيق المطوّر في إكس — يشترطهما Ayrshare منذ ٣١ مارس ٢٠٢٦ في
+     كل طلبٍ يمسّ إكس. وغيابهما يمنع إكس وحده عبر Ayrshare. */
+  AYRSHARE_X_API_KEY?: string;
+  AYRSHARE_X_API_SECRET?: string;
   AUTH_SECRET?: string;
   AUTH_CLIENT_SECRET?: string;
   // basecamp (مركز المعرفة)

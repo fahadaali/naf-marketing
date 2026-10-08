@@ -6,6 +6,12 @@ import {
   listSocialApiAccountsDetailed, listSocialApiPostsPaged, mapMetrics, syncYouTubePosts,
   type AccountPost, type SocialApiAccount,
 } from '../adapters/socialapi';
+import {
+  AYRSHARE_HISTORY_PLATFORMS, AYRSHARE_SOCIAL_ID_PLATFORMS, AyrshareError, ayrshareAnalyticsBySocialId,
+  ayrsharePlatform, ayrsharePlatformHistory, ayrshareSentPosts, ayrshareUser, errorCodes as ayrshareErrorCodes,
+  type AyrshareAccount,
+} from '../adapters/ayrshare';
+import { ayrshareAuth } from '../adapters';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 import { newId, nowIso } from '../util';
 
@@ -100,7 +106,7 @@ async function runBatch(env: Env, stmts: D1PreparedStatement[]): Promise<void> {
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
 }
 
-// مقاييس مُصطنعة للمزوّدين الذين يعيدون reach/impressions/engagement فقط (Mock/Ayrshare)
+// مقاييس مُصطنعة للمزوّدين الذين يعيدون reach/impressions/engagement فقط
 function synthMetrics(reach: number, impressions: number, engagement: number): string {
   return JSON.stringify([
     { type: 'reach', name: 'الوصول', value: reach, unit: 'count' },
@@ -231,6 +237,8 @@ async function pullWithLimits(
   try {
     if (providerName === 'socialapi') {
       captured = await pullAllSocialApi(env, report, { deadline: limits.deadline, deep: trigger === 'manual', history });
+    } else if (providerName === 'ayrshare') {
+      captured = await pullAllAyrshare(env, report, { deadline: limits.deadline, deep: trigger === 'manual', history });
     } else if (history) {
       // سجلُّ المزوّدين الآخرين يُقرأ مع كل سحبٍ معتاد — لا مسار له مستقلّ
     } else if (providerName === 'buffer') captured = await pullAllBuffer(env);
@@ -247,7 +255,7 @@ async function pullWithLimits(
   return captured;
 }
 
-// مزوّدون يعتمدون getAnalytics لكل منشور نُشر عبر المنصة (Mock/Ayrshare)
+// مزوّدون يعتمدون getAnalytics لكل منشور نُشر عبر المنصة — ما سوى الثلاثة أعلاه
 async function pullViaSchedules(env: Env): Promise<number> {
   const provider = await getProvider(env);
   const { results } = await env.DB.prepare(
@@ -720,6 +728,245 @@ async function pullAllSocialApi(
 
   // ٤) الأرقام الحيّة — أقدمُها تحديثاً أوّلاً
   await refreshLiveMetrics(env, token, budget, report, await dueForLiveMetrics(env, opts.history), platformOf, stop);
+
+  report.calls = budget.used;
+  report.stoppedBy = budget.stoppedBy;
+  if (budget.stoppedBy) report.complete = false;
+  return captured;
+}
+
+/* ═══ Ayrshare ═══
+
+   أربع خطوات بحصّة الاستدعاء نفسها:
+   ١) الحسابات المربوطة (`GET /user`) — ومنها نوع لينكدإن: صفحةٌ أم شخصي.
+   ٢) ما نُشر عبر Ayrshare (`GET /history`) — والجدول عندنا يحفظ معرّف Ayrshare
+      لا معرّف المنصة، وهذا ما يربطهما: لكل منشورٍ وجهاتُه بمعرّفاتها. فتُكتب
+      لقطةٌ لكل وجهةٍ بمعرّف المنصة، مربوطةً بالمحتوى إن نُشر منها.
+   ٣) سجلّ كل منصة (`GET /history/:platform`) — ومنه ما نُشر من تطبيق المنصة
+      مباشرةً. المعتاد أحدث خمسةٍ وعشرين، والسجلّ يمضي من مؤشّره المحفوظ إلى
+      أقدم منشور ثم يستريح ثلاثين يوماً كما في SocialAPI.
+   ٤) الأرقام الحيّة بمعرّف المنصة (`searchPlatformId`) — مئةُ منشورٍ في الطلب،
+      وتعمل لما نُشر من خارج Ayrshare. وسجلُّ إنستغرام لا يحمل إلا الإعجاب
+      والتعليق، ويوتيوب لا شيء: فهذه الخطوة ما يأتي بالوصول والمشاهدات.
+
+   وAyrshare يحدّث أرقام المنشور كل إحدى عشرة دقيقة تقريباً ولينكدإن القديم
+   مرّةً في اليوم، فلا فائدة من طلبها أكثر من كل ستّ ساعات. */
+
+const AYRSHARE_LIVE_EVERY_MS = 6 * 3_600_000;
+
+/**
+ * حجم صفحة السجلّ. إكس وثريدز لهما مؤشّرٌ يُمضى به صفحةً بعد صفحة؛ وما سواهما
+ * بلا مؤشّر في التوثيق فيُقرأ بصفحةٍ واحدة بأقصاها (٥٠٠). وفيسبوك وإنستغرام
+ * ينصح التوثيق ألا يتجاوزا المئة: فوقها تسقط قراءة الأرقام.
+ */
+function historyPageSize(platform: string): number {
+  if (platform === 'twitter' || platform === 'threads' || platform === 'facebook' || platform === 'instagram') return 100;
+  return 500;
+}
+
+async function pullAllAyrshare(
+  env: Env,
+  report: AnalyticsSyncReport,
+  opts: { deadline: number; deep: boolean; history: boolean },
+): Promise<number> {
+  const auth = ayrshareAuth(env);
+  if (!auth) {
+    report.errors.push('مفتاح Ayrshare غير مضبوط. اضبط AYRSHARE_API_KEY.');
+    return 0;
+  }
+  const budget = new CallBudget(report.budget, opts.deadline);
+  const stop = (err: unknown) => {
+    if (err instanceof BudgetExhausted) report.complete = false;
+    else report.errors.push(errorText(err));
+  };
+  const hasX = !!(auth.x?.key && auth.x.secret);
+  let captured = 0;
+
+  // ١) الحسابات
+  let accounts: AyrshareAccount[] = [];
+  try {
+    accounts = (await ayrshareUser(auth, budget)).accounts;
+  } catch (err) {
+    stop(err);
+    report.calls = budget.used;
+    return 0;
+  }
+  // إكس بلا مفتاحَي التطبيق يُرفض كل طلبٍ له — يُترك ويُقال مرّةً
+  if (!hasX && accounts.some((a) => a.platform === 'x')) {
+    report.errors.push('إكس عبر Ayrshare يشترط مفتاحَي تطبيق المطوّر. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET.');
+    accounts = accounts.filter((a) => a.platform !== 'x');
+  }
+  const internalOf = (ayrPlatform: string) =>
+    accounts.find((a) => ayrsharePlatform(a.platform) === ayrPlatform)?.platform ?? ayrPlatform;
+
+  // ٢) ما نُشر عبر Ayrshare — يربط معرّف كل وجهةٍ بجدول النشر
+  const schedMap = await scheduleIndex(env);
+  const { results: schedRows } = await env.DB.prepare(
+    'SELECT provider_post_id, platform FROM schedules WHERE provider_post_id IS NOT NULL',
+  ).all<{ provider_post_id: string; platform: string }>();
+  const schedPlatforms = new Map<string, string[]>();
+  for (const r of schedRows) schedPlatforms.set(r.provider_post_id, [...(schedPlatforms.get(r.provider_post_id) ?? []), r.platform]);
+  const nativeIndex = new Map<string, { postId: string; title: string }>();
+
+  const sentAt = opts.history ? await getSetting(env, 'ayrshare_posts_history_at') : null;
+  const readSent = !opts.history || !sentAt || Date.now() - Date.parse(sentAt) > DAY;
+  if (readSent) {
+    try {
+      const sent = await ayrshareSentPosts(auth, {
+        lastDays: opts.history ? 0 : opts.deep ? 90 : 30,
+        limit: opts.history ? 1000 : 200,
+        budget,
+      });
+      const writes: D1PreparedStatement[] = [];
+      for (const post of sent) {
+        const via = schedMap.get(post.ayrId);
+        for (const t of post.targets) {
+          if (t.platform === 'twitter' && !hasX) continue;
+          const platform = schedPlatforms.get(post.ayrId)?.find((p) => ayrsharePlatform(p) === t.platform) ?? internalOf(t.platform);
+          if (via) nativeIndex.set(t.id, via);
+          writes.push(upsertStmt(env, {
+            providerPostId: t.id,
+            platform,
+            title: via?.title || post.text.slice(0, 140) || null,
+            postId: via?.postId || null,
+            viaPlatform: via ? 1 : 0,
+            reach: null,
+            impressions: null,
+            engagement: null,
+            sentAt: post.created,
+            metricsJson: null,
+            externalUrl: t.postUrl,
+            source: 'posts',
+            providerUuid: post.ayrId,
+            metricsAt: null,
+          }));
+          report.posts++;
+          captured++;
+        }
+      }
+      await runBatch(env, writes);
+      if (opts.history) await setSetting(env, 'ayrshare_posts_history_at', nowIso());
+    } catch (err) {
+      stop(err);
+    }
+  }
+
+  // ٣) سجلّ كل منصة
+  const withHistory = accounts.filter((a) => AYRSHARE_HISTORY_PLATFORMS.has(ayrsharePlatform(a.platform)));
+  if (opts.history) {
+    report.historyAccounts = withHistory.length;
+    report.historyDone = 0;
+  }
+  for (const acc of withHistory) {
+    // تُترك للأرقام الحيّة حصّتها
+    if (budget.left <= 4) {
+      report.complete = false;
+      break;
+    }
+    const p = ayrsharePlatform(acc.platform);
+    const stateKey = `ayrshare:${p}`;
+    const state = opts.history ? await readHistoryState(env, stateKey) : null;
+    if (state?.doneAt && Date.now() - Date.parse(state.doneAt) < 30 * DAY) continue;
+
+    let next = state?.cursor ?? null;
+    let partial = false;
+    let failed = false;
+    for (let page = 0; page < (opts.history ? 4 : 1); page++) {
+      try {
+        const res = await ayrsharePlatformHistory(auth, p, acc.platform, { limit: opts.history ? historyPageSize(p) : 25, next, budget });
+        captured += await ingestAccountPosts(env, report, res.posts, acc.platform, nativeIndex);
+        partial ||= res.partial;
+        next = res.next;
+      } catch (err) {
+        failed = true;
+        // 196 «غير مربوط»: لا سجلّ يُقرأ — ولا يُعدّ خطأً كل ساعة
+        if (!(err instanceof AyrshareError && ayrshareErrorCodes(err.body).includes(196))) stop(err);
+        break;
+      }
+      if (!next) break;
+    }
+    if (partial) report.complete = false;
+    if (opts.history && !failed) {
+      // «partial» لا يُعدّ مكتملاً: يُعاد من الأحدث في السحب التالي
+      await writeHistoryState(env, stateKey, next ? { cursor: next, doneAt: null } : { cursor: null, doneAt: partial ? null : nowIso() });
+    }
+    if (budget.stoppedBy) break;
+  }
+  if (opts.history) {
+    let done = 0;
+    for (const acc of withHistory) {
+      const st = await readHistoryState(env, `ayrshare:${ayrsharePlatform(acc.platform)}`);
+      if (st.doneAt && Date.now() - Date.parse(st.doneAt) < 30 * DAY) done++;
+    }
+    report.historyDone = done;
+  }
+
+  /* ٤) الأرقام الحيّة بمعرّف المنصة — أقدمُها طلباً أوّلاً. والموعد بوقت
+     آخر طلبٍ لها (`metrics_checked_at`) لا بوقت آخر رقم: سجلُّ إنستغرام يحمل
+     الإعجاب والتعليق وحدهما، فلو عُدّت أرقامُه حديثةً لما طُلب الوصول أبداً. */
+  const livePlatforms = accounts.map((a) => a.platform).filter((k) => AYRSHARE_SOCIAL_ID_PLATFORMS.has(ayrsharePlatform(k)));
+  if (livePlatforms.length && !budget.stoppedBy) {
+    const since = new Date(Date.now() - 45 * DAY).toISOString();
+    const staleBefore = new Date(Date.now() - (opts.history ? 7 * DAY : AYRSHARE_LIVE_EVERY_MS)).toISOString();
+    const { results: due } = await env.DB.prepare(
+      `SELECT provider_post_id, platform FROM analytics_snapshots
+       WHERE platform IN (${livePlatforms.map(() => '?').join(',')})
+         AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${opts.history ? '<' : '>='} ?
+         AND COALESCE(metrics_checked_at, '') < ?
+       ORDER BY COALESCE(metrics_checked_at, '') ASC
+       LIMIT 300`,
+    )
+      .bind(...livePlatforms, since, staleBefore)
+      .all<{ provider_post_id: string; platform: string }>();
+
+    const byPlatform = new Map<string, string[]>();
+    for (const r of due) {
+      const p = ayrsharePlatform(r.platform);
+      byPlatform.set(p, [...(byPlatform.get(p) ?? []), r.provider_post_id]);
+    }
+    outer: for (const [p, ids] of byPlatform) {
+      for (let i = 0; i < ids.length; i += 100) {
+        if (budget.left <= 0) {
+          report.complete = false;
+          break outer;
+        }
+        const chunk = ids.slice(i, i + 100);
+        let metrics: Awaited<ReturnType<typeof ayrshareAnalyticsBySocialId>>;
+        try {
+          metrics = await ayrshareAnalyticsBySocialId(auth, p, chunk, budget);
+        } catch (err) {
+          if (err instanceof BudgetExhausted) {
+            report.complete = false;
+            break outer;
+          }
+          /* رفضٌ يخصّ هذه المنشورات (محذوفة، 186) يُختم وقتُ طلبها كي لا تبقى
+             أوّل القائمة تأكل حصّتها — وما سواه يُقال ويُعاد في السحب التالي. */
+          if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500)) {
+            stop(err);
+            continue;
+          }
+          metrics = new Map();
+        }
+        const writes: D1PreparedStatement[] = [];
+        for (const id of chunk) {
+          const m = metrics.get(id);
+          if (m?.present) {
+            writes.push(env.DB.prepare(
+              `UPDATE analytics_snapshots
+               SET reach = COALESCE(?, reach), impressions = COALESCE(?, impressions), engagement = COALESCE(?, engagement),
+                   metrics_json = ?, metrics_at = ?, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+               WHERE provider_post_id = ?`,
+            ).bind(m.reach, m.impressions, m.engagement, JSON.stringify(m.raw), nowIso(), id));
+            report.refreshed++;
+          }
+          writes.push(env.DB.prepare(
+            "UPDATE analytics_snapshots SET metrics_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_post_id = ?",
+          ).bind(id));
+        }
+        await runBatch(env, writes);
+      }
+    }
+  }
 
   report.calls = budget.used;
   report.stoppedBy = budget.stoppedBy;

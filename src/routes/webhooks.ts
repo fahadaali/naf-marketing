@@ -1,9 +1,13 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { providerKey } from '../adapters';
+import { ayrshareAuth, providerKey } from '../adapters';
 import { registerSocialApiWebhook, listSocialApiWebhooks, deleteSocialApiWebhook } from '../adapters/socialapi';
+import {
+  AYRSHARE_WEBHOOK_ACTIONS, deleteAyrshareWebhook, listAyrshareWebhooks, registerAyrshareWebhook, setAyrshareWebhookSecret,
+} from '../adapters/ayrshare';
 import { syncComments } from '../services/commentsSync';
+import { reconcilePublishing } from '../services/publish';
 
 export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -20,19 +24,44 @@ async function setSetting(env: Env, key: string, value: string): Promise<void> {
   ).bind(key, value).run();
 }
 
-// HMAC-SHA256 لجسم الطلب الخام، بصيغة "sha256=<hex>"، مع مقارنة ثابتة الزمن.
-export async function verifySignature(secret: string, rawBody: string, header: string): Promise<boolean> {
-  if (!header) return false;
+/** HMAC-SHA256 لجسم الطلب الخام بصيغة hex. */
+async function hmacHex(secret: string, rawBody: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
   );
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
-  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  const expected = `sha256=${hex}`;
-  if (expected.length !== header.length) return false;
+  return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** مقارنةٌ ثابتة الزمن — لا يُعرف من وقتها كم حرفاً طابق. */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
   let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ header.charCodeAt(i);
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// HMAC-SHA256 لجسم الطلب الخام، بصيغة "sha256=<hex>"، مع مقارنة ثابتة الزمن.
+export async function verifySignature(secret: string, rawBody: string, header: string): Promise<boolean> {
+  if (!header) return false;
+  return safeEqual(`sha256=${await hmacHex(secret, rawBody)}`, header);
+}
+
+/**
+ * توقيع Ayrshare: hex بلا بادئة في `X-Authorization-Content-SHA256`، و`-V2`
+ * يسرد `v1=<توقيع>` لكل سرٍّ صالح مفصولةً بفواصل — سرّان خلال يومٍ بعد
+ * التدوير. يُقبل إن طابق أيٌّ منها.
+ */
+export async function verifyAyrshareSignature(secret: string, rawBody: string, v1Header: string, v2Header: string): Promise<boolean> {
+  const listed = v2Header
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => p.startsWith('v1='))
+    .map((p) => p.slice(3));
+  const candidates = listed.length ? listed : v1Header ? [v1Header.trim()] : [];
+  if (!candidates.length) return false;
+  const expected = await hmacHex(secret, rawBody);
+  return candidates.some((sig) => safeEqual(expected, sig.toLowerCase()));
 }
 
 /* السرّ تحت البادئة المحجوزة `secret:` — لا يخرج من `GET /api/settings`.
@@ -112,4 +141,86 @@ webhookRoutes.delete('/socialapi/manage/:id', async (c) => {
   if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
   await deleteSocialApiWebhook(token, c.req.param('id'));
   return c.json({ ok: true });
+});
+
+/* ═══ Ayrshare ═══
+
+   الحدث يُشغّل ما يقرؤه كاملاً بدل الاعتماد على حمولته: حمولة التعليق في
+   إنستغرام تحمل معرّف Ayrshare للمنشور لا معرّف المنصة، وفيسبوك يُرسلها بشكل
+   ميتا الخام. فالتعليقات والرسائل تُشغّل دورة الصندوق، و«المجدول» دورة التسوية
+   التي تحسم منشور تيك توك المنتظر. ويُردّ ٢٠٠ فوراً — Ayrshare يعيد ما لم
+   يُجب في خمس عشرة ثانية، والقفل يجمع المكرّر في دورةٍ واحدة. */
+
+const AYRSHARE_SECRET_KEY = 'secret:ayrshare_webhook';
+
+webhookRoutes.post('/ayrshare', async (c) => {
+  const raw = await c.req.text();
+  const secret = await getSetting(c.env, AYRSHARE_SECRET_KEY);
+  if (!secret) {
+    console.error('ayrshare: webhook_unregistered — وصل حدثٌ ولا سرّ توقيع مخزَّن');
+    return c.text('Webhook not registered', 401);
+  }
+  const ok = await verifyAyrshareSignature(
+    secret, raw, c.req.header('X-Authorization-Content-SHA256') || '', c.req.header('X-Authorization-Content-SHA256-V2') || '',
+  );
+  if (!ok) return c.text('Invalid signature', 401);
+
+  let evt: any = null;
+  try { evt = JSON.parse(raw); } catch { return c.text('bad request', 400); }
+  const action = String(evt?.action || '');
+  if (action === 'comments' || action === 'messages') {
+    c.executionCtx.waitUntil(
+      syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }).catch(() => {}),
+    );
+  } else if (action === 'scheduled') {
+    c.executionCtx.waitUntil(reconcilePublishing(c.env).then(() => {}).catch(() => {}));
+  }
+  return c.text('ok', 200);
+});
+
+webhookRoutes.use('/ayrshare/manage/*', requireAuth, requirePermission('comments.manage'));
+
+/** سرٌّ عشوائي طويل بترميز base64url — كما يوصي Ayrshare. */
+function randomSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/* التسجيل: سرٌّ جديد يُضبط لدى Ayrshare ثم يُحفظ هنا، ثم يُسجَّل كل حدث. وسرٌّ
+   سابق يبقى صالحاً يوماً عند Ayrshare، فلا تُرفض أحداثٌ في الطريق. */
+webhookRoutes.post('/ayrshare/manage/register', async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  const url = `${new URL(c.req.url).origin}/api/webhooks/ayrshare`;
+  try {
+    const secret = randomSecret();
+    await setAyrshareWebhookSecret(auth, secret);
+    await setSetting(c.env, AYRSHARE_SECRET_KEY, secret);
+    for (const action of AYRSHARE_WEBHOOK_ACTIONS) await registerAyrshareWebhook(auth, action, url);
+    return c.json({ ok: true, url });
+  } catch (e: any) {
+    return c.json({ error: `تعذّر تسجيل الويب هوك: ${String(e?.message || e)}` }, 502);
+  }
+});
+
+webhookRoutes.get('/ayrshare/manage/list', async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  try {
+    // المعرّف اسم الحدث — به يُحذف
+    return c.json({ webhooks: (await listAyrshareWebhooks(auth)).map((h) => ({ id: h.event, url: h.url })) });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+webhookRoutes.delete('/ayrshare/manage/:id', async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  try {
+    await deleteAyrshareWebhook(auth, c.req.param('id'));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
 });

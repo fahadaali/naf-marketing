@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { SOURCES, SOURCE_CONTRACT } from '../adapters/sources';
+import { SOURCES, SOURCE_CONTRACT, socialSecretName } from '../adapters/sources';
 import { syncSource } from '../services/metricSync';
 import { applyCrmSnapshot, syncCrm } from '../services/crmSync';
 import { parseCrmExport } from '../adapters/crm';
@@ -32,6 +32,8 @@ integrationRoutes.get('/', async (c) => {
     last_sync_status: string; last_error: string | null; last_ok_at: string | null;
   }>();
 
+  // مصدر «مزوّد النشر» مفتاحُه مفتاحُ المزوّد المختار
+  const socialSecret = await socialSecretName(c.env);
   const integrations = results.map((row) => {
     const source = SOURCES[row.key];
     // منصة إدارة الشركة ليست في `SOURCES`: مسارُها نسخُ صفوفٍ لا سحبُ نقاط.
@@ -42,7 +44,7 @@ integrationRoutes.get('/', async (c) => {
     } catch {
       config = {};
     }
-    const secretName = isCrm ? 'CRM_API_KEY' : source?.secretName;
+    const secretName = isCrm ? 'CRM_API_KEY' : row.key === 'social' ? socialSecret : source?.secretName;
     return {
       key: row.key,
       is_enabled: row.is_enabled === 1,

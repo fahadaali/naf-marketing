@@ -25,8 +25,9 @@
 
 import type { Env } from '../types';
 import { getAccessToken, googleJson, parseServiceAccount, GoogleAuthError } from './googleAuth';
-import { providerKey } from './index';
+import { ayrshareAuth, providerKey } from './index';
 import { socialApiAudience, socialApiReviewSummary } from './socialapi';
+import { ayrshareAudience, ayrshareReviewSummary, ayrshareUser } from './ayrshare';
 import { riyadhToday } from '../services/period';
 
 export type MetricPoint = {
@@ -390,9 +391,23 @@ async function fetchBusinessProfile(env: Env, cfg: SourceConfig, range: SourceRa
    لا تزال الإصدار الرابع وتحتاج اعتماداً مستقلاً للحساب، ومزوّد النشر يقرأها
    اليوم بالمفتاح القائم. والرقم واحد في الحالين — مصدرُ جوجل نفسه. */
 
+/** مزوّد النشر المختار — من الإعدادات، وإلا احتياطه في الأسرار. */
+async function activeProvider(env: Env): Promise<string> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>();
+  return (row?.value || env.PROVIDER_NAME || 'mock').toLowerCase();
+}
+
+/** سرُّ مصدر «مزوّد النشر» — مفتاح المزوّد المختار. */
+export async function socialSecretName(env: Env): Promise<string> {
+  return (await activeProvider(env)) === 'ayrshare' ? 'AYRSHARE_API_KEY' : 'SOCIALAPI_API_KEY';
+}
+
 async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Promise<MetricPoint[]> {
-  const key = providerKey(env, 'socialapi');
-  if (!key) throw new SourceError('مفتاح مزوّد النشر غير مضبوط. اضبط SOCIALAPI_API_KEY.');
+  const ayrshare = (await activeProvider(env)) === 'ayrshare';
+  const key = providerKey(env, ayrshare ? 'ayrshare' : 'socialapi');
+  if (!key) {
+    throw new SourceError(`مفتاح مزوّد النشر غير مضبوط. اضبط ${ayrshare ? 'AYRSHARE_API_KEY' : 'SOCIALAPI_API_KEY'}.`);
+  }
 
   /* ═══ الثلاثة لقطاتٌ لا مجاميع، فلا تُكتب في فترةٍ منقضية ═══
 
@@ -411,7 +426,11 @@ async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Pr
   /* المتابعون لقطةٌ لا مجموع فترة: العدد اليوم هو العدد، ولا يُجمع على أيام
      الشهر. والنموّ يُحتسب بمقارنة الفترتين في `services/metrics.ts` كما كان
      يُحتسب حين كان يُسجَّل باليد. */
-  for (const acc of await socialApiAudience(key)) {
+  const auth = ayrshare ? ayrshareAuth(env) : null;
+  const audience = auth
+    ? await ayrshareAudience(auth, (await ayrshareUser(auth)).accounts)
+    : await socialApiAudience(key);
+  for (const acc of audience) {
     if (acc.followers === null) continue; // منصّة لا تُعلن العدد — يبقى تسجيله باليد
     out.push({ metricKey: 'followers_total', dimKey: 'platform', dimValue: acc.platform, value: acc.followers });
   }
@@ -419,7 +438,9 @@ async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Pr
   let reviewCount = 0;
   let weighted = 0;
   let sawAverage = false;
-  for (const r of await socialApiReviewSummary(key)) {
+  const ayrReviews = auth ? await ayrshareReviewSummary(auth) : null;
+  const reviews = auth ? (ayrReviews ? [ayrReviews] : []) : await socialApiReviewSummary(key);
+  for (const r of reviews) {
     if (r.count !== null) reviewCount += r.count;
     if (r.average !== null && r.count) {
       weighted += r.average * r.count;

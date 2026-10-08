@@ -408,8 +408,8 @@ function Platforms() {
         </div>
       )}
 
-      {provider === 'socialapi' && <IntegrationHealth />}
-      {provider === 'socialapi' && <SocialApiWebhook />}
+      {(provider === 'socialapi' || provider === 'ayrshare') && <IntegrationHealth provider={provider} />}
+      {(provider === 'socialapi' || provider === 'ayrshare') && <ProviderWebhook provider={provider} />}
 
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
@@ -417,8 +417,11 @@ function Platforms() {
   );
 }
 
-/* ===== تسجيل الويب هوك (استقبال فوري للتعليقات/الرسائل/التقييمات) ===== */
-function SocialApiWebhook() {
+/* ===== تسجيل الويب هوك (استقبال فوري للتعليقات/الرسائل/التقييمات) =====
+   المزوّدان بالمسارات نفسها تحت `/webhooks/{provider}/manage`. */
+const PROVIDER_NAMES = { socialapi: 'SocialAPI', ayrshare: 'Ayrshare' } as const;
+
+function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
   const [hooks, setHooks] = useState<any[]>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -426,15 +429,15 @@ function SocialApiWebhook() {
   function refresh() {
     // الصمت قرار: قائمةُ خطّافاتٍ مسجَّلة لدى المزوّد — تعذّرُها لا يمنع
     // التسجيل، وزرُّه يُبلّغ بخطئه إن فشل
-    api.get('/webhooks/socialapi/manage/list').then((d) => setHooks(d.webhooks || [])).catch(() => {});
+    api.get(`/webhooks/${provider}/manage/list`).then((d) => setHooks(d.webhooks || [])).catch(() => {});
   }
-  useEffect(refresh, []);
+  useEffect(refresh, [provider]);
 
   async function register() {
     setBusy(true);
     setMsg('جارٍ التسجيل…');
     try {
-      const d = await api.post('/webhooks/socialapi/manage/register');
+      const d = await api.post(`/webhooks/${provider}/manage/register`);
       setMsg(`تم التسجيل: ${d.url}`);
       refresh();
     } catch (e: any) {
@@ -447,7 +450,7 @@ function SocialApiWebhook() {
   async function remove(id: string) {
     setBusy(true);
     try {
-      await api.del(`/webhooks/socialapi/manage/${id}`);
+      await api.del(`/webhooks/${provider}/manage/${id}`);
       refresh();
     } catch (e: any) {
       setMsg(e.message);
@@ -464,7 +467,7 @@ function SocialApiWebhook() {
         <button className="btn ghost sm" onClick={register} disabled={busy}>تسجيل نقطة الاستقبال</button>
       </div>
       <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
-        يسجّل نقطة استقبال لدى SocialAPI لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
+        يسجّل نقطة استقبال لدى {PROVIDER_NAMES[provider]} لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
       </p>
       {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
       {hooks.map((h) => (
@@ -975,16 +978,17 @@ function Integrations() {
   );
 }
 
-/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة ===== */
-function IntegrationHealth() {
+/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة =====
+   المزوّدان يردّان الشكل نفسه من `/{provider}/health`، فالبطاقة واحدة. */
+function IntegrationHealth({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
   const [h, setH] = useState<any>(null);
   const [busy, setBusy] = useState(false);
 
   function load() {
     setBusy(true);
-    api.get('/socialapi/health').then(setH).catch(() => setH(null)).finally(() => setBusy(false));
+    api.get(`/${provider}/health`).then(setH).catch(() => setH(null)).finally(() => setBusy(false));
   }
-  useEffect(load, []);
+  useEffect(load, [provider]);
 
   if (!h?.configured) return null;
   const L = h.local || {};

@@ -4,6 +4,31 @@ import { requireAuth, requirePermission } from '../middleware';
 import { listSocialApiAccounts, listSocialApiWebhooks, socialApiUsage } from '../adapters/socialapi';
 import { providerKey } from '../adapters';
 
+/** آخر نشاطٍ فعلي مسجّل لدينا (لا لدى المزوّد) — مشتركٌ بين مزوّدي النشر. */
+export async function localSyncHealth(env: Env): Promise<Record<string, unknown>> {
+  const lastAnalytics = await env.DB.prepare(
+    'SELECT MAX(captured_at) AS t, COUNT(*) AS n FROM analytics_snapshots',
+  ).first<{ t: string | null; n: number }>();
+  const lastComment = await env.DB.prepare(
+    'SELECT MAX(created_at) AS t, COUNT(*) AS n FROM platform_comments',
+  ).first<{ t: string | null; n: number }>();
+  const pending = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'pending'",
+  ).first<{ n: number }>();
+  const failed = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'failed'",
+  ).first<{ n: number }>();
+
+  return {
+    analytics_last: lastAnalytics?.t || null,
+    analytics_count: lastAnalytics?.n || 0,
+    inbox_last: lastComment?.t || null,
+    inbox_count: lastComment?.n || 0,
+    schedules_pending: pending?.n || 0,
+    schedules_failed: failed?.n || 0,
+  };
+}
+
 export const socialApiRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 socialApiRoutes.use('*', requireAuth);
@@ -33,28 +58,7 @@ socialApiRoutes.get('/health', requirePermission('settings.manage'), async (c) =
     out.webhooks = hooks.map((h: any) => ({ id: h.id, url: h.url, is_active: h.is_active }));
   } catch (e: any) { out.webhooks_error = String(e?.message || e); }
 
-  // آخر نشاط فعلي مسجّل لدينا (لا لدى المزوّد)
-  const lastAnalytics = await c.env.DB.prepare(
-    'SELECT MAX(captured_at) AS t, COUNT(*) AS n FROM analytics_snapshots',
-  ).first<{ t: string | null; n: number }>();
-  const lastComment = await c.env.DB.prepare(
-    'SELECT MAX(created_at) AS t, COUNT(*) AS n FROM platform_comments',
-  ).first<{ t: string | null; n: number }>();
-  const pending = await c.env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'pending'",
-  ).first<{ n: number }>();
-  const failed = await c.env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'failed'",
-  ).first<{ n: number }>();
-
-  out.local = {
-    analytics_last: lastAnalytics?.t || null,
-    analytics_count: lastAnalytics?.n || 0,
-    inbox_last: lastComment?.t || null,
-    inbox_count: lastComment?.n || 0,
-    schedules_pending: pending?.n || 0,
-    schedules_failed: failed?.n || 0,
-  };
+  out.local = await localSyncHealth(c.env);
 
   // خريطة الربط المحفوظة
   const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();

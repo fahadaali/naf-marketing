@@ -174,7 +174,7 @@ analyticsRoutes.get('/sources', async (c) => {
   /* أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده. فمن فتح
      السنة الماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد. */
   let history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null = null;
-  if (provider === 'socialapi') {
+  if (provider === 'socialapi' || provider === 'ayrshare') {
     const postsHistory = await readAnalyticsHistoryReport(c.env);
     history = {
       posts: { accounts: postsHistory?.historyAccounts ?? null, done: postsHistory?.historyDone ?? null },

@@ -57,6 +57,12 @@ BUFFER_API_KEY=""
 # منه يُقرأ عددُ المتابعين وملخّص المراجعات، فلا سرَّ ثانياً له.
 SOCIALAPI_API_KEY=""
 AYRSHARE_API_KEY=""
+# وإكس عبر Ayrshare يشترط منذ ٣١ مارس ٢٠٢٦ مفتاحَي تطبيقٍ تنشئه أنت في
+# console.x.com (API Key وAPI Secret من OAuth 1.0، بصلاحية Read and write and
+# Direct message). يُرسلان مع كل طلب ولا يخزّنهما Ayrshare. وبدونهما يُرفض
+# النشر على إكس وحده بسببٍ يقول ذلك، وتعمل بقية المنصات.
+AYRSHARE_X_API_KEY=""
+AYRSHARE_X_API_SECRET=""
 PROVIDER_API_KEY=""
 
 # ═══ بيسكامب (مركز المعرفة) ═══
