@@ -633,6 +633,10 @@ h3, h4 { letter-spacing: -0.01em; }
 .kanban-col.dragover { outline: 2px dashed var(--primary); outline-offset: -2px; background: var(--primary-soft); }
 .kanban-card { transition: box-shadow .1s; }
 .kanban-card.dragging { opacity: .5; }
+/* «خطة المحتوى»: البطاقة تُسحب إلى يومٍ آخر فيتغيّر يومها المستهدف */
+.cal-event.plan[draggable="true"] { cursor: grab; }
+.cal-event.dragging { opacity: .5; }
+.cal-cell.dragover { outline: 2px dashed var(--primary); outline-offset: -2px; background: var(--primary-soft); }
 .kanban-card[draggable='true'] { cursor: grab; }
 
 /* ===== progress bar ===== */

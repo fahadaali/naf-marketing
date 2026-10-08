@@ -10,7 +10,7 @@ import { platformLabel, platformsOf, PlatformIcons, usePlatformLabels } from '..
 import { formatDate, formatMonth, isolate } from '../lib/format';
 import {
   type YearMonth, type DayCard, riyadhToday, monthOf, shiftMonth, monthBounds, monthCells, localDateOf,
-  groupByPostDay, groupByPlannedDay, dayDate,
+  groupByPostDay, groupByPlannedDay, dayDate, canDropOnDay,
 } from '../planning';
 
 type Layer = 'plan' | 'schedule';
@@ -24,7 +24,7 @@ const LAYER_KEY = 'naf-calendar-layer';
    و`CalendarClock` و`CalendarRange` مسجّلةٌ لمعانٍ أخرى تجاور هذا المبدّل. */
 export default function Calendar() {
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [layer, setLayer] = useState<Layer>(() => (localStorage.getItem(LAYER_KEY) === 'plan' ? 'plan' : 'schedule'));
   useEffect(() => { localStorage.setItem(LAYER_KEY, layer); }, [layer]);
 
@@ -41,6 +41,9 @@ export default function Calendar() {
   const [ym, setYm] = useState<YearMonth>(() => monthOf(riyadhToday()));
   const [reload, setReload] = useState(0);
   const [importing, setImporting] = useState(false);
+  // السحب في «خطة المحتوى»: المحتوى المسحوب، واليوم الذي تحته
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overDay, setOverDay] = useState<string | null>(null);
 
   /* مواعيد الشهر المعروض وحده. كانت تُجلب أقدمَ خمس مئة موعدٍ مرّةً واحدة،
      فلمّا تجاوز السجلّ خمس مئة خرجت الأشهر القادمة من التقويم بلا إشارة. */
@@ -75,6 +78,31 @@ export default function Calendar() {
   const monthLabel = formatMonth(localDateOf(ym));
   const labels = usePlatformLabels();
   const canAdd = layer === 'plan' && can('draft.edit');
+
+  /* من يعدّل يوم المحتوى في المحرّر يسحبه هنا — شرطُ المحرّر نفسه: الكاتب على
+     محتواه أو ما أُسند إليه، وما بعد المسودة لمن يراجع. والخادم هو الحكم. */
+  const canMove = (p: any) =>
+    canAdd &&
+    (['idea', 'draft', 'rejected'].includes(displayStatus(p)) || can('content.review')) &&
+    (user?.role_name !== 'writer' || p.author_id === user?.id || p.assignee_id === user?.id);
+
+  const dragged = planned.find((p) => p.id === dragId);
+
+  async function moveToDay(post: any, day: string) {
+    setMsg(''); setErr('');
+    const from = post.planned_on;
+    const place = (d: string) => setPlanned((ps) => ps.map((p) => (p.id === post.id ? { ...p, planned_on: d } : p)));
+    // تفاؤلي: ينتقل في يومه الجديد فوراً، ويعود إلى يومه إن ردّه الخادم.
+    // والعودة محلّية لا إعادة تحميل: التحميل يمسح رسالة الخطأ قبل أن تُقرأ.
+    place(day);
+    try {
+      await api.patch(`/posts/${post.id}`, { planned_on: day });
+      setMsg('تم التحديث');
+    } catch (e: any) {
+      place(from);
+      setErr(e.message);
+    }
+  }
 
   return (
     <div>
@@ -116,7 +144,23 @@ export default function Calendar() {
           </div>
           <div className="cal-grid">
             {cells.map((cell, i) => (
-              <div key={cell.ymd ?? `pad-${i}`} className={`cal-cell ${cell.day === null ? 'other' : ''}`}>
+              <div
+                key={cell.ymd ?? `pad-${i}`}
+                className={`cal-cell ${cell.day === null ? 'other' : ''} ${overDay && overDay === cell.ymd ? 'dragover' : ''}`}
+                onDragOver={(e) => {
+                  if (!dragged || !cell.ymd || !canDropOnDay(dragged.planned_on, cell.ymd, today)) return;
+                  e.preventDefault();
+                  if (overDay !== cell.ymd) setOverDay(cell.ymd);
+                }}
+                onDragLeave={() => { if (overDay === cell.ymd) setOverDay(null); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const day = cell.ymd;
+                  setOverDay(null);
+                  setDragId(null);
+                  if (dragged && day && canDropOnDay(dragged.planned_on, day, today)) moveToDay(dragged, day);
+                }}
+              >
                 <div className="cal-day-row">
                   <div className="cal-day">{cell.day ?? ''}</div>
                   {/* الإضافة في يومٍ قادم وحده: خطّةٌ ليومٍ مضى لا تُنشأ — تُعدَّل */}
@@ -142,7 +186,17 @@ export default function Calendar() {
                   const ds = displayStatus(p);
                   const label = `${p.title} — ${STATUS_LABELS[ds] || ds}`;
                   return (
-                    <button type="button" key={p.id} className="cal-event plan" title={label} aria-label={label} onClick={() => navigate(`/editor/${p.id}`)}>
+                    <button
+                      type="button"
+                      key={p.id}
+                      className={`cal-event plan ${dragId === p.id ? 'dragging' : ''}`}
+                      title={label}
+                      aria-label={label}
+                      draggable={canMove(p)}
+                      onDragStart={() => { if (canMove(p)) setDragId(p.id); }}
+                      onDragEnd={() => { setDragId(null); setOverDay(null); }}
+                      onClick={() => navigate(`/editor/${p.id}`)}
+                    >
                       <span className="row platform-row cal-plan-head">
                         <StatusBadge status={ds} size={13} iconOnly />
                         <PlatformIcons platforms={platformsOf(p)} custom={labels} />
