@@ -998,3 +998,25 @@ export async function ayrshareReviews(auth: AyrshareAuth, platform: string, budg
       };
     });
 }
+
+/* ═══ الويب هوك ═══
+
+   سرُّ التوقيع واحدٌ للملف كلّه (`POST /hook/webhook/secret`) يوقّع كل الأحداث،
+   والتسجيل حدثاً حدثاً (`POST /hook/webhook` بـ `action` و`url`). والتوقيع
+   HMAC-SHA256 للجسم الخام بصيغة hex في `X-Authorization-Content-SHA256`، ومعه
+   `-V2` يسرد `v1=<توقيع>` لكل سرٍّ صالح — سرّان خلال يومٍ بعد التدوير. */
+
+/** الأحداث التي تُسجَّل: التعليقات والرسائل للصندوق، والمجدول لحال تيك توك. */
+export const AYRSHARE_WEBHOOK_ACTIONS = ['comments', 'messages', 'scheduled'] as const;
+
+export async function setAyrshareWebhookSecret(auth: AyrshareAuth, secret: string): Promise<void> {
+  await ayrshareCall(auth, 'POST', '/hook/webhook/secret', { secret });
+}
+
+export async function registerAyrshareWebhook(auth: AyrshareAuth, action: string, url: string): Promise<void> {
+  await ayrshareCall(auth, 'POST', '/hook/webhook', { action, url });
+}
+
+export async function deleteAyrshareWebhook(auth: AyrshareAuth, action: string): Promise<void> {
+  await ayrshareCall(auth, 'DELETE', '/hook/webhook', { action });
+}
