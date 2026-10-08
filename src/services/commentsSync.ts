@@ -3,7 +3,7 @@ import type { ModerateAction } from '../adapters/provider';
 import { ayrshareAuth, getProvider, providerKey } from '../adapters';
 import {
   AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareMessages,
-  ayrsharePlatform, ayrshareReviews, ayrshareUser, mapAyrshareComments,
+  ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, mapAyrshareComments,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
 import {
@@ -14,7 +14,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { notifyUsers, usersWithPermission } from './notify';
-import { customPlatformLabels, platformName } from '../platformLabels';
+import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 
 /* ============================================================
@@ -1126,7 +1126,81 @@ async function syncMentions(
    ============================================================ */
 
 const AYRSHARE_RECENT_DAYS = 30;
-const AYRSHARE_RECHECK_MS = 6 * 3_600_000;
+/* ساعةٌ لا ستّ: الردّ من تطبيق المنصة لا يُعرف إلا بإعادة قراءة تعليقات
+   منشوره، وستُّ ساعاتٍ كانت تُبقي ما رُدّ عليه من إكس «بلا رد» نصفَ يوم. */
+const AYRSHARE_RECHECK_MS = 3_600_000;
+
+/* ═══ ما سُحب أيام SocialAPI ═══
+
+   الصفوف القديمة بمعرّفات SocialAPI — التعليق `منشور|حساب|تعليق`، والمراجعة
+   `rv:حساب:مراجعة` — فلا يجدها Ayrshare بمعرّفه: يبقى القديم «بلا رد» ولو رُدّ
+   عليه من المنصة، ويُكتب التعليق نفسه صفّاً ثانياً. ومعرّف التعليق والمراجعة
+   على المنصة واحدٌ في الاثنين، فبه يُطابَقان:
+   - لا صفَّ جديداً بعد: يُنقل القديم إلى معرّف Ayrshare بردّه كما هو.
+   - كُتب الجديد: يُنقل إليه ردُّ القديم إن لم يكن له ردّ، ويُحذف القديم —
+     قرار المالك. والرسائل لا تُطابَق: معرّف المحادثة عند SocialAPI غيرُه
+     عند المنصة. */
+
+type LegacyRow = {
+  id: string; platform: string; kind: string; provider_comment_id: string;
+  reply_body: string | null; replied_at: string | null; replied_by: string | null;
+  reply_source: string | null; reply_provider_id: string | null;
+};
+
+/** الصفوف القديمة بمفتاح «منصة|نوع|معرّف المنصة» — تُقرأ مرّةً في الدورة. */
+async function legacyIndex(env: Env): Promise<Map<string, LegacyRow>> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, platform, kind, provider_comment_id, reply_body, replied_at, replied_by, reply_source, reply_provider_id
+     FROM platform_comments
+     WHERE kind IN ('comment', 'review') AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')`,
+  ).all<LegacyRow>();
+  const out = new Map<string, LegacyRow>();
+  for (const r of results) {
+    let native = '';
+    if (r.kind === 'review' && r.provider_comment_id.startsWith('rv:')) {
+      native = r.provider_comment_id.slice(r.provider_comment_id.indexOf(':', 3) + 1);
+    } else if (r.kind === 'comment') {
+      const parts = r.provider_comment_id.split('|');
+      if (parts.length === 3) native = parts[2];
+    }
+    if (native) out.set(`${normalizePlatformKey(r.platform)}|${r.kind}|${native}`, r);
+  }
+  return out;
+}
+
+/** يضمّ القديم إلى عناصر Ayrshare قبل كتابتها — انظر أعلاه. */
+async function adoptLegacy(env: Env, legacy: Map<string, LegacyRow>, items: InboxItem[]): Promise<void> {
+  if (!legacy.size || !items.length) return;
+  const matches: { item: InboxItem; old: LegacyRow; key: string }[] = [];
+  for (const it of items) {
+    const d = decodeAyrshareId(it.id);
+    const native = d?.type === 'comment' ? d.commentId : d?.type === 'review' ? d.reviewId : '';
+    const key = `${normalizePlatformKey(it.platform)}|${it.kind}|${native}`;
+    const old = native ? legacy.get(key) : undefined;
+    if (old) matches.push({ item: it, old, key });
+  }
+  if (!matches.length) return;
+  const current = await rowsByIds(env, matches.map((m) => m.item.id));
+  const stmts: D1PreparedStatement[] = [];
+  for (const { item, old, key } of matches) {
+    const fresh = current.get(item.id);
+    if (!fresh) {
+      // والمنصة باسمها عندنا: SocialAPI كتب إكس `twitter`
+      stmts.push(env.DB.prepare('UPDATE platform_comments SET provider_comment_id = ?, platform = ? WHERE id = ?').bind(item.id, item.platform, old.id));
+    } else {
+      if (fresh.reply_body === null && old.reply_body !== null) {
+        stmts.push(env.DB.prepare(
+          `UPDATE platform_comments
+           SET reply_body = ?, replied_at = ?, replied_by = ?, reply_source = ?, reply_provider_id = COALESCE(reply_provider_id, ?)
+           WHERE id = ? AND reply_body IS NULL`,
+        ).bind(old.reply_body, old.replied_at, old.replied_by, old.reply_source, old.reply_provider_id, fresh.id));
+      }
+      stmts.push(env.DB.prepare('DELETE FROM platform_comments WHERE id = ?').bind(old.id));
+    }
+    legacy.delete(key);
+  }
+  await runBatch(env, stmts);
+}
 
 async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: number): Promise<void> {
   const auth = ayrshareAuth(env);
@@ -1177,10 +1251,11 @@ async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: nu
     ? accounts.filter((a) => a.messaging && AYRSHARE_DM_PLATFORMS.has(ayrsharePlatform(a.platform)))
     : [];
   const reviewAccounts = accounts.filter((a) => a.platform === 'google' || a.platform === 'facebook');
+  const legacy = await legacyIndex(env);
   const reserve = others ? (dmAccounts.length + reviewAccounts.length) * (deep ? 3 : 1) : 0;
 
   try {
-    await syncAyrshareComments(env, auth, budget, report, accounts, reserve, history);
+    await syncAyrshareComments(env, auth, budget, report, accounts, reserve, history, legacy);
   } catch (err) {
     fail('comment', err);
   }
@@ -1196,6 +1271,7 @@ async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: nu
         const items = (await ayrshareReviews(auth, ayrsharePlatform(acc.platform), budget)).map((it) => ({ ...it, platform: acc.platform }));
         report.kinds.review.ok = true;
         report.kinds.review.items += items.length;
+        await adoptLegacy(env, legacy, items);
         const res = await writeItems(env, items);
         report.added += res.added;
         report.externalReplies += res.externalReplies;
@@ -1237,6 +1313,7 @@ async function syncAyrshareComments(
   accounts: AyrshareAccount[],
   reserve: number,
   history: boolean,
+  legacy: Map<string, LegacyRow>,
 ): Promise<void> {
   const byInternal = new Map(accounts.filter((a) => AYRSHARE_COMMENT_PLATFORMS.has(ayrsharePlatform(a.platform))).map((a) => [a.platform, a]));
   if (!byInternal.size) return;
@@ -1313,6 +1390,7 @@ async function syncAyrshareComments(
       const keys = byInternal.get(q.internal)?.ownerKeys ?? [];
       const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
       report.kinds.comment.items += items.length;
+      await adoptLegacy(env, legacy, items);
       const res = await writeItems(env, items);
       report.added += res.added;
       report.externalReplies += res.externalReplies;
