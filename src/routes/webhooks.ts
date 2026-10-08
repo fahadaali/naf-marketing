@@ -4,7 +4,7 @@ import { requireAuth, requirePermission } from '../middleware';
 import { ayrshareAuth, providerKey } from '../adapters';
 import { registerSocialApiWebhook, listSocialApiWebhooks, deleteSocialApiWebhook } from '../adapters/socialapi';
 import {
-  AYRSHARE_WEBHOOK_ACTIONS, deleteAyrshareWebhook, listAyrshareWebhooks, registerAyrshareWebhook, setAyrshareWebhookSecret,
+  AYRSHARE_WEBHOOK_ACTIONS, deleteAyrshareWebhook, listAyrshareWebhooks, registerAyrshareWebhook,
 } from '../adapters/ayrshare';
 import { syncComments } from '../services/commentsSync';
 import { reconcilePublishing } from '../services/publish';
@@ -186,21 +186,31 @@ function randomSecret(): string {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/* التسجيل: سرٌّ جديد يُضبط لدى Ayrshare ثم يُحفظ هنا، ثم يُسجَّل كل حدث. وسرٌّ
-   سابق يبقى صالحاً يوماً عند Ayrshare، فلا تُرفض أحداثٌ في الطريق. */
+/* التسجيل: سرٌّ جديد يُحفظ هنا ويُرسل مع تسجيل كل حدث. وسرٌّ سابق يبقى صالحاً
+   يوماً عند Ayrshare، فلا تُرفض أحداثٌ في الطريق. والسبب يُذكر باسم الحدث
+   الذي تعذّر — فلا يُقرأ «تعذّر التسجيل» وحده ولا يُعرف أين. */
 webhookRoutes.post('/ayrshare/manage/register', async (c) => {
   const auth = ayrshareAuth(c.env);
   if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
   const url = `${new URL(c.req.url).origin}/api/webhooks/ayrshare`;
-  try {
-    const secret = randomSecret();
-    await setAyrshareWebhookSecret(auth, secret);
-    await setSetting(c.env, AYRSHARE_SECRET_KEY, secret);
-    for (const action of AYRSHARE_WEBHOOK_ACTIONS) await registerAyrshareWebhook(auth, action, url);
-    return c.json({ ok: true, url });
-  } catch (e: any) {
-    return c.json({ error: `تعذّر تسجيل الويب هوك: ${String(e?.message || e)}` }, 502);
+  const secret = randomSecret();
+  await setSetting(c.env, AYRSHARE_SECRET_KEY, secret);
+  // حدثٌ يتعذّر (الرسائل قبل تفعيلها مثلاً) لا يمنع تسجيل غيره
+  const done: string[] = [];
+  const failed: string[] = [];
+  for (const action of AYRSHARE_WEBHOOK_ACTIONS) {
+    try {
+      await registerAyrshareWebhook(auth, action, url, secret);
+      done.push(action);
+    } catch (e: any) {
+      failed.push(`«${action}»: ${String(e?.message || e)}`);
+    }
   }
+  if (failed.length) {
+    const head = done.length ? `سُجّل ${done.join('، ')}، وتعذّر` : 'تعذّر تسجيل';
+    return c.json({ error: `${head} ${failed.join(' · ')}`, registered: done }, 502);
+  }
+  return c.json({ ok: true, url, registered: done });
 });
 
 webhookRoutes.get('/ayrshare/manage/list', async (c) => {

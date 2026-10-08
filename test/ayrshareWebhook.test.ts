@@ -100,3 +100,17 @@ describe('نقطة الاستقبال', () => {
     expect(syncComments).not.toHaveBeenCalled();
   });
 });
+
+describe('تسجيل الويب هوك لدى Ayrshare', () => {
+  it('السرّ يُرسل مع تسجيل كل حدث — لا بنداءٍ مستقلّ', async () => {
+    const { registerAyrshareWebhook } = await import('../src/adapters/ayrshare');
+    const calls: { path: string; body: any }[] = [];
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      calls.push({ path: new URL(String(input)).pathname, body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ status: 'success' }));
+    });
+    await registerAyrshareWebhook({ key: 'k' }, 'comments', 'https://m.naflaw.sa/api/webhooks/ayrshare', 's3cret');
+    expect(calls).toEqual([{ path: '/api/hook/webhook', body: { action: 'comments', url: 'https://m.naflaw.sa/api/webhooks/ayrshare', secret: 's3cret' } }]);
+    vi.unstubAllGlobals();
+  });
+});
