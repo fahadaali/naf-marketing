@@ -72,6 +72,25 @@ export function localDateOf({ year, month }: YearMonth, day = 1): Date {
   return new Date(year, month - 1, day);
 }
 
+/** حدّ طول المحور — يطابق `PILLAR_MAX` في `src/services/planning.ts`. */
+export const PILLAR_MAX = 80;
+
+/**
+ * محاور المحتوى من الإعدادات (`content_pillars`): نصوصٌ مقصوصةٌ بلا فراغ ولا
+ * تكرار، بترتيبها. وما ليس مصفوفةً — إعدادٌ لم يُحفظ بعد أو مشوَّه — لا محاور.
+ */
+export function pillarsFrom(settings: { content_pillars?: unknown } | null | undefined): string[] {
+  const raw = settings?.content_pillars;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim().slice(0, PILLAR_MAX);
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 /** صفّ موعدٍ كما يُرجعه `GET /schedules`: محتوى × منصة. */
 export type ScheduleRow = { id: string; post_id: string; platform: string; scheduled_at: string; title?: string };
 
