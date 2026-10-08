@@ -1,46 +1,282 @@
-import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult, CommentItem } from './provider';
+import type {
+  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult,
+} from './provider';
+import { fixedLengthBody, youtubeTitle } from './socialapi';
+import { platformNames } from '../platformLabels';
 
-// مثال تنفيذ لمزوّد حقيقي (Ayrshare) — يوضّح كيف يُبنى أي مزوّد خلف نفس الواجهة.
-// ملاحظة: أسماء المنصات قد تحتاج مواءمة حسب المزوّد؛ عُدّلها عند التفعيل الفعلي.
+/* ═══ Ayrshare ═══
+
+   مزوّدٌ كاملٌ يُختار من الإعدادات كما يُختار SocialAPI. والحساب على خطة
+   Launch، والحسابات كلها مربوطةٌ بالملف الرئيسي (Primary Profile) — فلا
+   `Profile-Key` في أيّ طلب. والتوثيق: https://www.ayrshare.com/docs
+
+   وما بُني عليه هنا مأخوذٌ من صفحات التوثيق نفسها لا من الذاكرة:
+   - الأساس `https://api.ayrshare.com/api` والمفتاح `Authorization: Bearer`.
+   - منذ ٣١ مارس ٢٠٢٦ يشترط إكس مفتاحَي تطبيق المطوّر لدى صاحب الحساب في
+     كل طلبٍ يمسّه: `X-Twitter-OAuth1-Api-Key` و`X-Twitter-OAuth1-Api-Secret`.
+     وبدونهما يُرفض الطلب برمز 419.
+   - معرّف المنشور لدى Ayrshare (`id` في أعلى الردّ) هو ما يُحذف به ويُسأل
+     به عن حاله وتحليلاته وتعليقاته — لا معرّف المنصة. */
+
+const BASE = 'https://api.ayrshare.com/api';
+
+/** مفتاحا تطبيق إكس لدى صاحب الحساب — يُرسلان مع كل طلب إن ضُبطا. */
+export type AyrshareXKeys = { key?: string; secret?: string };
+
+/**
+ * اسم المنصة لدى Ayrshare. إكس عنده `twitter`، والملف التجاري `gmb`.
+ * ولينكدإن واحدٌ في الملف الرئيسي — شخصيٌّ أو صفحة — فالمفتاحان عندنا إليه.
+ */
+export function ayrsharePlatform(platform: string): string {
+  if (platform === 'x') return 'twitter';
+  if (platform === 'google') return 'gmb';
+  if (platform === 'linkedin_page') return 'linkedin';
+  return platform;
+}
+
+export class AyrshareError extends Error {
+  constructor(message: string, public status: number, public body: unknown) {
+    super(message);
+    this.name = 'AyrshareError';
+  }
+}
+
+/** رسائل الأخطاء من الردّ — مصفوفة `errors` أو `message` في أعلاه، ومعها الرمز. */
+export function ayrshareErrors(data: any): string {
+  const list: any[] = Array.isArray(data?.errors) ? data.errors : [];
+  const parts = list
+    .map((e) => {
+      const msg = String(e?.message || '').trim();
+      if (!msg) return '';
+      return e?.platform ? `${e.platform}: ${msg}` : msg;
+    })
+    .filter(Boolean);
+  if (parts.length) return parts.join(' · ');
+  return String(data?.message || '').trim();
+}
+
+/** رموز الأخطاء في الردّ — بها يُفرَّق بين الأسباب، لا بنصّ الرسالة. */
+function errorCodes(data: any): number[] {
+  const codes = [data?.code, ...(Array.isArray(data?.errors) ? data.errors.map((e: any) => e?.code) : [])];
+  return codes.map(Number).filter((n) => Number.isFinite(n));
+}
+
+/**
+ * الردّ مع ملفّ مستخدم يُغلَّف في `posts: [...]` — والملف الرئيسي يردّه مكشوفاً.
+ * يُقرأ الشكلان فلا يتوقّف النشر لو ربطت الحسابات بملفّ مستخدم لاحقاً.
+ */
+export function unwrapAyrsharePost(data: any): any {
+  if (Array.isArray(data?.posts) && data.posts.length && typeof data.posts[0] === 'object') return data.posts[0];
+  return data;
+}
+
+/**
+ * حالُ المنشور من ردّ النشر أو من `GET /post/:id`.
+ *
+ * - `errors` غير فارغة أو `status: "error"` ← رُفض، وسببه من الأخطاء.
+ * - وجهةٌ معرّفها `"pending"` (تيك توك يعالج المقطع) أو حالُ المنشور
+ *   `pending` / `awaiting approval` ← ينتظر.
+ * - `success` و`scheduled` ← قُبل. والمجدول لدى Ayrshare قبولٌ تامّ: هو من
+ *   ينشره في موعده.
+ * `null` = الردّ لا يُعلن حالاً يُقرأ.
+ */
+export function ayrshareOutcome(raw: any): PublishCheck | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const data = unwrapAyrsharePost(raw);
+  const status = String(data?.status || '').trim().toLowerCase();
+  const targets: any[] = Array.isArray(data?.postIds) ? data.postIds : [];
+  const errors = ayrshareErrors(data);
+
+  const failedTarget = targets.some((t) => String(t?.status || '').toLowerCase() === 'error' || t?.id === 'failed');
+  if (status === 'error' || status === 'deleted' || failedTarget || (Array.isArray(data?.errors) && data.errors.length)) {
+    return { state: 'failed', error: errors || (status === 'deleted' ? 'حُذف المنشور' : undefined) };
+  }
+  if (status === 'pending' || status === 'awaiting approval' || targets.some((t) => t?.id === 'pending')) {
+    return { state: 'pending' };
+  }
+  if (status === 'success' || status === 'scheduled') return { state: 'published' };
+  return null;
+}
+
+/** امتداد الملف ونوعه كما يقبلهما `GET /media/uploadUrl`. */
+function uploadType(m: PublishMedia): { fileName: string; contentType?: string } {
+  const KNOWN: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'video/mp4': 'mp4', 'video/quicktime': 'mov',
+  };
+  const OTHER: Record<string, string> = { 'image/gif': 'gif', 'image/webp': 'webp', 'video/webm': 'webm' };
+  const mime = (m.mimeType || '').toLowerCase();
+  const ext = KNOWN[mime] || OTHER[mime] || '';
+  let fileName = (m.filename || 'media').replace(/[^\w.\-]+/g, '_');
+  // اسمٌ بلا امتداد يُرفض حين لا يُرسل النوع — فيُلحق الامتداد من النوع
+  if (ext && !/\.[a-z0-9]{2,5}$/i.test(fileName)) fileName = `${fileName}.${ext}`;
+  return KNOWN[mime] ? { fileName, contentType: KNOWN[mime] } : { fileName };
+}
+
 export class AyrshareProvider implements PublishingProvider {
-  constructor(private apiKey: string, private baseUrl = 'https://app.ayrshare.com/api') {}
+  private key: string;
 
-  private headers() {
-    return {
-      authorization: `Bearer ${this.apiKey}`,
-      'content-type': 'application/json',
-    };
+  // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها
+  constructor(apiKey: string, private x: AyrshareXKeys = {}, private labels: Record<string, string> = {}) {
+    this.key = (apiKey || '').trim();
+  }
+
+  private headers(json = true): Record<string, string> {
+    const h: Record<string, string> = { authorization: `Bearer ${this.key}` };
+    if (json) h['content-type'] = 'application/json';
+    if (this.x.key && this.x.secret) {
+      h['X-Twitter-OAuth1-Api-Key'] = this.x.key;
+      h['X-Twitter-OAuth1-Api-Secret'] = this.x.secret;
+    }
+    return h;
+  }
+
+  /** نداءٌ واحد للواجهة — يردّ الجسم، ويرمي `AyrshareError` بسببٍ يُقرأ. */
+  private async call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: this.headers(body !== undefined),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text.slice(0, 200) }; }
+    if (res.ok) return data as T;
+
+    const codes = errorCodes(data);
+    if (codes.includes(419)) {
+      throw new AyrshareError(
+        'إكس يشترط مفتاحَي تطبيق المطوّر لدى Ayrshare. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET ثم أعد النشر',
+        res.status, data,
+      );
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new AyrshareError(
+        `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
+        res.status, data,
+      );
+    }
+    if (res.status === 429) {
+      throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
+    }
+    throw new AyrshareError(ayrshareErrors(data) || `خطأ من Ayrshare (${res.status})`, res.status, data);
+  }
+
+  /* ═══ رفعُ الوسيط ═══
+
+     الوسيط خلف مصادقة المنصة، فلا يجلبه Ayrshare برابط. يُطلب رابطٌ موقَّع
+     (`GET /media/uploadUrl`) ثم يُرفع إليه الملف تدفّقاً (PUT)، ويُنشر بالرابط
+     العامّ `accessUrl`. والرابط الموقَّع يقبل حتى ٥ غيغابايت فيكفي الصورة
+     والمقطع معاً، بخلاف `/media/upload` الذي يقف عند ٣٠ ميغابايت ويُحمَّل
+     كاملاً في الذاكرة. والرابط يُستعمل مرّةً واحدة ويبقى ثلاثين دقيقة. */
+  private async uploadMedia(m: PublishMedia): Promise<string> {
+    if (m.url && /^https:\/\//.test(m.url)) return m.url;
+    if (!m.data && !m.open) throw new Error(`تعذّر قراءة الوسيط «${m.filename}» للرفع`);
+    const size = m.data ? m.data.byteLength : m.size ?? 0;
+    const { fileName, contentType } = uploadType(m);
+
+    const q = new URLSearchParams({ fileName });
+    if (contentType) q.set('contentType', contentType);
+    let info: any;
+    try {
+      info = await this.call('GET', `/media/uploadUrl?${q}`);
+    } catch (err) {
+      throw new Error(`تعذّر طلب رابط رفع الوسيط «${m.filename}»: ${String((err as Error)?.message || err)}`);
+    }
+    const uploadUrl = String(info?.uploadUrl || '');
+    const accessUrl = String(info?.accessUrl || '');
+    if (!/^https:\/\//.test(uploadUrl) || !/^https:\/\//.test(accessUrl)) {
+      throw new Error(`لم يُعِد Ayrshare رابط رفعٍ لـ «${m.filename}»`);
+    }
+
+    const body = await fixedLengthBody(m, size);
+    if (!body) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
+    // الرابط موقَّعٌ بنفسه: لا مفتاح معه، ونوعُ المحتوى ما أعاده Ayrshare بعينه
+    const put = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'content-type': String(info?.contentType || m.mimeType || 'application/octet-stream') },
+      body,
+      // جسمٌ تدفّقي — يطلبه fetch في Node، ويتجاهله عامل كلاودفلير
+      ...({ duplex: 'half' } as object),
+    });
+    if (!put.ok) {
+      const text = await put.text().catch(() => '');
+      throw new Error(`فشل رفع الوسيط «${m.filename}» إلى Ayrshare (${put.status}): ${text.replace(/<[^>]+>/g, ' ').trim().slice(0, 140)}`);
+    }
+    return accessUrl;
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
-    const body: Record<string, unknown> = {
-      post: input.text,
-      platforms: input.platforms,
-    };
-    // Ayrshare يقبل روابط عامة فقط — نمرّر ما توفّر له رابط
-    const urls = (input.media || []).map((m) => m.url).filter((u): u is string => /^https?:\/\//.test(u || ''));
-    if (urls.length) body.mediaUrls = urls;
+    const platforms = [...new Set(input.platforms.map(ayrsharePlatform))];
+    if (platforms.includes('twitter') && !(this.x.key && this.x.secret)) {
+      throw new Error(
+        `النشر على ${platformNames(['x'], this.labels)} عبر Ayrshare يشترط مفتاحَي تطبيق المطوّر. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET ثم أعد النشر`,
+      );
+    }
+
+    const body: Record<string, unknown> = { post: input.text || '', platforms };
+    const media = input.media || [];
+    if (media.length) {
+      const urls: string[] = [];
+      for (const m of media) urls.push(await this.uploadMedia(m));
+      body.mediaUrls = urls;
+      if (media.some((m) => m.mimeType.startsWith('video/'))) body.isVideo = true;
+    }
+    if (input.firstComment?.trim()) body.firstComment = { comment: input.firstComment.trim() };
+    /* يوتيوب يشترط العنوان، ويرفع المقطع «خاصّاً» إن لم يُقل غيره. وتيك توك
+       كذلك يُضبط عامّاً: منشورات حساب الشركة للجمهور، والتعليق الأول لا
+       يُنشر على مقطعٍ غير عامّ. */
+    if (platforms.includes('youtube')) {
+      body.youTubeOptions = { title: youtubeTitle(input.title, input.text), visibility: 'public' };
+    }
+    if (platforms.includes('tiktok')) body.tikTokOptions = { visibility: 'public' };
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
-    const res = await fetch(`${this.baseUrl}/post`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(`فشل النشر عبر المزوّد: ${data?.message || res.status}`);
-    return { providerPostId: data.id || data.postId, status: data.status || 'success' };
+    /* الرفض يأتي ٤٠٠ ومعه `errors` بسبب كل منصة — فيُقرأ السبب منها لا من
+       رمز الحالة. */
+    let data: any;
+    try {
+      data = await this.call('POST', '/post', body);
+    } catch (err) {
+      // 419 سببُه مفهومٌ مسبقاً بنصٍّ يقول ما يُضبط — لا يُستبدل برسالة الواجهة
+      const known = err instanceof AyrshareError && errorCodes(err.body).includes(419);
+      const outcome = err instanceof AyrshareError && !known ? ayrshareOutcome(err.body) : null;
+      if (outcome?.state === 'failed' && outcome.error) throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error}`);
+      throw err;
+    }
+    const post = unwrapAyrsharePost(data);
+    const outcome = ayrshareOutcome(data);
+    if (outcome?.state === 'failed') {
+      throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error || 'رفضت المنصة المنشور'}`);
+    }
+    const id = String(post?.id || '');
+    // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
+    const state = id && outcome ? outcome.state : 'published';
+    return { providerPostId: id, status: String(post?.status || 'success'), state };
   }
 
+  async getPublishStatus(providerPostId: string): Promise<PublishCheck | null> {
+    try {
+      return ayrshareOutcome(await this.call('GET', `/post/${encodeURIComponent(providerPostId)}`));
+    } catch (err) {
+      // ٢٢١ «History not found» — المنشور لا يُعرف لدى Ayrshare
+      if (err instanceof AyrshareError && errorCodes(err.body).includes(221)) return null;
+      throw err;
+    }
+  }
+
+  async deletePost(providerPostId: string): Promise<void> {
+    // إنستغرام وتيك توك لا يحذفان المنشور عبر الواجهة — والحذف غير حرِج
+    try { await this.call('DELETE', '/post', { id: providerPostId }); } catch { /* لا يُعطّل */ }
+  }
+
+  /* ═══ التحليلات — مسارٌ أوّليّ ═══
+     `POST /analytics/post` بمعرّف Ayrshare، والردّ خريطةٌ باسم المنصة.
+     والتعليقات والرسائل والمراجعات لها دفعتها: الردّ على تعليقٍ لم يُنشر
+     عبر Ayrshare يشترط المنصة ومعرّفاً خاصاً بلينكدإن وتيك توك، وكان المسار
+     القديم يرسله بلا شيءٍ منها. فبقي المزوّد بلا صندوقٍ حتى يُبنى كاملاً. */
+
   async getAnalytics(providerPostId: string): Promise<AnalyticsResult> {
-    const res = await fetch(`${this.baseUrl}/analytics/post`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ id: providerPostId }),
-    });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(`فشل سحب التحليلات: ${data?.message || res.status}`);
-    // تجميع مبسّط عبر المنصات
+    const data = await this.call<any>('POST', '/analytics/post', { id: providerPostId });
     let reach = 0;
     let impressions = 0;
     let engagement = 0;
@@ -52,44 +288,5 @@ export class AyrshareProvider implements PublishingProvider {
       engagement += Number(m.engagement || m.likeCount || 0) + Number(m.commentCount || 0);
     }
     return { reach, impressions, engagement };
-  }
-
-  async deletePost(providerPostId: string): Promise<void> {
-    await fetch(`${this.baseUrl}/delete`, {
-      method: 'DELETE',
-      headers: this.headers(),
-      body: JSON.stringify({ id: providerPostId }),
-    });
-  }
-
-  // تعليقات Ayrshare — وفق واجهتهم الموثّقة (best-effort)
-  async getComments(providerPostId: string): Promise<CommentItem[]> {
-    const res = await fetch(`${this.baseUrl}/comments`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ id: providerPostId }),
-    });
-    const data = (await res.json()) as any;
-    if (!res.ok) throw new Error(`فشل جلب التعليقات: ${data?.message || res.status}`);
-    const list: any[] = data?.comments || data?.data || [];
-    return list.map((c) => ({
-      id: String(c.id || c.commentId),
-      kind: 'comment' as const,
-      authorName: c.name || c.username || c.from || 'مستخدم',
-      body: c.comment || c.text || c.message || '',
-      createdAt: c.created || c.timestamp || new Date().toISOString(),
-    }));
-  }
-
-  async replyComment(providerPostId: string, commentId: string, text: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/comments/reply`, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ id: providerPostId, commentId, comment: text }),
-    });
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as any;
-      throw new Error(`فشل الرد على التعليق: ${data?.message || res.status}`);
-    }
   }
 }

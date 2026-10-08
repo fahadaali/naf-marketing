@@ -1531,7 +1531,7 @@ export async function multipartBody(
 }
 
 /** جسم PUT بطولٍ معلوم — التخزين الموقَّع يرفض جسماً مقطّعاً بلا طول. */
-async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuffer | ReadableStream<Uint8Array> | null> {
+export async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuffer | ReadableStream<Uint8Array> | null> {
   if (m.data) return m.data;
   const source = m.open ? await m.open() : null;
   if (!source) return null;

@@ -48,7 +48,11 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
   switch (name) {
     case 'ayrshare':
       if (!key) throw new Error('مفتاح Ayrshare غير مضبوط (AYRSHARE_API_KEY أو PROVIDER_API_KEY)');
-      return new AyrshareProvider(key);
+      return new AyrshareProvider(
+        key,
+        { key: env.AYRSHARE_X_API_KEY?.trim(), secret: env.AYRSHARE_X_API_SECRET?.trim() },
+        await customPlatformLabels(env),
+      );
     case 'buffer': {
       if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
