@@ -6,6 +6,7 @@ import {
   pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN, groupByPlannedDay,
   addDays, weekStart, forwardRange, pivotWeeks, PIVOT_MAX_WEEKS,
   rowsFromTable, mapImportRow, exportDay, type ImportContext,
+  canDropOnDay,
 } from '../web/src/planning';
 import { FORMAT_LABELS } from '../web/src/api';
 import { FORMAT_TYPE, PILLAR_MAX as SERVER_PILLAR_MAX } from '../src/services/planning';
@@ -201,5 +202,19 @@ describe('الاستيراد', () => {
     expect(exportDay(null)).toBe('');
     const { item } = mapImportRow({ title: 't', planned_on: exportDay('2026-10-31') }, ctx);
     expect(item.planned_on).toBe('2026-10-31');
+  });
+});
+
+describe('نقل يوم النشر المستهدف بالسحب', () => {
+  const today = '2026-10-08';
+  it('يُقبل اليوم الجاري وما بعده', () => {
+    expect(canDropOnDay('2026-10-12', today, today)).toBe(true);
+    expect(canDropOnDay('2026-10-12', '2026-11-01', today)).toBe(true);
+    // ما مضى يومُه يُنقل إلى يومٍ قادم
+    expect(canDropOnDay('2026-10-01', '2026-10-20', today)).toBe(true);
+  });
+  it('لا نقل إلى اليوم نفسه ولا إلى يومٍ مضى', () => {
+    expect(canDropOnDay('2026-10-12', '2026-10-12', today)).toBe(false);
+    expect(canDropOnDay('2026-10-12', '2026-10-07', today)).toBe(false);
   });
 });

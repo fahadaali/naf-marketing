@@ -368,6 +368,16 @@ export function groupByPlannedDay<T extends { planned_on?: string | null }>(post
   return byDay;
 }
 
+/**
+ * أيُقبل إفلاتُ محتوى على يومٍ في «خطة المحتوى»؟ نقلُه يغيّر يومه المستهدف.
+ *
+ * اليوم نفسه ليس نقلاً، واليوم الماضي لا يُخطَّط له — قيدُ زرّ «إضافة فكرة»
+ * نفسه: الخطّة ليومٍ مضى تُعدَّل في المحرّر ولا تُنشأ بسحب.
+ */
+export function canDropOnDay(fromDay: string | null | undefined, toDay: string, today: string): boolean {
+  return toDay !== fromDay && toDay >= today;
+}
+
 /** صفّ موعدٍ كما يُرجعه `GET /schedules`: محتوى × منصة. */
 export type ScheduleRow = { id: string; post_id: string; platform: string; scheduled_at: string; title?: string };
 
