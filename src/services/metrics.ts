@@ -1170,7 +1170,11 @@ export async function readLayer(env: Env, p: Period, layer?: string): Promise<Me
       previous: prevMap.get(d.key) ?? null,
       review_due: isReviewDue(d.cadence, d.reviewed_at),
       breakdown,
-      connected: isConnected(d, rows.length > 0, state),
+      /* المُدخَل باليد يُعدّ مربوطاً بقيمةٍ لا بصفّ: صفرٌ سُجّل في الفترة —
+         وما قبلها صفرٌ أو لا شيء — لا يقول شيئاً، وكانت بطاقاته الصفرية تملأ
+         صدر الشاشة وتزاحم المقيس. فينزل إلى «غير مربوط» المطويّ ولا يُحذف:
+         يُفتح بنقرة، ويعود إلى الصدر أوّل ما تُسجَّل له قيمة. */
+      connected: isConnected(d, rows.some((v) => v.value !== 0) || (prevMap.get(d.key) ?? 0) !== 0, state),
     };
   });
 }

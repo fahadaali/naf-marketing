@@ -202,6 +202,37 @@ describe('مزامنة صندوق Ayrshare', () => {
   });
 });
 
+describe('ما سُحب أيام SocialAPI', () => {
+  beforeEach(() => {
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'T0', 'x', ?, '[]')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
+    routes['GET /comments/T0'] = () => ({ body: { twitter: [
+      { comment: 'سؤال قديم', commentId: 'T1', created: RECENT, userName: 'client', name: 'عميل' },
+      { comment: 'جواب من تطبيق إكس', commentId: 'T2', created: RECENT, userName: 'naf', referencedTweets: [{ type: 'replied_to', id: 'T1' }] },
+      { comment: 'سؤال ثانٍ', commentId: 'T3', created: RECENT, userName: 'client2', name: 'عميل ٢' },
+    ] } });
+    const ins = db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, reply_body, reply_source) VALUES (?, ?, ?, 'comment', 'عميل', ?, ?, ?, ?)");
+    // بمعرّفات SocialAPI: «منشور|حساب|تعليق»
+    ins.run('old1', 'twitter', 'sp_post|acc_x|T1', 'سؤال قديم', RECENT, null, null);
+    ins.run('old3', 'x', 'sp_post|acc_x|T3', 'سؤال ثانٍ', RECENT, 'رددنا من المنصة', 'platform');
+    // وصفٌّ جديد كُتب بمعرّف Ayrshare قبل الضمّ — التعليق نفسه مرّتين
+    ins.run('new3', 'x', 'ayc|twitter|T0|T3|', 'سؤال ثانٍ', RECENT, null, null);
+  });
+
+  it('يُنقل القديم إلى معرّف Ayrshare بردّه، ويُضمّ المكرّر ويُحذف قديمه', async () => {
+    await syncComments(env);
+    const all = db.prepare('SELECT id, platform, provider_comment_id, reply_body, reply_source FROM platform_comments ORDER BY provider_comment_id').all();
+    expect(all).toEqual([
+      // القديم نفسه بمعرّفه الجديد — وعرف ردَّنا من تطبيق إكس
+      { id: 'old1', platform: 'x', provider_comment_id: 'ayc|twitter|T0|T1|', reply_body: 'جواب من تطبيق إكس', reply_source: 'external' },
+      // المكرّر: بقي الجديد بردّ القديم
+      { id: 'new3', platform: 'x', provider_comment_id: 'ayc|twitter|T0|T3|', reply_body: 'رددنا من المنصة', reply_source: 'platform' },
+    ]);
+  });
+});
+
 describe('الردّ عبر Ayrshare', () => {
   const insert = (id: string, providerId: string, platform: string, kind = 'comment') =>
     db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at) VALUES (?, ?, ?, ?, 'عميل', 'نص', ?)")

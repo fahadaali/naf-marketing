@@ -472,6 +472,8 @@ export function mapAccountPost(p: any, account: SocialApiAccount): AccountPost |
   const id = String(p?.platform_post_id || p?.platform_id || p?.id || '');
   if (!id) return null;
   const platform = String(p?.platform || account.platform || '');
+  // الريتويت ليس منشورنا: أرقامُه أرقامُ التغريدة الأصلية
+  if ((platform === 'x' || platform === 'twitter') && /^RT @/.test(String(p?.text || ''))) return null;
   // المقاييس في كائنٍ واحد إن وُجد، وإلا فالحقول الرقمية على المنشور نفسه
   const source = p?.metrics ?? p?.engagement ?? p?.stats ?? p?.insights ?? pickMetricFields(p);
   return {

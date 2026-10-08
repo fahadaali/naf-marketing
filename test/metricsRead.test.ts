@@ -145,6 +145,17 @@ describe('حال ربط المؤشر', () => {
     expect((await find('sessions'))?.connected).toBe(true);
   });
 
+  it('المُدخَل باليد مربوطٌ بقيمةٍ لا بصفرٍ سُجّل', async () => {
+    const manual = (db.prepare("SELECT key FROM metric_definitions WHERE source = 'manual' LIMIT 1").get() as { key: string }).key;
+    expect((await find(manual))?.connected).toBe(false);
+    await upsertValue(env, JULY, { metricKey: manual, value: 0, source: 'manual' });
+    // صفرٌ وحده لا يملأ صدر الشاشة — يبقى في «غير مربوط» بقيمته
+    expect((await find(manual))?.connected).toBe(false);
+    expect((await find(manual))?.value).toBe(0);
+    await upsertValue(env, JULY, { metricKey: manual, value: 7, source: 'manual' });
+    expect((await find(manual))?.connected).toBe(true);
+  });
+
   it('المحتسب من المرآة يتبع منصة إدارة الشركة', async () => {
     expect((await find('mql'))?.connected).toBe(false);
     enable('crm');
