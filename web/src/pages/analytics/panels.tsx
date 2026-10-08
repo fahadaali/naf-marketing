@@ -30,7 +30,7 @@ export type DashboardData = {
   }[];
   pipeline?: { status: string; count: number }[];
   campaigns?: { id: string; name: string; impressions: number; engagement: number }[];
-  /** أمزوّد النشر حقيقيٌّ بمفتاح؟ التجريبي يولّد هذه الألواح كلَّها. */
+  /** أمزوّد النشر حقيقيٌّ بمفتاح؟ التجريبي لا يقيس، فلا لقطة لهذه الألواح معه. */
   provider_connected?: boolean;
 };
 

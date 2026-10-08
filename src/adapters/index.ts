@@ -24,9 +24,9 @@ const REAL_PROVIDERS = ['socialapi', 'buffer', 'ayrshare'];
 /**
  * أمزوّد النشر مربوطٌ بخدمةٍ حقيقية؟
  *
- * التجريبي يولّد أرقام وصولٍ وتفاعل ورسائلَ من بصمة المعرّف، وتُخزَّن كما
- * تُخزَّن الحقيقية. فما حُسب منها لا يُعرض مربوطاً — والمزوّد الحقيقي بلا
- * مفتاح لا يسحب شيئاً، فهو غير مربوط كذلك.
+ * التجريبي يحاكي النشر ولا يقيس شيئاً (`adapters/mock.ts`)، فما يقوم على
+ * لقطات المزوّد لا يُعرض مربوطاً معه — والمزوّد الحقيقي بلا مفتاح لا يسحب
+ * شيئاً، فهو غير مربوط كذلك.
  */
 export async function publishingProviderConnected(env: Env): Promise<boolean> {
   const setting = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{
