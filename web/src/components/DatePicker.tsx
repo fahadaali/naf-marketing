@@ -146,6 +146,47 @@ export function DateRangePicker({
   );
 }
 
+// ===== منتقي يومٍ واحد (يوم النشر المستهدف) =====
+// الشبكة نفسها التي يستعملها النطاق والجدولة؛ والفراغ قيمةٌ مقصودة («بلا يوم محدّد»)
+// يعود إليها «مسح».
+export function DayPicker({
+  value,
+  onChange,
+  placeholder,
+  id,
+  disabled = false,
+}: {
+  value: string; // 'YYYY-MM-DD' أو ''
+  onChange: (v: string) => void;
+  placeholder: string;
+  id?: string;
+  disabled?: boolean;
+}) {
+  const [month, setMonth] = useState<Date>(() => parseYMD(value) || new Date());
+
+  return (
+    <Popover
+      render={({ toggle }) => (
+        <button type="button" id={id} className="dp-trigger" onClick={toggle} disabled={disabled}>
+          <Calendar size={16} />
+          {value ? <bdi>{fmtAr(value)}</bdi> : <span className="ph">{placeholder}</span>}
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <div className="dp-pop dp-day-pop">
+          <CalGrid month={month} setMonth={setMonth} start={value} end="" onPick={(s) => { onChange(s); close(); }} />
+          {value && (
+            <div className="dp-presets">
+              <button type="button" onClick={() => { onChange(''); close(); }}>مسح</button>
+            </div>
+          )}
+        </div>
+      )}
+    </Popover>
+  );
+}
+
 /* حقل الوقت نصّاً لا `type="time"`: ذاك لا يقبل الأرقام الهندية، ويعرض
    ١٢ ساعة بحسب لغة الجهاز. وما يُكتب يُحوَّل إلى الغربية في الحقل نفسه وهو
    يُكتب، ويُعتمد متى صار وقتاً صحيحاً؛ وما لا يصير وقتاً يرجع عند الخروج من

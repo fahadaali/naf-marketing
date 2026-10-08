@@ -109,6 +109,20 @@ export const TYPE_LABELS: Record<string, string> = {
   video: 'فيديو',
 };
 
+/* أشكال المحتوى — naf-terms «أشكال المحتوى». الشكل ما يُنتَج، ولكلٍّ نوعٌ من
+   الثلاثة يقابله في الخادم (`FORMAT_TYPE` في src/services/planning.ts) فلا
+   تتغيّر المؤشرات. والمفاتيح نفسها هناك — يحرسها اختبار. */
+export const FORMAT_LABELS: Record<string, string> = {
+  text: 'منشور نصي',
+  image: 'صورة',
+  carousel: 'كاروسيل',
+  infographic: 'إنفوجرافيك',
+  video: 'فيديو',
+  short_video: 'فيديو قصير',
+  story: 'قصة',
+  article: 'مقال',
+};
+
 export const STATUS_BADGE: Record<string, string> = {
   idea: 'gray',
   draft: 'gray',

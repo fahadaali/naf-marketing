@@ -36,6 +36,8 @@ import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
+import { PlanFields, usePlanOptions } from '../components/PlanItemModal';
+import { EMPTY_PLAN, planFromPost, planPayload, riyadhToday, type PlanDraft } from '../planning';
 
 /* رسالة النجاح تحمل اسم الإجراء نفسه، على صيغة «تم + المصدر»
    من naf-terms.md §4. الزر الذي يقول «رفض» ينتج «تم الرفض». */
@@ -57,15 +59,16 @@ export default function Editor() {
   const [body, setBody] = useState('');
   // النصّ كما حُفظ في الخادم — به تُعرف «الفكرة» (مسودةٌ لم يُحفظ لها نصّ)
   const [savedBody, setSavedBody] = useState('');
-  const [contentType, setContentType] = useState('text');
-  const [campaignId, setCampaignId] = useState('');
+  // حقول خطة المحتوى — الشكل منها بدل «نوع المحتوى»، والحملة كذلك
+  const [plan, setPlan] = useState<PlanDraft>(EMPTY_PLAN);
+  const [assigneeName, setAssigneeName] = useState('');
+  const planOptions = usePlanOptions();
   const [status, setStatus] = useState('draft');
   // كاتبُ المحتوى — يُقرأ ليُخفى عنه زرُّ الاعتماد. الخادم هو الحكم
   // (`transition` في `services/workflow.ts`)، وهذا يمنع زرّاً يُردّ عند
   // الضغط: من يراه ثم يقرأ «لا يعتمد المحتوى كاتبُه» يظنّه عطلاً.
   const [authorId, setAuthorId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
-  const [campaigns, setCampaigns] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
   const [basecampSynced, setBasecampSynced] = useState(false);
@@ -113,8 +116,8 @@ export default function Editor() {
     setTitle(d.post.title);
     setBody(d.post.body);
     setSavedBody(d.post.body);
-    setContentType(d.post.content_type);
-    setCampaignId(d.post.campaign_id || '');
+    setPlan(planFromPost(d.post));
+    setAssigneeName(d.post.assignee_name || '');
     setStatus(d.post.status);
     setAuthorId(d.post.author_id || '');
     setRejectReason(d.post.reject_reason || '');
@@ -149,7 +152,6 @@ export default function Editor() {
   }
 
   useEffect(() => {
-    api.get('/campaigns').then((d) => setCampaigns(d.campaigns));
     api.get('/settings').then((d) => {
       setPlatforms(d.settings?.enabled_platforms || []);
       setPlatLabels(d.settings?.platform_labels || {});
@@ -172,15 +174,14 @@ export default function Editor() {
         const d = await api.post('/posts', {
           title,
           body,
-          content_type: contentType,
-          campaign_id: campaignId || null,
+          ...planPayload(plan),
           source: sp.get('news') ? 'rss' : 'manual',
           news_item_id: sp.get('news') || undefined,
         });
         setPostId(d.id);
         navigate(`/editor/${d.id}`, { replace: true });
       } else {
-        await api.patch(`/posts/${postId}`, { title, body, content_type: contentType, campaign_id: campaignId || null });
+        await api.patch(`/posts/${postId}`, { title, body, ...planPayload(plan) });
       }
       // الخادم يطبّع النصّ الفارغ إلى '' — فالفكرة تبقى فكرةً حتى يُحفظ لها نصّ
       setSavedBody(isBlankHtml(body) ? '' : body);
@@ -329,7 +330,7 @@ export default function Editor() {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 300px' }}>
+      <div className="grid editor-grid">
         {/* المحرر */}
         <div className="card">
           <div className="field">
@@ -399,24 +400,18 @@ export default function Editor() {
 
         {/* اللوحة الجانبية */}
         <div>
+          {/* خطة المحتوى: يومه المستهدف ومنصاته وشكله ومسؤوله ومحوره وحملته وملخّصه.
+              تُحفظ مع المحتوى بزرّ الحفظ نفسه. */}
           <div className="card" style={{ marginBottom: 14 }}>
-            <div className="field">
-              <label>نوع المحتوى</label>
-              <select className="select" value={contentType} onChange={(e) => setContentType(e.target.value)} disabled={readOnly}>
-                <option value="text">نص</option>
-                <option value="image">صورة</option>
-                <option value="video">فيديو</option>
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label>الحملة</label>
-              <select className="select" value={campaignId} onChange={(e) => setCampaignId(e.target.value)} disabled={readOnly}>
-                <option value="">بدون حملة</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
+            <h4 style={{ marginTop: 0 }}>خطة المحتوى</h4>
+            <PlanFields
+              draft={plan}
+              onChange={setPlan}
+              options={planOptions}
+              disabled={readOnly}
+              idPrefix="plan-edit"
+              assigneeName={assigneeName}
+            />
           </div>
 
           {/* إجراءات دورة الحياة */}
@@ -671,6 +666,8 @@ export default function Editor() {
           postId={postId}
           platforms={platforms}
           labels={platLabels}
+          initialPlatforms={plan.planned_platforms.filter((p) => platforms.includes(p))}
+          initialDay={plan.planned_on && plan.planned_on >= riyadhToday() ? plan.planned_on : ''}
           onClose={() => setShowSchedule(false)}
           onDone={async (issues) => {
             setShowSchedule(false);
@@ -1220,9 +1217,19 @@ function RejectModal({ onClose, onReject }: { onClose: () => void; onReject: (re
 
 type ScheduleIssue = { platform: string; error: string };
 
-function ScheduleModal({ postId, platforms, labels, onClose, onDone }: { postId: string; platforms: string[]; labels: Record<string, string>; onClose: () => void; onDone: (issues: ScheduleIssue[]) => void }) {
-  const [selected, setSelected] = useState<string[]>([]);
-  const [when, setWhen] = useState('');
+/* تبدأ بمنصات الخطة ويومها المستهدف إن لم يمضِ — والوقت يُدخل يدوياً: اليوم
+   المستهدف يومٌ لا ساعة، وساعةٌ مقترحة تُجدول ما لم يقصده أحد. */
+function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initialDay = '', onClose, onDone }: {
+  postId: string;
+  platforms: string[];
+  labels: Record<string, string>;
+  initialPlatforms?: string[];
+  initialDay?: string;
+  onClose: () => void;
+  onDone: (issues: ScheduleIssue[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(initialPlatforms);
+  const [when, setWhen] = useState(initialDay ? `${initialDay}T` : '');
   const [err, setErr] = useState('');
 
   function toggle(p: string) {

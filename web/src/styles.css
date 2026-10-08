@@ -820,3 +820,18 @@ button.metric-card:hover .metric-spark { opacity: 1; }
   padding: var(--space-2) 0; border-bottom: 1px solid var(--border);
 }
 .pillar-input { flex: 1; min-width: 0; }
+/* منتقي اليوم الواحد: «مسح» تحت الشبكة لا بجوارها */
+.dp-day-pop { flex-direction: column; }
+.dp-day-pop .dp-presets {
+  border-inline-end: none; padding-inline-end: 0;
+  border-top: 1px solid var(--border); padding-top: var(--space-2);
+}
+/* حقول الخطة: أزرار المنصات تلتفّ في عرض اللوحة الجانبية */
+.plan-platforms { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* المحرّر: المحرر واللوحة الجانبية متجاوران، وعلى الشاشة الضيّقة تحت بعض — كان
+   عرضُ اللوحة سطرياً في الشيفرة فيبقى العمودان على شاشة الجوال. والنقطة 900
+   نقطة الهيكل نفسها (انظر قاعدة الشبكات أعلاه). */
+.editor-grid { grid-template-columns: minmax(0, 1fr) 300px; }
+@media (width < 900px) {
+  .editor-grid { grid-template-columns: minmax(0, 1fr); }
+}

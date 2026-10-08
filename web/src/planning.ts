@@ -8,6 +8,7 @@
    ثابتةٌ بلا توقيتٍ صيفي. */
 
 import { sortPlatforms } from './platformKeys';
+import { parsePlatforms } from './campaigns';
 
 export type YearMonth = { year: number; month: number }; // الشهر ١–١٢
 
@@ -70,6 +71,53 @@ export function monthCells(ym: YearMonth): { day: number | null; ymd: string | n
 /** تاريخٌ محلّيّ يحمل اليوم نفسه، لدوالّ `naf-format` التي تقرأ بالتوقيت المحلّي. */
 export function localDateOf({ year, month }: YearMonth, day = 1): Date {
   return new Date(year, month - 1, day);
+}
+
+/** حقول خطة المحتوى كما تحرّرها الشاشة: '' للفارغ، ومصفوفةٌ للمنصات. */
+export type PlanDraft = {
+  planned_on: string; // 'YYYY-MM-DD' أو '' = بلا يوم محدّد
+  planned_platforms: string[];
+  format: string;
+  assignee_id: string; // '' = بلا مسؤول
+  pillar: string; // '' = بلا محور
+  campaign_id: string; // '' = بدون حملة
+  brief: string;
+};
+
+export const EMPTY_PLAN: PlanDraft = {
+  planned_on: '', planned_platforms: [], format: 'text', assignee_id: '', pillar: '', campaign_id: '', brief: '',
+};
+
+/** حقول الخطة من صفّ المحتوى كما يُرجعه الخادم. */
+export function planFromPost(p: Record<string, any>): PlanDraft {
+  return {
+    planned_on: typeof p.planned_on === 'string' ? p.planned_on : '',
+    planned_platforms: parsePlatforms(p.planned_platforms),
+    format: typeof p.format === 'string' && p.format ? p.format : p.content_type || 'text',
+    assignee_id: p.assignee_id || '',
+    pillar: p.pillar || '',
+    campaign_id: p.campaign_id || '',
+    brief: p.brief || '',
+  };
+}
+
+/** ما يُرسَل إلى الخادم: الفارغ `null` يمسح الحقل، والشكل يقرّر النوع هناك. */
+export function planPayload(d: PlanDraft) {
+  return {
+    planned_on: d.planned_on || null,
+    planned_platforms: d.planned_platforms.length ? d.planned_platforms : null,
+    format: d.format,
+    assignee_id: d.assignee_id || null,
+    pillar: d.pillar.trim() || null,
+    campaign_id: d.campaign_id || null,
+    brief: d.brief.trim() || null,
+  };
+}
+
+/** تاريخٌ محلّيّ ليومٍ 'YYYY-MM-DD'، لدوالّ `naf-format` التي تقرأ بالتوقيت المحلّي. */
+export function dayDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d);
 }
 
 /** حدّ طول المحور — يطابق `PILLAR_MAX` في `src/services/planning.ts`. */
