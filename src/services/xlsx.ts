@@ -1,6 +1,14 @@
 // مولّد ملفات .xlsx خفيف بلا اعتماديات (ضغط «مُخزَّن» store)، ينتج مصنّفاً صالحاً يفتحه Excel.
+// وتستورده الواجهة أيضاً لقالب استيراد خطة المحتوى وتصديرها — مولّدٌ واحد لا اثنان.
 
-export type Sheet = { name: string; rows: (string | number)[][] };
+export type Sheet = {
+  name: string;
+  rows: (string | number)[][];
+  /** الورقة من اليمين — العمود الأول في يمين الشاشة كما يُقرأ جدولٌ عربي. */
+  rtl?: boolean;
+  /** عرض كل عمود بعدد المحارف، بترتيب الأعمدة. */
+  widths?: number[];
+};
 
 // ===== CRC32 =====
 const CRC_TABLE = (() => {
@@ -33,7 +41,7 @@ function colName(n: number): string {
   return s;
 }
 
-function sheetXml(rows: (string | number)[][]): string {
+function sheetXml({ rows, rtl, widths }: Sheet): string {
   const body = rows
     .map((row, ri) => {
       const cells = row
@@ -46,8 +54,13 @@ function sheetXml(rows: (string | number)[][]): string {
       return `<row r="${ri + 1}">${cells}</row>`;
     })
     .join('');
+  // ترتيب العناصر في الورقة إلزاميّ في المخطّط: العرض ثم الأعمدة ثم البيانات
+  const views = rtl ? '<sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews>' : '';
+  const cols = widths?.length
+    ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${views}${cols}<sheetData>${body}</sheetData></worksheet>`;
 }
 
 // ===== ZIP (store, no compression) =====
@@ -96,7 +109,7 @@ export function zipStore(entries: Entry[]): Uint8Array {
 }
 
 export function buildXlsx(sheets: Sheet[]): Uint8Array {
-  const sheetEntries = sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: enc(sheetXml(s.rows)) }));
+  const sheetEntries = sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: enc(sheetXml(s)) }));
 
   const contentTypes =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +

@@ -106,9 +106,9 @@ export function PlanFields({
       </div>
 
       <div className="field">
-        <label htmlFor={id('pillar')}>محور المحتوى</label>
+        <label htmlFor={id('pillar')}>السلسلة</label>
         <select id={id('pillar')} className="select" value={draft.pillar} onChange={(e) => set('pillar', e.target.value)} disabled={disabled}>
-          <option value="">بلا محور</option>
+          <option value="">بلا سلسلة</option>
           {pillars.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
       </div>

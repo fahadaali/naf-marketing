@@ -16,7 +16,7 @@ export default function Settings() {
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
     can('settings.manage') && { id: 'feeds', label: 'خلاصات \u2068RSS\u2069' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
-    can('settings.manage') && { id: 'pillars', label: 'محاور المحتوى' },
+    can('settings.manage') && { id: 'pillars', label: 'السلاسل' },
     can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
     can('settings.manage') && { id: 'notifications', label: 'الإشعارات' },
@@ -478,10 +478,10 @@ function SocialApiWebhook() {
 }
 
 /* ===== نبرات الذكاء الاصطناعي (البرومبت لكل نبرة) ===== */
-/* ===== محاور المحتوى =====
+/* ===== السلاسل (المفتاح `content_pillars` باقٍ) =====
    قائمةٌ يحرّرها المدير العام، وتظهر خياراتٍ في خطة المحتوى. بياناتٌ لا مصطلحات:
    الاسم يُخزَّن نصّاً على المحتوى نفسه، فلا تعديلَ لاسمٍ هنا — تغييرُه لا يصل
-   إلى ما وُسم به من قبل، فيبقى المحور القديم على محتواه باسمه. */
+   إلى ما وُسم به من قبل، فتبقى السلسلة القديمة على محتواها باسمها. */
 function ContentPillars() {
   const [pillars, setPillars] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
@@ -496,7 +496,7 @@ function ContentPillars() {
     setErr(''); setMsg('');
     const name = draft.trim().slice(0, PILLAR_MAX);
     if (!name) return setErr('هذا الحقل مطلوب');
-    if (pillars.includes(name)) return setErr('المحور موجود مسبقاً');
+    if (pillars.includes(name)) return setErr('السلسلة موجودة مسبقاً');
     setPillars((ps) => [...ps, name]);
     setDraft('');
   }
@@ -505,7 +505,7 @@ function ContentPillars() {
     setErr(''); setMsg('');
     try {
       await api.put('/settings', { content_pillars: pillars });
-      setMsg('تم حفظ محاور المحتوى');
+      setMsg('تم حفظ السلاسل');
     } catch (e: any) {
       setErr(e.message);
     }
@@ -513,9 +513,9 @@ function ContentPillars() {
 
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>محاور المحتوى</h3>
+      <h3 style={{ marginTop: 0 }}>السلاسل</h3>
       {pillars.length === 0 ? (
-        <p className="muted">لا محاور بعد. أضف أول محور.</p>
+        <p className="muted">لا سلاسل بعد. أضف أول سلسلة.</p>
       ) : (
         <ul className="pillar-list">
           {pillars.map((p) => (
@@ -537,7 +537,7 @@ function ContentPillars() {
       )}
 
       <div className="field">
-        <label htmlFor="pillar-new">محور المحتوى</label>
+        <label htmlFor="pillar-new">السلسلة</label>
         <div className="row">
           <input
             id="pillar-new"
@@ -547,7 +547,7 @@ function ContentPillars() {
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
           />
-          <button type="button" className="btn ghost" onClick={add}><Plus size={20} /> إضافة محور</button>
+          <button type="button" className="btn ghost" onClick={add}><Plus size={20} /> إضافة سلسلة</button>
         </div>
       </div>
 
