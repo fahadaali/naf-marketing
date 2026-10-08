@@ -21,8 +21,11 @@ import { useAuth } from '../auth';
    — الاسم والرقم واتجاهه — وخطَّ الإنتاج سطراً واحداً. والتفصيل كلّه، وما لم
    يُربط مصدره، في التحليلات. */
 
-/** كم مؤشراً من اللوحة المختصرة تحمله الرئيسية. */
-const HOME_METRICS = 4;
+/* ثم صارت أربعتُها أرقامَ المحتوى نفسها — الوصول والظهور والتفاعل ومعدله —
+   كما تُقرأ في تبويب «التفاعل والمحتوى»، بطلب المالك. فكانت أوّلَ أربعةٍ
+   مربوطة من اللوحة المختصرة، وفيها ما يُدخَل باليد وما يأتي من منصة إدارة
+   الشركة، فلا تطابق ما يراه من يفتح التحليلات على المحتوى. */
+const HOME_METRICS = ['reach', 'impressions', 'engagement', 'engagement_rate_reach'] as const;
 
 const STATUS_ORDER = ['idea', 'draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published', 'rejected'];
 
@@ -55,12 +58,13 @@ export default function Dashboard() {
   useEffect(() => {
     loadPosts();
     if (can('analytics.view')) {
-      api.get('/metrics/board?period=weekly')
-        .then((d) => {
-          // الردّ مرتّبٌ بترتيب اللوحة المعتمد — فالأوائل من المربوط هم الأهمّ
-          const rows: MetricReading[] = (d.metrics || [])
-            .filter((m: MetricReading) => m.connected)
-            .slice(0, HOME_METRICS);
+      // الأربعة في طبقتين: الوصول والظهور في «الوصول»، والتفاعل ومعدله في «التفاعل»
+      Promise.all(['reach', 'engagement'].map((layer) => api.get(`/metrics/layer?period=weekly&layer=${layer}`)))
+        .then((parts) => {
+          const all: MetricReading[] = parts.flatMap((d) => d.metrics || []);
+          const rows = HOME_METRICS
+            .map((key) => all.find((m) => m.key === key))
+            .filter((m): m is MetricReading => !!m && m.connected);
           setBoard(rows);
           if (!rows.length) return;
           const keys = rows.map((r) => r.key).join(',');
@@ -89,7 +93,7 @@ export default function Dashboard() {
       {can('analytics.view') && (
         <section style={{ marginBottom: 'var(--space-6)' }}>
           <div className="row" style={{ marginBottom: 'var(--space-3)' }}>
-            <h3 style={{ margin: 0 }}>اللوحة المختصرة</h3>
+            <h3 style={{ margin: 0 }}>التفاعل والمحتوى</h3>
             <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>هذا الأسبوع</span>
             <div className="spacer" />
             <Link to="/analytics" className="btn ghost sm">التحليلات</Link>
