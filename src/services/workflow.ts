@@ -1,6 +1,6 @@
 import type { Env, User } from '../types';
 import { hasPermission } from '../permissions';
-import { newId, nowIso } from '../util';
+import { isBlankBody, newId, nowIso } from '../util';
 
 // دورة حياة المحتوى — التسلسل الإلزامي. لا يمكن تجاوز مرحلة.
 // draft -> pending_marketing -> pending_gm -> approved/scheduled -> published -> archived
@@ -8,7 +8,8 @@ import { newId, nowIso } from '../util';
 
 export type Action = 'submit' | 'approve' | 'reject' | 'archive';
 
-type Post = { id: string; status: string; author_id: string };
+// `body` يُقرأ للإرسال وحده؛ ومن لا يمرّره لا يُفحص نصّه.
+type Post = { id: string; status: string; author_id: string; body?: string };
 
 // الانتقالات المسموحة: (action, currentStatus) -> { to, permission }
 const TRANSITIONS: Record<string, { to: string; permission: string }> = {
@@ -55,6 +56,15 @@ export async function transition(
       status: 403,
       error: 'لا يعتمد المحتوى كاتبُه. يعتمده غيرك ممّن يملك الصلاحية.',
     };
+  }
+
+  /* ═══ لا تُرسَل فكرةٌ قبل أن يُكتب نصّها ═══
+
+     «فكرة» في خطة المحتوى مسودةٌ بعنوانٍ ويومٍ بلا نصّ، والمراجع لا يراجع
+     عنواناً. والواجهة تخفي زرّ الإرسال عنها؛ وهذا الحكم لمن يرسل مباشرةً أو
+     يسحب بطاقتها. والفراغ بمعنى `isBlankBody`: `<p><br></p>` فارغٌ كالفراغ. */
+  if (action === 'submit' && post.body !== undefined && isBlankBody(post.body)) {
+    return { ok: false, status: 400, error: 'لا نصّ لهذه الفكرة بعد. اكتب المحتوى ثم أرسله للمراجعة.' };
   }
 
   if (action === 'reject' && (!note || !note.trim())) {

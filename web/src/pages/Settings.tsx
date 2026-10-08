@@ -6,6 +6,7 @@ import { api, ROLE_LABELS, formatRiyadh } from '../api';
 import { useAuth } from '../auth';
 import { KNOWN_PLATFORMS, PLATFORM_META, PlatformIcon, platformLabel, DEFAULT_PLATFORM_PROMPTS } from '../platforms';
 import { DEFAULT_TONES, type Tone } from '../tones';
+import { PILLAR_MAX, pillarsFrom } from '../planning';
 import MetricSources from '../components/MetricSources';
 
 export default function Settings() {
@@ -15,6 +16,7 @@ export default function Settings() {
     can('permissions.manage') && { id: 'permissions', label: 'الصلاحيات' },
     can('settings.manage') && { id: 'feeds', label: 'خلاصات \u2068RSS\u2069' },
     can('settings.manage') && { id: 'platforms', label: 'المنصات والمزوّد' },
+    can('settings.manage') && { id: 'pillars', label: 'محاور المحتوى' },
     can('settings.manage') && { id: 'ai', label: 'الذكاء الاصطناعي' },
     can('settings.manage') && { id: 'integrations', label: 'التكاملات' },
     can('settings.manage') && { id: 'notifications', label: 'الإشعارات' },
@@ -34,6 +36,7 @@ export default function Settings() {
       {tab === 'permissions' && <Permissions />}
       {tab === 'feeds' && <Feeds />}
       {tab === 'platforms' && <Platforms />}
+      {tab === 'pillars' && <ContentPillars />}
       {tab === 'ai' && <><AITones /><div style={{ height: 16 }} /><PlatformPrompts /><div style={{ height: 16 }} /><AIMediaProviders /></>}
       {tab === 'integrations' && <><Integrations /><MetricSources /></>}
       {tab === 'notifications' && <NotificationSettings />}
@@ -475,6 +478,86 @@ function SocialApiWebhook() {
 }
 
 /* ===== نبرات الذكاء الاصطناعي (البرومبت لكل نبرة) ===== */
+/* ===== محاور المحتوى =====
+   قائمةٌ يحرّرها المدير العام، وتظهر خياراتٍ في خطة المحتوى. بياناتٌ لا مصطلحات:
+   الاسم يُخزَّن نصّاً على المحتوى نفسه، فلا تعديلَ لاسمٍ هنا — تغييرُه لا يصل
+   إلى ما وُسم به من قبل، فيبقى المحور القديم على محتواه باسمه. */
+function ContentPillars() {
+  const [pillars, setPillars] = useState<string[]>([]);
+  const [draft, setDraft] = useState('');
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then((d) => setPillars(pillarsFrom(d.settings))).catch((e: any) => setErr(e.message));
+  }, []);
+
+  function add() {
+    setErr(''); setMsg('');
+    const name = draft.trim().slice(0, PILLAR_MAX);
+    if (!name) return setErr('هذا الحقل مطلوب');
+    if (pillars.includes(name)) return setErr('المحور موجود مسبقاً');
+    setPillars((ps) => [...ps, name]);
+    setDraft('');
+  }
+
+  async function save() {
+    setErr(''); setMsg('');
+    try {
+      await api.put('/settings', { content_pillars: pillars });
+      setMsg('تم حفظ محاور المحتوى');
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>محاور المحتوى</h3>
+      {pillars.length === 0 ? (
+        <p className="muted">لا محاور بعد. أضف أول محور.</p>
+      ) : (
+        <ul className="pillar-list">
+          {pillars.map((p) => (
+            <li key={p}>
+              <span>{p}</span>
+              <div className="spacer" />
+              <button
+                type="button"
+                className="btn danger sm"
+                title="حذف"
+                aria-label={`حذف ${p}`}
+                onClick={() => { setMsg(''); setPillars((ps) => ps.filter((x) => x !== p)); }}
+              >
+                <Trash2 size={20} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="field">
+        <label htmlFor="pillar-new">محور المحتوى</label>
+        <div className="row">
+          <input
+            id="pillar-new"
+            className="input pillar-input"
+            value={draft}
+            maxLength={PILLAR_MAX}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          />
+          <button type="button" className="btn ghost" onClick={add}><Plus size={20} /> إضافة محور</button>
+        </div>
+      </div>
+
+      {err && <p className="err">{err}</p>}
+      {msg && <p className="ok">{msg}</p>}
+      <button type="button" className="btn" onClick={save}>حفظ</button>
+    </div>
+  );
+}
+
 function AITones() {
   const [tones, setTones] = useState<Tone[]>([]);
   const [msg, setMsg] = useState('');

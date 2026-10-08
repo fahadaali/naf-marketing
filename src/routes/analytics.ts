@@ -57,9 +57,11 @@ analyticsRoutes.get('/dashboard', async (c) => {
     .bind(...binds)
     .all();
 
-  // حالة خط الإنتاج (عدد المسودات في كل مرحلة) — لا يتأثر بالفلاتر
+  // حالة خط الإنتاج (عدد المسودات في كل مرحلة) — لا يتأثر بالفلاتر.
+  // و«فكرة» خانةٌ مستقلّة: مسودةٌ لم يُكتب نصّها، والخادم يطبّع الفارغ إلى ''.
   const pipeline = await c.env.DB.prepare(
-    'SELECT status, COUNT(*) AS count FROM content_posts GROUP BY status',
+    `SELECT CASE WHEN status = 'draft' AND body = '' THEN 'idea' ELSE status END AS status, COUNT(*) AS count
+     FROM content_posts GROUP BY 1`,
   ).all();
 
   // أداء الحملات — للمنشورات المرتبطة بمحتوى المنصة فقط (لها post_id)

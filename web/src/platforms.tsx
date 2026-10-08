@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Globe, MapPin } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import {
   XMark, TikTokMark, SnapchatMark, ThreadsMark,
-  FacebookMark, YouTubeMark, InstagramMark, LinkedInMark,
+  FacebookMark, YouTubeMark, InstagramMark, LinkedInMark, GoogleMark,
 } from './components/brand/brand-marks';
 import { type PlatformKey, normalizePlatform } from './platformKeys';
 import { api } from './api';
@@ -29,8 +29,9 @@ export const PLATFORM_META: Record<string, PlatformMeta> = ({
   linkedin: { label: 'لينكدإن', color: 'var(--brand-linkedin)', glyph: (s) => <LinkedInMark size={g(s)} /> },
   linkedin_page: { label: 'لينكدإن (صفحة)', color: 'var(--brand-linkedin)', glyph: (s) => <LinkedInMark size={g(s)} /> },
   x: { label: 'إكس', color: 'var(--brand-x)', glyph: (s) => <XMark size={g(s)} /> },
-  // نشاط تجاري على الخرائط → MapPin. لا Star: هي للتقييم حصراً — naf-icons#v1.4.0
-  google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <MapPin size={g(s)} /> },
+  // حرف G الرسمي من naf-brand-marks — كان دبوس الخريطة MapPin لأن Lucide حذفت
+  // شعار Google، والدبوس باقٍ لمعناه المسجّل «نشاط تجاري على الخرائط» — naf-icons#v1.56.0
+  google: { label: 'نشاطي التجاري (\u2068Google\u2069)', color: 'var(--brand-google)', glyph: (s) => <GoogleMark size={g(s)} /> },
   instagram: {
     label: 'إنستغرام',
     color: 'var(--brand-instagram)',

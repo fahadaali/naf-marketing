@@ -85,3 +85,15 @@ describe('أداء الفريق', () => {
     expect(writers.map((w: any) => [w.id, w.created_count])).toEqual([['usr_w', 2]]);
   });
 });
+
+describe('خط الإنتاج في لوحة التحليلات', () => {
+  it('«فكرة» خانةٌ مستقلّة عن «مسودة»', async () => {
+    const app = new Hono();
+    app.use('*', async (c, next) => { c.set('sub', 'usr_gm'); await next(); });
+    app.route('/analytics', analyticsRoutes);
+    const res = await app.request('http://localhost/analytics/dashboard', {}, { DB: d1(db) } as any);
+    const { pipeline } = (await res.json()) as any;
+    const by = Object.fromEntries(pipeline.map((s: any) => [s.status, s.count]));
+    expect(by).toMatchObject({ idea: 2, draft: 1, scheduled: 1 });
+  });
+});

@@ -5,6 +5,7 @@ import {
   CircleX,
   Clock,
   FilePen,
+  NotepadTextDashed,
   Send,
   TriangleAlert,
   UserCheck,
@@ -13,9 +14,10 @@ import type { LucideIcon } from 'lucide-react';
 import { STATUS_LABELS, STATUS_BADGE } from '../api';
 
 /* شارة حالة المحتوى — لون وأيقونة ونص معاً، لا لون وحده.
-   الأيقونات من جدول «دورة حياة المحتوى» في naf-icons.md#v1.3.0. */
+   الأيقونات من جدول «دورة حياة المحتوى» في naf-icons.md#v1.56.0. */
 
 const STATUS_ICON: Record<string, LucideIcon> = {
+  idea: NotepadTextDashed,
   draft: FilePen,
   pending_marketing: Clock,
   pending_gm: UserCheck,

@@ -1,16 +1,21 @@
-import { isolate, formatDate } from '../lib/format';
+import { isolate, formatDate, formatNumber } from '../lib/format';
 
 // إزاحة الرياض الثابتة (+3 بلا توقيت صيفي) — كما في api.ts
 const RIYADH_OFFSET = 3 * 60 * 60 * 1000;
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, FileOutput,
+  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Grid3x3, Upload, FileOutput,
   FolderInput, ArrowUpDown, ChevronDown, CheckSquare,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, TYPE_LABELS, formatRiyadh, displayStatus } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, FORMAT_LABELS, IDEA_NO_TEXT, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
-import { PlatformIcons, platformsOf } from '../platforms';
+import { PlatformIcon, PlatformIcons, platformLabel, platformsOf, sortPlatforms, usePlatformLabels } from '../platforms';
+import PlanItemModal from '../components/PlanItemModal';
+import { KANBAN_COLS } from '../contentFlow';
+import { dayDate, exportDay, mapImportRow, pivotWeeks, rowsFromTable, type ImportRow } from '../planning';
+import { parsePlatforms } from '../campaigns';
+import { usePlanOptions } from '../components/PlanItemModal';
 import PostKanban, { moveAction } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -35,6 +40,9 @@ const BADGE_COLOR: Record<string, string> = {
 };
 const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--muted-foreground)';
 
+/** قيمة «بلا …» في مرشّحَي المسؤول والمحور — لا تتصادم مع معرّفٍ ولا اسم. */
+const NONE = '__none';
+
 /** علامةُ ترتيب البايتات — بدونها يقرأ Excel العربية محارفَ مبعثرة. */
 const BOM = '\uFEFF';
 
@@ -48,7 +56,7 @@ export default function ContentManagement() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [view, setView] = useState<'table' | 'kanban' | 'gantt'>(
+  const [view, setView] = useState<'table' | 'kanban' | 'gantt' | 'workload'>(
     () => (localStorage.getItem('naf-content-view') as any) || 'table',
   );
   useEffect(() => {
@@ -57,7 +65,11 @@ export default function ContentManagement() {
   const [search, setSearch] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fSource, setFSource] = useState('');
-  const [fType, setFType] = useState('');
+  const [fFormat, setFFormat] = useState('');
+  const [fAssignee, setFAssignee] = useState('');
+  const [fPillar, setFPillar] = useState('');
+  // أساس التصفية بتاريخ: آخر تحديث (كما كان) أو يوم النشر المستهدف
+  const [fBasis, setFBasis] = useState<'updated' | 'planned'>('updated');
   const [fCampaign, setFCampaign] = useState('');
   const [fAuthor, setFAuthor] = useState('');
   const [fFrom, setFFrom] = useState('');
@@ -69,6 +81,8 @@ export default function ContentManagement() {
   const [err, setErr] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
+  const [showAddIdea, setShowAddIdea] = useState(false);
+  const platLabels = usePlatformLabels();
 
   function load() {
     api.get('/posts').then((d) => setPosts(d.posts));
@@ -78,16 +92,32 @@ export default function ContentManagement() {
   useEffect(load, []);
 
   const authors = useMemo(() => Array.from(new Set(posts.map((p) => p.author_name).filter(Boolean))), [posts]);
+  // خيارات المرشّحَين ممّا يحمله المحتوى نفسه — مسؤولٌ أو محورٌ بلا محتوى لا يُصفّى به شيء
+  const assignees = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of posts) if (p.assignee_id) m.set(p.assignee_id, p.assignee_name || p.assignee_id);
+    return [...m].sort((a, b) => a[1].localeCompare(b[1], 'ar'));
+  }, [posts]);
+  const pillars = useMemo(() => Array.from(new Set(posts.map((p) => p.pillar).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ar')), [posts]);
 
   const filtered = useMemo(() => {
     let r = posts.filter((p) => {
-      if (fStatus && displayStatus(p) !== fStatus && p.status !== fStatus) return false;
+      /* بالحالة المعروضة: «مسودة» لا تضمّ الأفكار وإن كانت مسوداتٍ في القاعدة،
+         و«مجدول» يضمّ ما فات موعده («متأخر») كما يضمّه عمودُه في اللوحة. */
+      if (fStatus) {
+        const ds = displayStatus(p);
+        if (ds !== fStatus && !(fStatus === 'scheduled' && ds === 'late')) return false;
+      }
       if (fSource && p.source !== fSource) return false;
-      if (fType && p.content_type !== fType) return false;
+      if (fFormat && (p.format || p.content_type) !== fFormat) return false;
       if (fCampaign && p.campaign_id !== fCampaign) return false;
       if (fAuthor && p.author_name !== fAuthor) return false;
+      if (fAssignee && (fAssignee === NONE ? !!p.assignee_id : p.assignee_id !== fAssignee)) return false;
+      if (fPillar && (fPillar === NONE ? !!p.pillar : p.pillar !== fPillar)) return false;
       if (fFrom || fTo) {
-        const d = riyadhYMD(p.updated_at);
+        // باليوم المستهدف: ما لا يومَ له خارج كل نطاق
+        const d = fBasis === 'planned' ? p.planned_on || '' : riyadhYMD(p.updated_at);
+        if (!d) return false;
         if (fFrom && d < fFrom) return false;
         if (fTo && d > fTo) return false;
       }
@@ -98,13 +128,14 @@ export default function ContentManagement() {
       return true;
     });
     r = [...r].sort((a, b) => {
-      let av = a[sortKey], bv = b[sortKey];
-      if (sortKey === 'title') { av = a.title || ''; bv = b.title || ''; }
+      // الفارغ آخراً في الاتجاهين: فكرةٌ بلا يومٍ لا تتصدّر ترتيب الأيام
+      const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
+      if (av === '' || bv === '') return av === bv ? 0 : av === '' ? 1 : -1;
       const c = String(av).localeCompare(String(bv));
       return sortDir === 'asc' ? c : -c;
     });
     return r;
-  }, [posts, fStatus, fSource, fType, fCampaign, fAuthor, fFrom, fTo, search, sortKey, sortDir]);
+  }, [posts, fStatus, fSource, fFormat, fCampaign, fAuthor, fAssignee, fPillar, fBasis, fFrom, fTo, search, sortKey, sortDir]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -155,9 +186,13 @@ export default function ContentManagement() {
 
   async function onMove(post: any, toCol: string) {
     setErr(''); setMsg('');
-    const action = moveAction(post.status, toCol);
+    const from = displayStatus(post);
+    const action = moveAction(from, toCol);
     if (!action) {
-      setErr('انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
+      // الفكرة تصير مسودةً بكتابة نصّها لا بسحب — والرسالة رسالةُ الخادم نفسها
+      setErr(from === 'idea' && toCol === 'pending_marketing'
+        ? IDEA_NO_TEXT
+        : 'انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
       return;
     }
     // الرفض يحتاج سبباً إلزامياً — يُطلب في نافذة بحقلٍ وتحقّقٍ ورسالة
@@ -189,20 +224,36 @@ export default function ContentManagement() {
     if (fmt === 'json') {
       saveText(JSON.stringify(rows, null, 2), `content-${stamp}.json`, 'application/json');
     } else if (fmt === 'csv') {
-      const cols = ['id', 'title', 'status', 'source', 'content_type', 'campaign_name', 'author_name', 'created_at', 'updated_at', 'body'];
-      const head = ['المعرّف', 'العنوان', 'الحالة', 'المصدر', 'النوع', 'الحملة', 'الكاتب', 'أُنشئ', 'حُدّث', 'المحتوى'];
+      /* حقول الخطة بأسمائها المسجّلة وقيمها أسماءً لا معرّفات — فالملف نفسه
+         يُعاد استيراداً بعد تعديله في Excel (naf-terms «شرح الاستيراد»). */
+      const cols = ['id', 'title', 'status', 'source', 'format', 'campaign_name', 'author_name',
+        'planned_on', 'planned_platforms', 'assignee_name', 'pillar', 'brief', 'created_at', 'updated_at', 'body'];
+      const head = ['المعرّف', 'العنوان', 'الحالة', 'المصدر', 'الشكل', 'الحملة', 'الكاتب',
+        'يوم النشر المستهدف', 'منصات التواصل', 'مسؤول التنفيذ', 'محور المحتوى', 'ملخّص الفكرة', 'أُنشئ', 'حُدّث', 'المحتوى'];
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const cell = (p: any, c: string) => {
+        if (c === 'status') return STATUS_LABELS[displayStatus(p)];
+        if (c === 'body') return stripHtml(p.body);
+        if (c === 'format') return FORMAT_LABELS[p.format || p.content_type] || p.format;
+        if (c === 'planned_on') return exportDay(p.planned_on);
+        if (c === 'planned_platforms') return parsePlatforms(p.planned_platforms).map((k) => platformLabel(k, platLabels)).join('، ');
+        return p[c];
+      };
       const lines = [head.join(',')];
-      for (const p of rows) {
-        lines.push(cols.map((c) => esc(c === 'status' ? STATUS_LABELS[displayStatus(p)] : c === 'body' ? stripHtml(p.body) : p[c])).join(','));
-      }
+      for (const p of rows) lines.push(cols.map((c) => esc(cell(p, c))).join(','));
       /* العلامة لـCSV وحده: بها يقرأ Excel العربية سليمةً، وفي JSON
          تكسر `JSON.parse`. والعلّة في `lib/download.ts`. */
       saveText(BOM + lines.join('\n'), `content-${stamp}.csv`, 'text/csv;charset=utf-8');
     } else {
       let md = `# تصدير المحتوى — ${stamp}\n\n`;
       for (const p of rows) {
-        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n\n${stripHtml(p.body)}\n\n---\n\n`;
+        const plan = [
+          p.planned_on && `- يوم النشر المستهدف: ${exportDay(p.planned_on)}`,
+          p.assignee_name && `- مسؤول التنفيذ: ${p.assignee_name}`,
+          p.pillar && `- محور المحتوى: ${p.pillar}`,
+          p.brief && `- ملخّص الفكرة: ${p.brief}`,
+        ].filter(Boolean).map((l) => `${l}\n`).join('');
+        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n${plan}\n${stripHtml(p.body)}\n\n---\n\n`;
       }
       saveText(md, `content-${stamp}.md`, 'text/markdown;charset=utf-8');
     }
@@ -228,7 +279,7 @@ export default function ContentManagement() {
                 aria-pressed={fStatus === ''} onClick={() => setFStatus('')}>
           الكل <b><bdi>{posts.length}</bdi></b>
         </button>
-        {['draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
+        {['idea', 'draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
           .filter((s) => counts[s])
           .map((s) => (
             <button type="button" key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`}
@@ -249,9 +300,9 @@ export default function ContentManagement() {
             <option value="">كل المصادر</option>
             {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select className="select" style={{ width: 130 }} value={fType} onChange={(e) => setFType(e.target.value)}>
-            <option value="">كل الأنواع</option>
-            {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          <select className="select fit" value={fFormat} onChange={(e) => setFFormat(e.target.value)}>
+            <option value="">كل الأشكال</option>
+            {Object.entries(FORMAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <select className="select" style={{ width: 160 }} value={fCampaign} onChange={(e) => setFCampaign(e.target.value)}>
             <option value="">كل الحملات</option>
@@ -261,14 +312,42 @@ export default function ContentManagement() {
             <option value="">كل الكُتّاب</option>
             {authors.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
-          <DateRangePicker from={fFrom} to={fTo} onChange={(f, t) => { setFFrom(f); setFTo(t); }} placeholder="كل التواريخ" />
+          <select className="select fit" value={fAssignee} onChange={(e) => setFAssignee(e.target.value)}>
+            <option value="">كل المسؤولين</option>
+            <option value={NONE}>بلا مسؤول</option>
+            {assignees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+          <select className="select fit" value={fPillar} onChange={(e) => setFPillar(e.target.value)}>
+            <option value="">كل المحاور</option>
+            <option value={NONE}>بلا محور</option>
+            {pillars.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          {/* الخيار المختار يقول نفسه، والتسمية لقارئ الشاشة — naf-terms «التصفية بتاريخ» */}
+          <select
+            className="select fit"
+            aria-label="التصفية بتاريخ"
+            value={fBasis}
+            onChange={(e) => { setFBasis(e.target.value as 'updated' | 'planned'); setFFrom(''); setFTo(''); }}
+          >
+            <option value="updated">آخر تحديث</option>
+            <option value="planned">يوم النشر المستهدف</option>
+          </select>
+          <DateRangePicker
+            key={fBasis}
+            from={fFrom}
+            to={fTo}
+            onChange={(f, t) => { setFFrom(f); setFTo(t); }}
+            placeholder="كل التواريخ"
+            presets={fBasis === 'planned' ? 'future' : 'past'}
+          />
         </div>
 
         <div className="row" style={{ marginTop: 12 }}>
-          <div className="seg">
-            <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}><Table2 size={20} /> جدول</button>
-            <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}><LayoutGrid size={20} /> كانبان</button>
-            <button className={view === 'gantt' ? 'on' : ''} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
+          <div className="seg seg-scroll">
+            <button type="button" className={view === 'table' ? 'on' : ''} aria-pressed={view === 'table'} onClick={() => setView('table')}><Table2 size={20} /> جدول</button>
+            <button type="button" className={view === 'kanban' ? 'on' : ''} aria-pressed={view === 'kanban'} onClick={() => setView('kanban')}><LayoutGrid size={20} /> كانبان</button>
+            <button type="button" className={view === 'gantt' ? 'on' : ''} aria-pressed={view === 'gantt'} onClick={() => setView('gantt')}><GanttChart size={20} /> جانت</button>
+            <button type="button" className={view === 'workload' ? 'on' : ''} aria-pressed={view === 'workload'} onClick={() => setView('workload')}><Grid3x3 size={20} /> حجم العمل</button>
           </div>
           <div className="spacer" />
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{filtered.length}</bdi> عنصر</span>
@@ -286,6 +365,7 @@ export default function ContentManagement() {
               </div>
             )}
           </Popover>
+          {can('draft.edit') && <button className="btn ghost sm" onClick={() => { setMsg(''); setShowAddIdea(true); }}><Plus size={20} /> إضافة فكرة</button>}
           {can('draft.edit') && <button className="btn sm" onClick={() => navigate('/editor')}><Plus size={20} /> محتوى جديد</button>}
         </div>
       </div>
@@ -312,6 +392,16 @@ export default function ContentManagement() {
       )}
       {view === 'kanban' && <PostKanban rows={filtered} onOpen={(p) => navigate(`/editor/${p.id}`)} onMove={onMove} />}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
+      {view === 'workload' && (
+        <WorkloadView rows={filtered} range={fBasis === 'planned' ? { from: fFrom || undefined, to: fTo || undefined } : {}} />
+      )}
+
+      {showAddIdea && (
+        <PlanItemModal
+          onClose={() => setShowAddIdea(false)}
+          onCreated={() => { setShowAddIdea(false); setMsg('تمت إضافة الفكرة'); load(); }}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmModal
@@ -346,7 +436,17 @@ export default function ContentManagement() {
         />
       )}
 
-      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
+      {showImport && (
+        <ImportModal
+          onClose={() => setShowImport(false)}
+          onDone={(n, unmatched) => {
+            setShowImport(false);
+            // ما لم يُطابَق يُقال بعدده — naf-terms «ملخّص الاستيراد»
+            setMsg(`تم استيراد ${isolate(n)} عنصراً${unmatched ? ` · لم تُطابَق ${isolate(unmatched)} قيمة فتُركت فارغة.` : ''}`);
+            load();
+          }}
+        />
+      )}
       {showAssign && (
         <Modal title="نقل العناصر المحددة إلى حملة" onClose={() => setShowAssign(false)}>
           <div className="field">
@@ -385,9 +485,11 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
             <Sort k="title" label="العنوان" />
             <Sort k="status" label="الحالة" />
             <th>المصدر</th>
-            <th>النوع</th>
+            <th>الشكل</th>
             <th>الحملة</th>
             <th>الكاتب</th>
+            <Sort k="planned_on" label="يوم النشر المستهدف" />
+            <th>مسؤول التنفيذ</th>
             <Sort k="updated_at" label="آخر تحديث" />
             <th></th>
           </tr>
@@ -402,16 +504,19 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
               </td>
               <td><StatusBadge status={displayStatus(p)} /></td>
               <td className="muted"><bdi>{SOURCE_LABELS[p.source] || p.source}</bdi></td>
-              <td className="muted">{TYPE_LABELS[p.content_type] || p.content_type}</td>
+              {/* الشكل تصنيفٌ لا حالة: شارةٌ بلا لون ولا أيقونة — naf-icons «التصنيف ليس حالة» */}
+              <td><span className="badge outline">{FORMAT_LABELS[p.format || p.content_type] || p.format || p.content_type}</span></td>
               <td className="muted">{p.campaign_name || '—'}</td>
               <td className="muted">{p.author_name}</td>
+              <td className="muted">{p.planned_on ? <bdi>{formatDate(dayDate(p.planned_on))}</bdi> : '—'}</td>
+              <td className="muted">{p.assignee_name || '—'}</td>
               <td className="muted">{formatRiyadh(p.updated_at)}</td>
               <td onClick={(e) => e.stopPropagation()}>
                 {canDelete(p) && <button className="btn danger sm" title="حذف" onClick={() => onDelete(p.id)}><Trash2 size={20} /></button>}
               </td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center', padding: 'var(--space-6)' }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -484,14 +589,132 @@ function GanttView({ rows, navigate }: any) {
   );
 }
 
+/* ===== عرض «حجم العمل» =====
+   المحتوى المخطَّط أسبوعاً بأسبوع، موزّعاً بحسب ما يختاره القارئ. يعدّ ولا يحكم:
+   الاسم «حجم العمل» لا «عبء العمل» (naf-terms «أسماء العروض»). والصفوف التي في
+   الجدول نفسها بمرشّحاتها، فما يُعدّ هنا هو ما يُرى هناك. */
+type Breakdown = 'assignee' | 'platform' | 'format' | 'pillar' | 'status';
+const BREAKDOWN_LABELS: Record<Breakdown, string> = {
+  assignee: 'مسؤول التنفيذ',
+  platform: 'منصات التواصل',
+  format: 'الشكل',
+  pillar: 'محور المحتوى',
+  status: 'الحالة',
+};
+const NONE_LABELS: Partial<Record<Breakdown, string>> = {
+  assignee: 'بلا مسؤول',
+  platform: 'بلا منصة',
+  pillar: 'بلا محور',
+};
+const STATUS_ORDER = KANBAN_COLS.flatMap((c) => c.statuses);
+
+function WorkloadView({ rows, range }: { rows: any[]; range: { from?: string; to?: string } }) {
+  const labels = usePlatformLabels();
+  const [by, setBy] = useState<Breakdown>(() => {
+    const v = localStorage.getItem('naf-workload-by');
+    return v && v in BREAKDOWN_LABELS ? (v as Breakdown) : 'assignee';
+  });
+  useEffect(() => { localStorage.setItem('naf-workload-by', by); }, [by]);
+
+  const names = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of rows) if (p.assignee_id) m.set(p.assignee_id, p.assignee_name || p.assignee_id);
+    return m;
+  }, [rows]);
+
+  const { weeks, keys, truncated } = useMemo(() => {
+    const keysOf = (p: any): string[] => {
+      if (by === 'assignee') return [p.assignee_id || ''];
+      if (by === 'platform') return platformsOf(p);
+      if (by === 'format') return [p.format || p.content_type || 'text'];
+      if (by === 'pillar') return [p.pillar || ''];
+      return [displayStatus(p)];
+    };
+    return pivotWeeks(rows, keysOf, range);
+  }, [rows, by, range.from, range.to]);
+
+  // ترتيب الأعمدة ثابتٌ بين أسبوعٍ وآخر، و«بلا …» آخرها
+  const ordered = useMemo(() => {
+    const present = keys.filter((k) => k !== '');
+    let sorted: string[];
+    if (by === 'platform') sorted = sortPlatforms(present);
+    else if (by === 'format') sorted = Object.keys(FORMAT_LABELS).filter((k) => present.includes(k));
+    else if (by === 'status') sorted = STATUS_ORDER.filter((k) => present.includes(k));
+    else if (by === 'assignee') sorted = present.sort((a, b) => (names.get(a) || a).localeCompare(names.get(b) || b, 'ar'));
+    else sorted = present.sort((a, b) => a.localeCompare(b, 'ar'));
+    return keys.includes('') ? [...sorted, ''] : sorted;
+  }, [keys, by, names]);
+
+  const head = (k: string) => {
+    if (k === '') return NONE_LABELS[by] || '—';
+    if (by === 'assignee') return names.get(k) || k;
+    if (by === 'platform') return <span className="row platform-row"><PlatformIcon platform={k} size={16} /> {platformLabel(k, labels)}</span>;
+    if (by === 'format') return FORMAT_LABELS[k] || k;
+    if (by === 'status') return STATUS_LABELS[k] || k;
+    return k;
+  };
+  const day = (ymd: string) => <bdi>{formatDate(dayDate(ymd))}</bdi>;
+  const columnTotal = (k: string) => weeks.reduce((n, w) => n + (w.counts[k] || 0), 0);
+  const grandTotal = weeks.reduce((n, w) => n + w.total, 0);
+
+  return (
+    <div className="card workload">
+      <div className="row workload-bar">
+        <label htmlFor="workload-by">التوزيع حسب</label>
+        <select id="workload-by" className="select workload-select" value={by} onChange={(e) => setBy(e.target.value as Breakdown)}>
+          {(Object.keys(BREAKDOWN_LABELS) as Breakdown[]).map((k) => <option key={k} value={k}>{BREAKDOWN_LABELS[k]}</option>)}
+        </select>
+        {by === 'platform' && <span className="muted workload-hint">العنصر متعدّد المنصات يُعدّ في كل منصة، ومرةً واحدة في الإجمالي.</span>}
+      </div>
+      {truncated && <p className="muted workload-hint">النطاق أوسع من أن يُعرض كاملاً. ضيّق النطاق الزمني.</p>}
+      {grandTotal === 0 ? (
+        <p className="muted workload-empty">لا محتوى مخطّط في هذه الفترة. وسّع النطاق الزمني أو أضف فكرة.</p>
+      ) : (
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>الفترة</th>
+                {ordered.map((k) => <th key={k || 'none'}>{head(k)}</th>)}
+                <th>الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeks.map((w) => (
+                <tr key={w.start}>
+                  <th scope="row" className="workload-week">من {day(w.start)} إلى {day(w.end)}</th>
+                  {ordered.map((k) => (
+                    <td key={k || 'none'} className={w.counts[k] ? '' : 'muted'}><bdi>{formatNumber(w.counts[k] || 0)}</bdi></td>
+                  ))}
+                  <td><b><bdi>{formatNumber(w.total)}</bdi></b></td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">الإجمالي</th>
+                {ordered.map((k) => <td key={k || 'none'}><b><bdi>{formatNumber(columnTotal(k))}</bdi></b></td>)}
+                <td><b><bdi>{formatNumber(grandTotal)}</bdi></b></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===== نافذة الاستيراد ===== */
-function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: number) => void }) {
-  const [items, setItems] = useState<any[]>([]);
+/* الحقول تُطابَق عند الاستيراد لا عند اختيار الملف: الخيارات (المنصات والمسؤولون
+   والمحاور والحملات) تصل بعد فتح النافذة، والملفّ قد يُختار قبلها. */
+function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (created: number, unmatched: number) => void }) {
+  const [items, setItems] = useState<ImportRow[]>([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const options = usePlanOptions();
 
-  function parseCSV(text: string): any[] {
+  function parseCSV(text: string): string[][] {
     const rows: string[][] = [];
     let cur: string[] = [], field = '', q = false;
     for (let i = 0; i < text.length; i++) {
@@ -508,14 +731,24 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
       }
     }
     if (field !== '' || cur.length) { cur.push(field); rows.push(cur); }
-    if (rows.length < 2) return [];
-    const head = rows[0].map((h) => h.trim().toLowerCase());
-    const ti = head.findIndex((h) => ['title', 'العنوان'].includes(h));
-    const bi = head.findIndex((h) => ['body', 'content', 'المحتوى', 'النص'].includes(h));
-    return rows.slice(1).filter((r) => r.some((c) => c.trim())).map((r) => ({
-      title: ti >= 0 ? r[ti] : r[0],
-      body: bi >= 0 ? r[bi] : '',
-    }));
+    return rows;
+  }
+
+  /** عنصر JSON ← صفّ استيراد: ما يصدّره JSON (معرّفات ومنصاتٌ JSON) وما يُكتب يدوياً (أسماء). */
+  function fromJson(x: any): ImportRow {
+    const str = (v: unknown) => (v == null || v === '' ? undefined : String(v));
+    const plats = Array.isArray(x.planned_platforms) ? x.planned_platforms : parsePlatforms(x.planned_platforms);
+    return {
+      title: str(x.title),
+      body: str(x.body ?? x.content),
+      format: str(x.format ?? x.content_type),
+      planned_on: str(x.planned_on),
+      planned_platforms: plats.length ? plats.join(',') : str(x.planned_platforms),
+      assignee: str(x.assignee_id ?? x.assignee ?? x.assignee_name),
+      pillar: str(x.pillar),
+      brief: str(x.brief),
+      campaign: str(x.campaign_id ?? x.campaign ?? x.campaign_name),
+    };
   }
 
   function onFile(f: File) {
@@ -524,12 +757,12 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
     reader.onload = () => {
       try {
         const text = String(reader.result || '');
-        let parsed: any[];
+        let parsed: ImportRow[];
         if (f.name.endsWith('.json')) {
           const j = JSON.parse(text);
-          parsed = (Array.isArray(j) ? j : j.items || []).map((x: any) => ({ title: x.title, body: x.body || x.content || '', content_type: x.content_type }));
+          parsed = (Array.isArray(j) ? j : j.items || []).map(fromJson);
         } else {
-          parsed = parseCSV(text);
+          parsed = rowsFromTable(parseCSV(text));
         }
         if (!parsed.length) return setErr('لم يُعثر على عناصر صالحة (يلزم عمود عنوان)');
         setItems(parsed);
@@ -540,17 +773,33 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
 
   async function submit() {
     setBusy(true); setErr('');
+    const ctx = {
+      platforms: options.platforms.map((k) => ({ key: k, label: platformLabel(k, options.labels) })),
+      assignees: options.assignees,
+      pillars: options.pillars,
+      campaigns: options.campaigns,
+      formats: FORMAT_LABELS,
+    };
+    let unmatched = 0;
+    const mapped = items.map((row) => {
+      const r = mapImportRow(row, ctx);
+      unmatched += r.unmatched;
+      return r.item;
+    });
     try {
-      const d = await api.post('/posts/import', { items });
-      onDone(d.created);
+      const d = await api.post('/posts/import', { items: mapped });
+      onDone(d.created, unmatched);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
 
   return (
     <Modal title="استيراد محتوى" onClose={onClose}>
       <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        ارفع ملف <b>CSV</b> (بأعمدة: العنوان، المحتوى) أو <b>JSON</b> (مصفوفة عناصر فيها title و body).
-        تُنشأ العناصر كمسودات.
+        ارفع ملف <b>CSV</b> أو <b>JSON</b>. تُنشأ العناصر كمسودات.
+      </p>
+      {/* naf-terms «نصوص خطة المحتوى» ← شرح الاستيراد */}
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+        الأعمدة المقبولة: العنوان، المحتوى، الشكل، يوم النشر المستهدف، منصات التواصل، مسؤول التنفيذ، محور المحتوى، ملخّص الفكرة، الحملة. واليوم بصيغة <bdi>2026/10/31</bdi>.
       </p>
       <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
       <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={20} /> اختيار ملف</button>

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Archive, ArrowRight, CopyPlus, FolderMinus, GanttChart, LayoutGrid, Pencil, Plus, RotateCcw,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, displayStatus } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, IDEA_NO_TEXT, displayStatus } from '../api';
 import { useAuth } from '../auth';
 import { formatDate, formatNumber, isolate } from '../lib/format';
 import { targetStatus } from '../metrics';
@@ -114,9 +114,12 @@ export default function CampaignDetail() {
   // نقل بطاقةٍ بين أعمدة المحتوى — الحارس نفسه الذي تستعمله قائمة المحتوى.
   async function onMovePost(post: any, toCol: string) {
     setErr(''); setMsg('');
-    const action = moveAction(post.status, toCol);
+    const from = displayStatus(post);
+    const action = moveAction(from, toCol);
     if (!action) {
-      setErr('انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
+      setErr(from === 'idea' && toCol === 'pending_marketing'
+        ? IDEA_NO_TEXT
+        : 'انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
       return;
     }
     if (action === 'reject') { setRejecting({ post, toCol }); return; }

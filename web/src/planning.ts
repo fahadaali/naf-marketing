@@ -8,6 +8,9 @@
    ثابتةٌ بلا توقيتٍ صيفي. */
 
 import { sortPlatforms } from './platformKeys';
+import { parsePlatforms } from './campaigns';
+import { toLatinDigits } from './lib/digits';
+import { formatDate } from './lib/format';
 
 export type YearMonth = { year: number; month: number }; // الشهر ١–١٢
 
@@ -70,6 +73,278 @@ export function monthCells(ym: YearMonth): { day: number | null; ymd: string | n
 /** تاريخٌ محلّيّ يحمل اليوم نفسه، لدوالّ `naf-format` التي تقرأ بالتوقيت المحلّي. */
 export function localDateOf({ year, month }: YearMonth, day = 1): Date {
   return new Date(year, month - 1, day);
+}
+
+/** يومٌ بعد `n` يوماً (أو قبلها بسالب)، بحساب UTC فلا يتأثّر بتوقيت الجهاز. */
+export function addDays(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+
+/** أحدُ الأسبوع الذي فيه اليوم — الأسبوع يبدأ بالأحد كشبكة التقويم. */
+export function weekStart(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return addDays(ymd, -new Date(Date.UTC(y, m - 1, d)).getUTCDay());
+}
+
+/** اليوم نفسه بعد `n` شهراً، ويُقصّ إلى آخر الشهر حين لا يوجد (٣١ ← ٢٨). */
+function addMonths(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const target = shiftMonth({ year: y, month: m }, n);
+  return `${target.year}-${pad(target.month)}-${pad(Math.min(d, daysInMonth(target)))}`;
+}
+
+/**
+ * الاختصاران الأماميّان في منتقي النطاق (naf-terms «الفترة المعروضة»)، وبدايتهما
+ * اليوم — عكس الخمسة الخلفية التي نهايتها اليوم:
+ * «الشهر القادم» أوّلُه إلى آخره، و«خلال 3 أشهر» من اليوم إلى ما قبل يومه بعد
+ * ثلاثة أشهر — كما أن «آخر 12 شهراً» اثنا عشر شهراً تنتهي اليوم.
+ */
+export function forwardRange(kind: 'next_month' | 'within_3_months', today: string): { from: string; to: string } {
+  if (kind === 'next_month') {
+    const { first, last } = monthBounds(shiftMonth(monthOf(today), 1));
+    return { from: first, to: last };
+  }
+  return { from: today, to: addDays(addMonths(today, 3), -1) };
+}
+
+export type WeekRow = { start: string; end: string; counts: Record<string, number>; total: number };
+
+/** أقصى ما يُعرض من أسابيع — ما زاد يُقال «النطاق أوسع من أن يُعرض كاملاً». */
+export const PIVOT_MAX_WEEKS = 60;
+
+/**
+ * «حجم العمل»: المحتوى المخطَّط أسبوعاً بأسبوع (الأحد–السبت)، وفي كل أسبوع عددُه
+ * بحسب ما يُرجعه `keysOf` — مسؤولٌ أو منصةٌ أو شكلٌ أو محورٌ أو حالة.
+ *
+ * - المفتاح الفارغ '' خانةُ «بلا …»، وصفٌّ بلا مفاتيح يُعدّ فيها.
+ * - العنصر متعدّد المفاتيح (المنصات) يُعدّ في كل مفتاح، ومرةً واحدة في الإجمالي.
+ * - الأسابيع متّصلة من أوّل النطاق إلى آخره، والفارغ منها صفٌّ بأصفار: أسبوعٌ
+ *   بلا خطة معلومةٌ لمن يوزّع العمل لا فراغٌ يُطوى.
+ * - النطاق `range` إن جاء حدَّ الأسابيع، وإلا فأوّلُ يومٍ مخطَّط وآخرُه.
+ */
+export function pivotWeeks<T extends { planned_on?: string | null }>(
+  rows: T[],
+  keysOf: (row: T) => string[],
+  range: { from?: string; to?: string } = {},
+): { weeks: WeekRow[]; keys: string[]; truncated: boolean } {
+  const inRange = rows.filter((r): r is T & { planned_on: string } =>
+    !!r.planned_on && (!range.from || r.planned_on >= range.from) && (!range.to || r.planned_on <= range.to));
+  const days = inRange.map((r) => r.planned_on).sort();
+  const from = range.from || days[0];
+  const to = range.to || days[days.length - 1];
+  if (!from || !to || from > to) return { weeks: [], keys: [], truncated: false };
+
+  const weeks: WeekRow[] = [];
+  const index = new Map<string, WeekRow>();
+  let truncated = false;
+  for (let start = weekStart(from); start <= to; start = addDays(start, 7)) {
+    if (weeks.length === PIVOT_MAX_WEEKS) { truncated = true; break; }
+    const w = { start, end: addDays(start, 6), counts: {}, total: 0 };
+    weeks.push(w);
+    index.set(start, w);
+  }
+
+  const keys = new Set<string>();
+  for (const r of inRange) {
+    const w = index.get(weekStart(r.planned_on));
+    if (!w) continue; // ما بعد الأسابيع المعروضة حين يُقطع النطاق
+    const ks = [...new Set(keysOf(r))];
+    for (const k of ks.length ? ks : ['']) {
+      w.counts[k] = (w.counts[k] || 0) + 1;
+      keys.add(k);
+    }
+    w.total += 1;
+  }
+  return { weeks, keys: [...keys], truncated };
+}
+
+/* ═══ الاستيراد ═══
+
+   ملفُّ خطةٍ يُكتب في Excel بأسماء الأعمدة العربية المسجّلة (naf-terms «نصوص خطة
+   المحتوى» ← شرح الاستيراد)، أو بمفاتيحها اللاتينية كما يُصدّرها JSON. والقيم
+   أسماءٌ لا معرّفات — «إكس» و«قصة» واسم المسؤول — تُطابَق بخيارات المنصة، وما لا
+   يُطابَق يُترك فارغاً ويُعدّ ليُقال. */
+
+export type ImportField =
+  | 'title' | 'body' | 'format' | 'planned_on' | 'planned_platforms' | 'assignee' | 'pillar' | 'brief' | 'campaign';
+export type ImportRow = Partial<Record<ImportField, string>>;
+
+/** رؤوس الأعمدة المقبولة ← حقولها. تُقارَن بلا تشكيلٍ ولا حالة أحرف. */
+const IMPORT_HEADERS: Record<string, ImportField> = {
+  title: 'title', 'العنوان': 'title',
+  body: 'body', content: 'body', 'المحتوى': 'body', 'النص': 'body',
+  format: 'format', 'الشكل': 'format',
+  planned_on: 'planned_on', 'يوم النشر المستهدف': 'planned_on',
+  planned_platforms: 'planned_platforms', 'منصات التواصل': 'planned_platforms',
+  assignee: 'assignee', assignee_id: 'assignee', 'مسؤول التنفيذ': 'assignee',
+  pillar: 'pillar', 'محور المحتوى': 'pillar',
+  brief: 'brief', 'ملخص الفكرة': 'brief',
+  campaign: 'campaign', campaign_id: 'campaign', 'الحملة': 'campaign',
+};
+
+// التشكيل والتطويل لا يغيّران الاسم: «ملخّص» و«ملخص» رأسٌ واحد
+const headerKey = (h: string) => h.replace(/[ً-ْـ]/g, '').trim().toLowerCase();
+
+/** صفوف جدولٍ (أوّلها الرؤوس) ← صفوف استيراد. وبلا عمود عنوانٍ فالعمود الأول عنوان. */
+export function rowsFromTable(table: string[][]): ImportRow[] {
+  if (table.length < 2) return [];
+  const fields = table[0].map((h) => IMPORT_HEADERS[headerKey(h)]);
+  const titleless = !fields.includes('title');
+  return table.slice(1)
+    .filter((r) => r.some((c) => c.trim()))
+    .map((r) => {
+      const row: ImportRow = {};
+      r.forEach((cell, i) => {
+        const f = fields[i] ?? (titleless && i === 0 ? 'title' : undefined);
+        if (f && cell.trim() && row[f] === undefined) row[f] = cell.trim();
+      });
+      return row;
+    });
+}
+
+export type ImportContext = {
+  platforms: { key: string; label: string }[];
+  assignees: { id: string; name: string }[];
+  pillars: string[];
+  campaigns: { id: string; name: string }[];
+  formats: Record<string, string>; // المفتاح ← التسمية
+};
+
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** يومٌ بصيغة 2026/10/31 أو 2026-10-31، بأرقامٍ غربية أو هندية، ← 'YYYY-MM-DD'. */
+function importDay(v: string): string | null {
+  const m = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(toLatinDigits(v).trim());
+  if (!m) return null;
+  const ymd = `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+  // 2026-02-30 لا يُطوى إلى مارس
+  return addDays(ymd, 0) === ymd ? ymd : null;
+}
+
+/**
+ * صفّ استيراد ← عنصرٌ يقبله `POST /posts/import`، وعددُ ما لم يُطابَق من قيمه.
+ * كل قيمةٍ لم تُطابَق تُترك فارغة وتُعدّ مرّة؛ والمنصات قيمةً قيمة.
+ */
+export function mapImportRow(row: ImportRow, ctx: ImportContext): { item: Record<string, unknown>; unmatched: number } {
+  let unmatched = 0;
+  const item: Record<string, unknown> = { title: row.title || '', body: row.body || '' };
+
+  if (row.format) {
+    const key = Object.keys(ctx.formats).find((k) => same(k, row.format!) || same(ctx.formats[k], row.format!));
+    if (key) item.format = key; else unmatched++;
+  }
+  if (row.planned_on) {
+    const day = importDay(row.planned_on);
+    if (day) item.planned_on = day; else unmatched++;
+  }
+  if (row.planned_platforms) {
+    const keys: string[] = [];
+    for (const v of row.planned_platforms.split(/[،,;]/).map((x) => x.trim()).filter(Boolean)) {
+      const p = ctx.platforms.find((x) => same(x.key, v) || same(x.label, v));
+      if (p) { if (!keys.includes(p.key)) keys.push(p.key); } else unmatched++;
+    }
+    if (keys.length) item.planned_platforms = keys;
+  }
+  if (row.assignee) {
+    const a = ctx.assignees.find((x) => x.id === row.assignee || same(x.name, row.assignee!));
+    if (a) item.assignee_id = a.id; else unmatched++;
+  }
+  if (row.pillar) {
+    const p = ctx.pillars.find((x) => same(x, row.pillar!));
+    if (p) item.pillar = p; else unmatched++;
+  }
+  if (row.campaign) {
+    const c = ctx.campaigns.find((x) => x.id === row.campaign || same(x.name, row.campaign!));
+    if (c) item.campaign_id = c.id; else unmatched++;
+  }
+  if (row.brief) item.brief = row.brief;
+  return { item, unmatched };
+}
+
+/** اليوم كما يُكتب في ملف التصدير — صيغة `naf-format` نفسها (2026/10/31)، وهي ما يقبله الاستيراد. */
+export function exportDay(ymd: string | null | undefined): string {
+  return ymd ? formatDate(dayDate(ymd)) : '';
+}
+
+/** حقول خطة المحتوى كما تحرّرها الشاشة: '' للفارغ، ومصفوفةٌ للمنصات. */
+export type PlanDraft = {
+  planned_on: string; // 'YYYY-MM-DD' أو '' = بلا يوم محدّد
+  planned_platforms: string[];
+  format: string;
+  assignee_id: string; // '' = بلا مسؤول
+  pillar: string; // '' = بلا محور
+  campaign_id: string; // '' = بدون حملة
+  brief: string;
+};
+
+export const EMPTY_PLAN: PlanDraft = {
+  planned_on: '', planned_platforms: [], format: 'text', assignee_id: '', pillar: '', campaign_id: '', brief: '',
+};
+
+/** حقول الخطة من صفّ المحتوى كما يُرجعه الخادم. */
+export function planFromPost(p: Record<string, any>): PlanDraft {
+  return {
+    planned_on: typeof p.planned_on === 'string' ? p.planned_on : '',
+    planned_platforms: parsePlatforms(p.planned_platforms),
+    format: typeof p.format === 'string' && p.format ? p.format : p.content_type || 'text',
+    assignee_id: p.assignee_id || '',
+    pillar: p.pillar || '',
+    campaign_id: p.campaign_id || '',
+    brief: p.brief || '',
+  };
+}
+
+/** ما يُرسَل إلى الخادم: الفارغ `null` يمسح الحقل، والشكل يقرّر النوع هناك. */
+export function planPayload(d: PlanDraft) {
+  return {
+    planned_on: d.planned_on || null,
+    planned_platforms: d.planned_platforms.length ? d.planned_platforms : null,
+    format: d.format,
+    assignee_id: d.assignee_id || null,
+    pillar: d.pillar.trim() || null,
+    campaign_id: d.campaign_id || null,
+    brief: d.brief.trim() || null,
+  };
+}
+
+/** تاريخٌ محلّيّ ليومٍ 'YYYY-MM-DD'، لدوالّ `naf-format` التي تقرأ بالتوقيت المحلّي. */
+export function dayDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** حدّ طول المحور — يطابق `PILLAR_MAX` في `src/services/planning.ts`. */
+export const PILLAR_MAX = 80;
+
+/**
+ * محاور المحتوى من الإعدادات (`content_pillars`): نصوصٌ مقصوصةٌ بلا فراغ ولا
+ * تكرار، بترتيبها. وما ليس مصفوفةً — إعدادٌ لم يُحفظ بعد أو مشوَّه — لا محاور.
+ */
+export function pillarsFrom(settings: { content_pillars?: unknown } | null | undefined): string[] {
+  const raw = settings?.content_pillars;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim().slice(0, PILLAR_MAX);
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * المحتوى المخطَّط مجمّعاً بيومه المستهدف، بترتيب الخادم (اليوم ثم الإنشاء).
+ * وما لا يومَ له لا يدخل التقويم — يبقى في الجدول («بلا يوم محدّد»).
+ */
+export function groupByPlannedDay<T extends { planned_on?: string | null }>(posts: T[]): Record<string, T[]> {
+  const byDay: Record<string, T[]> = {};
+  for (const p of posts) {
+    if (!p.planned_on) continue;
+    (byDay[p.planned_on] ||= []).push(p);
+  }
+  return byDay;
 }
 
 /** صفّ موعدٍ كما يُرجعه `GET /schedules`: محتوى × منصة. */

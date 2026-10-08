@@ -107,3 +107,34 @@ describe('لا يعتمد المحتوى كاتبُه', () => {
     if (r.ok) expect(r.to).toBe('archived');
   });
 });
+
+describe('لا تُرسَل فكرةٌ قبل أن يُكتب نصّها', () => {
+  const withBody = (body: string) => ({ ...post('u1', 'draft'), body });
+
+  it('مسودةٌ بلا نصّ تُردّ برسالتها، ولا يُكتب شيء', async () => {
+    for (const body of ['', '<p><br></p>', '<div>&nbsp;</div>']) {
+      const { env, writes } = fakeEnv(ALL);
+      const r = await transition(env, user('u1', 'writer'), withBody(body), 'submit');
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.status).toBe(400);
+        expect(r.error).toBe('لا نصّ لهذه الفكرة بعد. اكتب المحتوى ثم أرسله للمراجعة.');
+      }
+      expect(writes).toEqual([]);
+    }
+  });
+
+  it('النصّ أو الوسيط وحده يكفي للإرسال', async () => {
+    for (const body of ['<p>نص</p>', '<p><img src="/api/media/m1"></p>']) {
+      const { env } = fakeEnv(ALL);
+      const r = await transition(env, user('u1', 'writer'), withBody(body), 'submit');
+      expect(r.ok).toBe(true);
+    }
+  });
+
+  it('ومن لا يمرّر النصّ لا يُفحص — الحكم للإرسال من المسار الذي يقرؤه', async () => {
+    const { env } = fakeEnv(ALL);
+    const r = await transition(env, user('u1', 'writer'), post('u1', 'draft'), 'submit');
+    expect(r.ok).toBe(true);
+  });
+});
