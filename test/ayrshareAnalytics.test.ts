@@ -196,6 +196,31 @@ describe('السحب من Ayrshare', () => {
   });
 });
 
+describe('سجلٌّ بأرقامٍ ناقصة', () => {
+  it('٤٠٠ مع posts تُكتب منه المنشورات السليمة ولا يُعدّ السحب فاشلاً', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'fb', platform: 'facebook', pageName: 'ناف' }] } });
+    routes['GET /history/facebook'] = () => ({
+      status: 400,
+      body: {
+        status: 'error',
+        posts: [
+          { id: 'fb_1', post: 'منشور سليم', created: RECENT, likeCount: 3, commentsCount: 1 },
+          { id: 'fb_2', action: 'analytics', code: 187, message: 'Error getting analytics.', status: 'error', created: RECENT },
+        ],
+      },
+    });
+    await pullAnalytics(env);
+    expect(snaps().map((s) => s.provider_post_id)).toEqual(['fb_1']);
+    expect((await readAnalyticsReport(env))?.errors).toEqual([]);
+  });
+
+  it('رفضٌ بلا رسالة يُذكر بمساره ورمزه', async () => {
+    routes['GET /history/instagram'] = () => ({ status: 400, body: { status: 'error', code: 999 } });
+    await pullAnalytics(env).catch(() => {});
+    expect((await readAnalyticsReport(env))?.errors[0]).toBe('خطأ من Ayrshare (400) في GET /history/instagram — رمز 999');
+  });
+});
+
 describe('مصدر مزوّد النشر عبر Ayrshare', () => {
   it('المتابعون من analytics/social بأسماء كل منصة، والمراجعات من reviews', async () => {
     routes['GET /user'] = () => ({

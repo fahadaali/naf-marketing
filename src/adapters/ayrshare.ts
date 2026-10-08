@@ -176,7 +176,13 @@ export async function ayrshareCall<T = any>(
     }
     throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
   }
-  throw new AyrshareError(ayrshareErrors(data) || `خطأ من Ayrshare (${res.status})`, res.status, data);
+  /* سببٌ بلا رسالة يُذكر بمساره ورمزه — وكان «خطأ من Ayrshare (400)» وحده لا
+     يقول أيُّ طلبٍ رُفض. والمسار بلا استعلامه: فيه مؤشّر الصفحة. */
+  const where = `${method} ${path.split('?')[0]}`;
+  throw new AyrshareError(
+    ayrshareErrors(data) || `خطأ من Ayrshare (${res.status}) في ${where}${codes.length ? ` — رمز ${codes[0]}` : ''}`,
+    res.status, data,
+  );
 }
 
 /* ═══ الحسابات المربوطة ═══
@@ -661,7 +667,17 @@ export async function ayrsharePlatformHistory(
   if (opts.next) q.set('next', opts.next);
   // فيسبوك: ما نشرته الصفحة لا كلّ ما في خلاصتها من منشورات غيرها
   if (platform === 'facebook') q.set('pagePublished', 'true');
-  const data = await ayrshareCall<any>(auth, 'GET', `/history/${platform}?${q}`, undefined, opts.budget);
+  /* ٤٠٠ مع `posts` ليس رفضاً: «When some of the data is not available from the
+     social networks. All available data is still returned» — منشوراتٌ تعذّرت
+     أرقامها (code 187) بين منشوراتٍ سليمة. وكان يُرمى كلُّه خطأً بلا سبب
+     («خطأ من Ayrshare (400)»)، فلا يُكتب منشورٌ واحد من صفحةٍ أغلبُها سليم. */
+  let data: any;
+  try {
+    data = await ayrshareCall<any>(auth, 'GET', `/history/${platform}?${q}`, undefined, opts.budget);
+  } catch (err) {
+    if (err instanceof AyrshareError && Array.isArray((err.body as any)?.posts)) data = err.body;
+    else throw err;
+  }
   const list: any[] = Array.isArray(data?.posts) ? data.posts : [];
   const posts: AyrshareHistoryPost[] = [];
   for (const p of list) {
