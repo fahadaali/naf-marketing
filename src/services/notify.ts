@@ -3,6 +3,7 @@ import { newId } from '../util';
 import { getEmailProvider } from './email';
 import { EMAIL } from './emailTheme';
 import { escapeHtml } from './newsletter';
+import { customPlatformLabels, platformName } from '../platformLabels';
 
 type NotifyInput = { type: string; title: string; body?: string; link?: string };
 
@@ -76,7 +77,7 @@ export async function notifyPublishFailed(env: Env, postId: string, platform: st
   await notifyUsers(env, ids, {
     type: 'publish_failed',
     title: 'فشل نشر منشور',
-    body: `${post.title} — ${platform}: ${error}`,
+    body: `${post.title} — ${platformName(platform, await customPlatformLabels(env))}: ${error}`,
     link: `/editor/${postId}`,
   });
 }

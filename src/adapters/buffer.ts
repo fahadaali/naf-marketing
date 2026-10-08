@@ -1,4 +1,5 @@
 import type { PublishingProvider, PublishInput, PublishResult, AnalyticsResult } from './provider';
+import { platformNames } from '../platformLabels';
 
 // مزوّد Buffer — واجهة Buffer الحديثة (GraphQL) على https://api.buffer.com
 // المصادقة: ترويسة Authorization: Bearer <مفتاح شخصي من publish.buffer.com/settings/api>
@@ -135,14 +136,15 @@ export async function listSentPostMetrics(token: string): Promise<BufferPostMetr
 
 export class BufferProvider implements PublishingProvider {
   private token: string;
-  constructor(accessToken: string, private profiles: Record<string, string>) {
+  // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها
+  constructor(accessToken: string, private profiles: Record<string, string>, private labels: Record<string, string> = {}) {
     this.token = (accessToken || '').trim();
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
     const channelIds = input.platforms.map((p) => this.profiles[p]).filter(Boolean);
     if (!channelIds.length) {
-      throw new Error(`لا توجد قناة Buffer مربوطة للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
+      throw new Error(`لا توجد قناة Buffer مربوطة للمنصات: ${platformNames(input.platforms, this.labels)} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
     const modeClause = input.scheduleAt
       ? `mode: customScheduled, dueAt: ${JSON.stringify(input.scheduleAt)}`
