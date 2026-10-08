@@ -2,6 +2,7 @@ import type {
   PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishState, PublishMedia, AnalyticsResult, CommentItem,
   ModerateAction,
 } from './provider';
+import { platformNames } from '../platformLabels';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
@@ -1723,7 +1724,8 @@ export function publishOutcome(data: any): PublishCheck | null {
 
 export class SocialApiProvider implements PublishingProvider {
   private key: string;
-  constructor(apiKey: string, private accounts: Record<string, string>) {
+  // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها
+  constructor(apiKey: string, private accounts: Record<string, string>, private labels: Record<string, string> = {}) {
     this.key = (apiKey || '').trim();
   }
 
@@ -1811,7 +1813,7 @@ export class SocialApiProvider implements PublishingProvider {
   async publish(input: PublishInput): Promise<PublishResult> {
     const accountIds = input.platforms.map((p) => this.accounts[p]).filter(Boolean);
     if (!accountIds.length) {
-      throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${input.platforms.join('، ')} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
+      throw new Error(`لا يوجد حساب SocialAPI مربوط للمنصات: ${platformNames(input.platforms, this.labels)} — اربطها من الإعدادات، قسم المنصات والمزوّد`);
     }
     // جسم النشر: { text, targets:[{account_id}], media?, scheduled_at? }
     // والنشر الفوري يحتاج publish_now

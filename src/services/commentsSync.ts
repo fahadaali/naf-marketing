@@ -9,6 +9,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { notifyUsers, usersWithPermission } from './notify';
+import { customPlatformLabels, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 
 /* ============================================================
@@ -1113,10 +1114,11 @@ async function notifyNegative(
   try {
     const userIds = await usersWithPermission(env, 'comments.manage');
     if (!userIds.length) return;
+    const custom = await customPlatformLabels(env);
     for (const it of items) {
       await notifyUsers(env, userIds, {
         type: 'negative_feedback',
-        title: `تقييم سلبي (${it.rating} من 5) على ${it.platform}`,
+        title: `تقييم سلبي (${it.rating} من 5) على ${platformName(it.platform, custom)}`,
         body: `${it.authorName}: ${String(it.body).slice(0, 160)}`,
         link: '/comments',
       });

@@ -4,6 +4,7 @@ import { MockProvider } from './mock';
 import { AyrshareProvider } from './ayrshare';
 import { BufferProvider } from './buffer';
 import { SocialApiProvider } from './socialapi';
+import { customPlatformLabels } from '../platformLabels';
 
 // يحل مفتاح المزوّد: يُفضّل السرّ الخاص بالمزوّد، ثم يتراجع إلى PROVIDER_API_KEY العام.
 // هكذا يمكن تخزين مفتاح Buffer وSocialAPI معاً على Cloudflare بأسماء مختلفة والتبديل بينهما.
@@ -35,14 +36,14 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
       let profiles: Record<string, string> = {};
       try { profiles = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
-      return new BufferProvider(key, profiles);
+      return new BufferProvider(key, profiles, await customPlatformLabels(env));
     }
     case 'socialapi': {
       if (!key) throw new Error('مفتاح SocialAPI.ai غير مضبوط (SOCIALAPI_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
       let accounts: Record<string, string> = {};
       try { accounts = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
-      return new SocialApiProvider(key, accounts);
+      return new SocialApiProvider(key, accounts, await customPlatformLabels(env));
     }
     case 'mock':
       return new MockProvider();

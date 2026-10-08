@@ -3,6 +3,7 @@ import { buildXlsx, type Sheet } from './xlsx';
 import { isConfigured, getMgmtProjectId, createAttachment, getRootVaultId, ensureSubVault, createUpload } from './basecamp';
 import { readBoard, readLayer } from './metrics';
 import { periodOf } from './period';
+import { customPlatformLabels, noteForDisplay, platformName } from '../platformLabels';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const REPORT_FOLDER = 'تقارير الأداء الأسبوعية (آلي)';
@@ -15,6 +16,11 @@ const STATUS_AR: Record<string, string> = {
   approved: 'معتمد', scheduled: 'مجدول', published: 'منشور', archived: 'مؤرشف', rejected: 'مرفوض',
 };
 const SOURCE_AR: Record<string, string> = { manual: 'يدوي', ai: 'ذكاء اصطناعي', rss: 'خبر RSS' };
+// naf-terms «أشكال المحتوى» — المفاتيح نفسها في `FORMAT_TYPE` (services/planning.ts)
+const FORMAT_AR: Record<string, string> = {
+  text: 'منشور نصي', image: 'صورة', carousel: 'كاروسيل', infographic: 'إنفوجرافيك',
+  video: 'فيديو', short_video: 'فيديو قصير', story: 'قصة', article: 'مقال',
+};
 
 /* مفردات المؤشرات — كلها من `naf-terms.md` §١٣. ولا تُشتقّ من الواجهة:
    هذا الملفّ يعمل في `Cron` بلا متصفّح، ونسخُها هنا نسخةٌ من السجلّ لا منها. */
@@ -53,6 +59,8 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
   const q = (sql: string, ...binds: any[]) => env.DB.prepare(sql).bind(...binds).all<any>();
   const one = (sql: string, ...binds: any[]) => env.DB.prepare(sql).bind(...binds).first<any>();
+  // المنصة باسمها لا بمفتاحها، في ورقتي التحليلات وملاحظات الجدولة — naf-terms §٣
+  const custom = await customPlatformLabels(env);
 
   // ملخص الأعمال (الفترة + الحالة العامة)
   const createdPeriod = (await one('SELECT COUNT(*) c FROM content_posts WHERE created_at >= ?', since))?.c || 0;
@@ -80,13 +88,13 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
 
   // كل المحتوى
   const posts = (await q(
-    `SELECT p.title, p.status, p.source, p.content_type, u.name author, cm.name campaign, p.created_at, p.updated_at
+    `SELECT p.title, p.status, p.source, p.format, u.name author, cm.name campaign, p.created_at, p.updated_at
      FROM content_posts p LEFT JOIN users u ON u.id=p.author_id LEFT JOIN campaigns cm ON cm.id=p.campaign_id
      ORDER BY p.updated_at DESC`,
   )).results;
   const content: (string | number)[][] = [
-    ['العنوان', 'الحالة', 'المصدر', 'النوع', 'الكاتب', 'الحملة', 'أُنشئ', 'آخر تحديث'],
-    ...posts.map((p: any) => [p.title, STATUS_AR[p.status] || p.status, SOURCE_AR[p.source] || p.source, p.content_type, p.author || '', p.campaign || '', riyadh(p.created_at), riyadh(p.updated_at)]),
+    ['العنوان', 'الحالة', 'المصدر', 'الشكل', 'الكاتب', 'الحملة', 'أُنشئ', 'آخر تحديث'],
+    ...posts.map((p: any) => [p.title, STATUS_AR[p.status] || p.status, SOURCE_AR[p.source] || p.source, FORMAT_AR[p.format] || p.format, p.author || '', p.campaign || '', riyadh(p.created_at), riyadh(p.updated_at)]),
   ];
 
   // سجل الاعتمادات خلال الفترة
@@ -97,7 +105,7 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
   )).results;
   const approvals: (string | number)[][] = [
     ['المنشور', 'من', 'إلى', 'المنفّذ', 'ملاحظة', 'الوقت'],
-    ...appr.map((a: any) => [a.title || '', STATUS_AR[a.from_status] || a.from_status || '', STATUS_AR[a.to_status] || a.to_status, a.actor || '', a.note || '', riyadh(a.created_at)]),
+    ...appr.map((a: any) => [a.title || '', STATUS_AR[a.from_status] || a.from_status || '', STATUS_AR[a.to_status] || a.to_status, a.actor || '', noteForDisplay(a.note, custom), riyadh(a.created_at)]),
   ];
 
   // تحليلات المنصات (نموذج upsert: سطر حديث واحد لكل منشور، مجمّعة حسب المنصة)
@@ -105,14 +113,14 @@ export async function buildReportWorkbook(env: Env, period: ReportPeriod = 'week
   const platforms: (string | number)[][] = [
     ['المنصة', 'الوصول', 'الانطباعات', 'التفاعل'],
     // ما لم يُعلنه المزوّد «—» لا صفر: الخانة الصفرية تُقرأ قياساً
-    ...byPlat.map((p: any) => [p.platform, p.reach ?? '—', p.impressions ?? '—', p.engagement ?? '—']),
+    ...byPlat.map((p: any) => [platformName(p.platform, custom), p.reach ?? '—', p.impressions ?? '—', p.engagement ?? '—']),
   ];
 
   // تحليلات المنشورات
   const byPost = (await q("SELECT COALESCE(title,'—') title, platform, reach, impressions, engagement, captured_at, via_platform FROM analytics_snapshots ORDER BY impressions DESC")).results;
   const postAnalytics: (string | number)[][] = [
     ['المنشور', 'المنصة', 'المصدر', 'الوصول', 'الانطباعات', 'التفاعل', 'وقت القياس'],
-    ...byPost.map((r: any) => [r.title || '', r.platform, r.via_platform ? 'عبر المنصة' : 'خارجي', r.reach ?? '—', r.impressions ?? '—', r.engagement ?? '—', riyadh(r.captured_at)]),
+    ...byPost.map((r: any) => [r.title || '', platformName(r.platform, custom), r.via_platform ? 'عبر المنصة' : 'خارجي', r.reach ?? '—', r.impressions ?? '—', r.engagement ?? '—', riyadh(r.captured_at)]),
   ];
 
   /* ═══ المؤشرات ═══

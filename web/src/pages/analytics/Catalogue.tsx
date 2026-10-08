@@ -6,9 +6,10 @@ import { formatNumber } from '../../lib/format';
 import Modal from '../../components/Modal';
 import { Money } from '../../components/Money';
 import {
-  CADENCE_LABELS, CLASS_LABELS, INTEGRATION_LABELS, LAYERS, REFERENCE_LABELS, SOURCE_LABELS, UNIT_SUFFIX,
-  type MetricClass, type MetricUnit,
+  CADENCE_LABELS, CLASS_LABELS, DIMENSION_LABELS, INTEGRATION_LABELS, LAYERS, REFERENCE_LABELS, SOURCE_LABELS, UNIT_SUFFIX,
+  spendChannelOptions, type MetricClass, type MetricUnit,
 } from '../../metrics';
+import { platformLabel, spendChannelLabel, usePlatformLabels } from '../../platforms';
 
 /* دليل المؤشرات — كلُّ ما يُقاس، بمصدره ودوريته ومستهدفه.
 
@@ -179,6 +180,21 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
+  /* «المنصة» تُختار ولا تُكتب (naf-terms §١٣ «أبعاد تفصيل المؤشّر»): كان الحقل
+     نصّاً حرّاً تسميته مفتاحه، فيُكتب «إنستغرام» مرةً و`instagram` أخرى فيصيران
+     صفّين في التفصيل. والخيار الفارغ هو الإجمالي — القيمة بلا بُعد. */
+  const byPlatform = def.dim_key === 'platform';
+  const isSpend = def.key === 'ad_spend';
+  const labels = usePlatformLabels();
+  const [enabled, setEnabled] = useState<string[]>([]);
+  useEffect(() => {
+    if (!byPlatform) return;
+    // الصمت قرار: قائمةُ خياراتٍ لحقل — وبدونها يبقى «الإجمالي» قابلاً للتسجيل
+    api.get('/settings').then((d) => setEnabled(d.settings?.enabled_platforms || [])).catch(() => {});
+  }, [byPlatform]);
+  const platformOptions = isSpend ? spendChannelOptions(enabled) : enabled;
+  const optionLabel = (p: string) => (isSpend ? spendChannelLabel(p, labels) : platformLabel(p, labels));
+
   async function saveValue() {
     const n = Number(value);
     // الخانة الفارغة تُردّ صراحةً: `Number('')` صفرٌ صحيح، فحفظُها يكتب صفراً
@@ -233,8 +249,15 @@ function RecordPanel({ def, period, start, onClose, onSaved }: {
         </div>
         {def.dim_key && (
           <div className="field" style={{ margin: 0 }}>
-            <label htmlFor="mv-dim">{def.dim_key}</label>
-            <input id="mv-dim" className="input" value={dimValue} onChange={(e) => setDimValue(e.target.value)} />
+            <label htmlFor="mv-dim">{DIMENSION_LABELS[def.dim_key] ?? def.dim_key}</label>
+            {byPlatform ? (
+              <select id="mv-dim" className="select" value={dimValue} onChange={(e) => setDimValue(e.target.value)}>
+                <option value="">الإجمالي</option>
+                {platformOptions.map((p) => <option key={p} value={p}>{optionLabel(p)}</option>)}
+              </select>
+            ) : (
+              <input id="mv-dim" className="input" value={dimValue} onChange={(e) => setDimValue(e.target.value)} />
+            )}
           </div>
         )}
         <div className="field" style={{ margin: 0, flex: 1, minWidth: 160 }}>

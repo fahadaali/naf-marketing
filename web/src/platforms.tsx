@@ -5,6 +5,7 @@ import {
   FacebookMark, YouTubeMark, InstagramMark, LinkedInMark, GoogleMark,
 } from './components/brand/brand-marks';
 import { type PlatformKey, normalizePlatform } from './platformKeys';
+import { SPEND_CHANNEL_LABELS } from './metrics';
 import { api } from './api';
 
 export { normalizePlatform, platformsOf, sortPlatforms } from './platformKeys';
@@ -65,6 +66,11 @@ export const DEFAULT_PLATFORM_PROMPTS: Record<string, string> = {
 export function platformLabel(key: string, custom?: Record<string, string>): string {
   const k = normalizePlatform(key);
   return custom?.[key] || custom?.[k] || PLATFORM_META[k]?.label || key;
+}
+
+/** قناة الإنفاق الإعلاني باسمها: `google` «إعلانات Google» هنا، وسواها منصةٌ باسمها. */
+export function spendChannelLabel(key: string, custom?: Record<string, string>): string {
+  return SPEND_CHANNEL_LABELS[normalizePlatform(key)] ?? platformLabel(key, custom);
 }
 
 // أيقونة منصة داخل رقعة ملوّنة بلونها الرسمي.

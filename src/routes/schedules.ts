@@ -4,6 +4,7 @@ import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
 import { publishPostNow, preflightSchedules } from '../services/publish';
 import { syncPostSafe } from '../services/basecampSync';
+import { customPlatformLabels, scheduleNote } from '../platformLabels';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -104,7 +105,7 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
     `INSERT INTO approvals (id, post_id, from_status, to_status, actor_id, note)
      VALUES (?, ?, ?, 'scheduled', ?, ?)`,
   )
-    .bind(newId('appr'), post_id, post.status, user.id, `جدولة على: ${platforms.join(', ')}`)
+    .bind(newId('appr'), post_id, post.status, user.id, scheduleNote([...new Set(platforms)], await customPlatformLabels(c.env)))
     .run();
 
   // تحديث بطاقة بيسكامب: النقل إلى «مجدول» وضبط تاريخ الاستحقاق = تاريخ النشر

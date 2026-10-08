@@ -9,6 +9,7 @@ import { syncPostSafe, trashPostTaskSafe } from '../services/basecampSync';
 import { notifyStageReached } from '../services/notify';
 import { snapshotVersion } from '../services/versions';
 import { logAudit } from '../services/audit';
+import { customPlatformLabels, noteForDisplay } from '../platformLabels';
 import {
   resolveFormat, isYmd, cleanDay, cleanPlatforms, cleanText, isIdeaRow,
   PILLAR_MAX, BRIEF_MAX, PLANNED_CAP, SCHEDULED_PLATFORMS_SQL,
@@ -156,11 +157,13 @@ postRoutes.get('/:id', async (c) => {
   const schedules = await c.env.DB.prepare('SELECT * FROM schedules WHERE post_id = ?').bind(id).all();
   const notes = await c.env.DB.prepare('SELECT * FROM post_notes WHERE post_id = ? ORDER BY created_at ASC').bind(id).all();
   const bcTask = await c.env.DB.prepare('SELECT 1 AS x FROM basecamp_tasks WHERE post_id = ?').bind(id).first();
+  // ملاحظات الجدولة القديمة كُتبت بمفاتيح المنصات — تُقرأ بأسمائها
+  const custom = await customPlatformLabels(c.env);
 
   return c.json({
     post,
     variants: variants.results,
-    approvals: approvals.results,
+    approvals: approvals.results.map((a: any) => (a.note ? { ...a, note: noteForDisplay(a.note, custom) } : a)),
     schedules: schedules.results,
     notes: notes.results,
     basecamp_synced: !!bcTask,
