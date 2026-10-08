@@ -867,3 +867,8 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 .workload-empty { text-align: center; padding: var(--space-6); margin: 0; }
 .workload-week { white-space: nowrap; font-weight: 500; color: var(--foreground); background: transparent; }
 .workload tfoot th, .workload tfoot td { border-top: 2px solid var(--border); }
+/* قائمةٌ منسدلة بعرض خياراتها في شريط المرشّحات، لا بعرضٍ مكتوب */
+.select.fit { width: auto; }
+/* الشارة سطرٌ واحد في الجدول: بعمودَي الخطة ضاق العمود فانكسرت «بانتظار المراجعة»
+   و«منشور نصي» على سطرين بحدٍّ مستدير. والجدول يُمرَّر داخل بطاقته. */
+.table .badge { white-space: nowrap; }

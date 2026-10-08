@@ -300,7 +300,7 @@ export default function ContentManagement() {
             <option value="">كل المصادر</option>
             {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select className="select" style={{ width: 130 }} value={fFormat} onChange={(e) => setFFormat(e.target.value)}>
+          <select className="select fit" value={fFormat} onChange={(e) => setFFormat(e.target.value)}>
             <option value="">كل الأشكال</option>
             {Object.entries(FORMAT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
@@ -312,20 +312,19 @@ export default function ContentManagement() {
             <option value="">كل الكُتّاب</option>
             {authors.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
-          <select className="select" style={{ width: 150 }} value={fAssignee} onChange={(e) => setFAssignee(e.target.value)}>
+          <select className="select fit" value={fAssignee} onChange={(e) => setFAssignee(e.target.value)}>
             <option value="">كل المسؤولين</option>
             <option value={NONE}>بلا مسؤول</option>
             {assignees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
-          <select className="select" style={{ width: 150 }} value={fPillar} onChange={(e) => setFPillar(e.target.value)}>
+          <select className="select fit" value={fPillar} onChange={(e) => setFPillar(e.target.value)}>
             <option value="">كل المحاور</option>
             <option value={NONE}>بلا محور</option>
             {pillars.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           {/* الخيار المختار يقول نفسه، والتسمية لقارئ الشاشة — naf-terms «التصفية بتاريخ» */}
           <select
-            className="select"
-            style={{ width: 170 }}
+            className="select fit"
             aria-label="التصفية بتاريخ"
             value={fBasis}
             onChange={(e) => { setFBasis(e.target.value as 'updated' | 'planned'); setFFrom(''); setFTo(''); }}
@@ -517,7 +516,7 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
               </td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center', padding: 24 }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center', padding: 'var(--space-6)' }}>لا نتائج مطابقة لبحثك. جرّب كلمات أخرى.</td></tr>}
         </tbody>
       </table>
     </div>
