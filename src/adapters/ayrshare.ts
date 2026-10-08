@@ -639,6 +639,16 @@ function isoOrNull(v: unknown): string | null {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/**
+ * ريتويتٌ في سجلّ إكس — `referencedTweets` نوعه `retweeted`، أو نصُّه «RT @…»
+ * كما يكتبه إكس دائماً. والاقتباس ليس منه: نصُّه نصُّنا وأرقامُه أرقامنا.
+ */
+export function isRetweet(p: any): boolean {
+  const refs: any[] = Array.isArray(p?.referencedTweets) ? p.referencedTweets : [];
+  if (refs.some((r) => r?.type === 'retweeted')) return true;
+  return /^RT @/.test(String(p?.post ?? p?.text ?? ''));
+}
+
 /** المنصات التي لها `GET /history/:platform` — ومنها ما نُشر خارج Ayrshare. */
 export const AYRSHARE_HISTORY_PLATFORMS = new Set([
   'bluesky', 'facebook', 'instagram', 'linkedin', 'pinterest', 'snapchat', 'threads', 'tiktok', 'twitter', 'youtube',
@@ -687,6 +697,8 @@ export async function ayrsharePlatformHistory(
     const id = String(p?.id ?? '');
     // منشورٌ يحمل خطأه (code 187) بلا معرّف لا يُكتب
     if (!id || p?.status === 'error') continue;
+    // الريتويت ليس منشورنا: أرقامُه أرقامُ التغريدة الأصلية
+    if (platform === 'twitter' && isRetweet(p)) continue;
     posts.push({
       id,
       platform: internal,

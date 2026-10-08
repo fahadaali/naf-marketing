@@ -185,6 +185,16 @@ describe('السحب من Ayrshare', () => {
     expect(snaps().map((s) => s.provider_post_id)).toEqual(['t1', 't2', 't3', 't4', 't5']);
   });
 
+  it('الريتويت في سجلّ إكس لا يُكتب', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
+    routes['GET /history/twitter'] = () => ({ body: { status: 'success', posts: [
+      { id: 't1', post: 'RT @KingSalman: نص', created: RECENT, publicMetrics: { likeCount: 90000 } },
+      { id: 't2', post: 'منشورنا', created: RECENT, publicMetrics: { likeCount: 12 } },
+    ] } });
+    await pullAnalytics(env);
+    expect(snaps().map((s) => s.provider_post_id)).toEqual(['t2']);
+  });
+
   it('إكس بلا مفتاحَي التطبيق يُترك ويُقال — وبقية المنصات تُسحب', async () => {
     delete env.AYRSHARE_X_API_SECRET;
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter' }, { id: 'ig1', platform: 'instagram' }] } });
