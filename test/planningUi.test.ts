@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   pillarsFrom, PILLAR_MAX, planFromPost, planPayload, dayDate, EMPTY_PLAN, groupByPlannedDay,
   addDays, weekStart, forwardRange, pivotWeeks, PIVOT_MAX_WEEKS,
+  rowsFromTable, mapImportRow, exportDay, type ImportContext,
 } from '../web/src/planning';
 import { FORMAT_LABELS } from '../web/src/api';
 import { FORMAT_TYPE, PILLAR_MAX as SERVER_PILLAR_MAX } from '../src/services/planning';
@@ -144,5 +145,61 @@ describe('pivotWeeks', () => {
     const r = pivotWeeks([row('2026-01-04', ['a']), row('2028-12-31', ['a'])], keysOf);
     expect(r.weeks).toHaveLength(PIVOT_MAX_WEEKS);
     expect(r.truncated).toBe(true);
+  });
+});
+
+describe('الاستيراد', () => {
+  const ctx: ImportContext = {
+    platforms: [{ key: 'x', label: 'إكس' }, { key: 'linkedin', label: 'لينكدإن' }],
+    assignees: [{ id: 'usr_1', name: 'سارة' }],
+    pillars: ['توعية نظامية'],
+    campaigns: [{ id: 'cmp_1', name: 'رمضان' }],
+    formats: FORMAT_LABELS,
+  };
+
+  it('الرؤوس العربية المسجّلة واللاتينية، بتشكيلٍ أو بدونه', () => {
+    const rows = rowsFromTable([
+      ['العنوان', 'الشكل', 'يوم النشر المستهدف', 'منصات التواصل', 'مسؤول التنفيذ', 'محور المحتوى', 'ملخّص الفكرة', 'الحملة', 'عمود آخر'],
+      ['فكرة أولى', 'قصة', '2026/10/31', 'إكس، لينكدإن', 'سارة', 'توعية نظامية', 'ملخص', 'رمضان', 'يُتجاهل'],
+      ['', '', '', '', '', '', '', '', ''],
+    ]);
+    expect(rows).toEqual([{
+      title: 'فكرة أولى', format: 'قصة', planned_on: '2026/10/31', planned_platforms: 'إكس، لينكدإن',
+      assignee: 'سارة', pillar: 'توعية نظامية', brief: 'ملخص', campaign: 'رمضان',
+    }]);
+    expect(rowsFromTable([['Title', 'brief', 'planned_on'], ['t', 'b', '2026-10-31']]))
+      .toEqual([{ title: 't', brief: 'b', planned_on: '2026-10-31' }]);
+  });
+
+  it('بلا عمود عنوانٍ فالعمود الأول عنوان', () => {
+    expect(rowsFromTable([['x', 'المحتوى'], ['عنوان', 'نص']])).toEqual([{ title: 'عنوان', body: 'نص' }]);
+  });
+
+  it('الأسماء ← المعرّفات والمفاتيح، واليوم بأرقامٍ هندية', () => {
+    const { item, unmatched } = mapImportRow({
+      title: 'فكرة', format: 'قصة', planned_on: '٢٠٢٦/١٠/٣١', planned_platforms: 'إكس، linkedin، إكس',
+      assignee: 'سارة', pillar: 'توعية نظامية', brief: 'ملخص', campaign: 'رمضان',
+    }, ctx);
+    expect(item).toEqual({
+      title: 'فكرة', body: '', format: 'story', planned_on: '2026-10-31', planned_platforms: ['x', 'linkedin'],
+      assignee_id: 'usr_1', pillar: 'توعية نظامية', brief: 'ملخص', campaign_id: 'cmp_1',
+    });
+    expect(unmatched).toBe(0);
+  });
+
+  it('ما لم يُطابَق يُترك فارغاً ويُعدّ — والمنصات قيمةً قيمة', () => {
+    const { item, unmatched } = mapImportRow({
+      title: 'فكرة', format: 'بودكاست', planned_on: '2026/02/30', planned_platforms: 'إكس، تيليجرام، ماستودون',
+      assignee: 'مجهول', pillar: 'محور جديد', campaign: 'حملة غائبة',
+    }, ctx);
+    expect(item).toEqual({ title: 'فكرة', body: '', planned_platforms: ['x'] });
+    expect(unmatched).toBe(7);
+  });
+
+  it('يوم التصدير بصيغة الاستيراد نفسها', () => {
+    expect(exportDay('2026-10-31')).toBe('2026/10/31');
+    expect(exportDay(null)).toBe('');
+    const { item } = mapImportRow({ title: 't', planned_on: exportDay('2026-10-31') }, ctx);
+    expect(item.planned_on).toBe('2026-10-31');
   });
 });

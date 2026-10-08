@@ -13,7 +13,9 @@ import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, PlatformIcons, platformLabel, platformsOf, sortPlatforms, usePlatformLabels } from '../platforms';
 import PlanItemModal from '../components/PlanItemModal';
 import { KANBAN_COLS } from '../contentFlow';
-import { dayDate, pivotWeeks } from '../planning';
+import { dayDate, exportDay, mapImportRow, pivotWeeks, rowsFromTable, type ImportRow } from '../planning';
+import { parsePlatforms } from '../campaigns';
+import { usePlanOptions } from '../components/PlanItemModal';
 import PostKanban, { moveAction } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -80,6 +82,7 @@ export default function ContentManagement() {
   const [showImport, setShowImport] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showAddIdea, setShowAddIdea] = useState(false);
+  const platLabels = usePlatformLabels();
 
   function load() {
     api.get('/posts').then((d) => setPosts(d.posts));
@@ -221,20 +224,36 @@ export default function ContentManagement() {
     if (fmt === 'json') {
       saveText(JSON.stringify(rows, null, 2), `content-${stamp}.json`, 'application/json');
     } else if (fmt === 'csv') {
-      const cols = ['id', 'title', 'status', 'source', 'content_type', 'campaign_name', 'author_name', 'created_at', 'updated_at', 'body'];
-      const head = ['المعرّف', 'العنوان', 'الحالة', 'المصدر', 'النوع', 'الحملة', 'الكاتب', 'أُنشئ', 'حُدّث', 'المحتوى'];
+      /* حقول الخطة بأسمائها المسجّلة وقيمها أسماءً لا معرّفات — فالملف نفسه
+         يُعاد استيراداً بعد تعديله في Excel (naf-terms «شرح الاستيراد»). */
+      const cols = ['id', 'title', 'status', 'source', 'format', 'campaign_name', 'author_name',
+        'planned_on', 'planned_platforms', 'assignee_name', 'pillar', 'brief', 'created_at', 'updated_at', 'body'];
+      const head = ['المعرّف', 'العنوان', 'الحالة', 'المصدر', 'الشكل', 'الحملة', 'الكاتب',
+        'يوم النشر المستهدف', 'منصات التواصل', 'مسؤول التنفيذ', 'محور المحتوى', 'ملخّص الفكرة', 'أُنشئ', 'حُدّث', 'المحتوى'];
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const cell = (p: any, c: string) => {
+        if (c === 'status') return STATUS_LABELS[displayStatus(p)];
+        if (c === 'body') return stripHtml(p.body);
+        if (c === 'format') return FORMAT_LABELS[p.format || p.content_type] || p.format;
+        if (c === 'planned_on') return exportDay(p.planned_on);
+        if (c === 'planned_platforms') return parsePlatforms(p.planned_platforms).map((k) => platformLabel(k, platLabels)).join('، ');
+        return p[c];
+      };
       const lines = [head.join(',')];
-      for (const p of rows) {
-        lines.push(cols.map((c) => esc(c === 'status' ? STATUS_LABELS[displayStatus(p)] : c === 'body' ? stripHtml(p.body) : p[c])).join(','));
-      }
+      for (const p of rows) lines.push(cols.map((c) => esc(cell(p, c))).join(','));
       /* العلامة لـCSV وحده: بها يقرأ Excel العربية سليمةً، وفي JSON
          تكسر `JSON.parse`. والعلّة في `lib/download.ts`. */
       saveText(BOM + lines.join('\n'), `content-${stamp}.csv`, 'text/csv;charset=utf-8');
     } else {
       let md = `# تصدير المحتوى — ${stamp}\n\n`;
       for (const p of rows) {
-        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n\n${stripHtml(p.body)}\n\n---\n\n`;
+        const plan = [
+          p.planned_on && `- يوم النشر المستهدف: ${exportDay(p.planned_on)}`,
+          p.assignee_name && `- مسؤول التنفيذ: ${p.assignee_name}`,
+          p.pillar && `- محور المحتوى: ${p.pillar}`,
+          p.brief && `- ملخّص الفكرة: ${p.brief}`,
+        ].filter(Boolean).map((l) => `${l}\n`).join('');
+        md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n${plan}\n${stripHtml(p.body)}\n\n---\n\n`;
       }
       saveText(md, `content-${stamp}.md`, 'text/markdown;charset=utf-8');
     }
@@ -418,7 +437,17 @@ export default function ContentManagement() {
         />
       )}
 
-      {showImport && <ImportModal onClose={() => setShowImport(false)} onDone={(n) => { setShowImport(false); setMsg(`تم استيراد ${isolate(n)} عنصراً`); load(); }} />}
+      {showImport && (
+        <ImportModal
+          onClose={() => setShowImport(false)}
+          onDone={(n, unmatched) => {
+            setShowImport(false);
+            // ما لم يُطابَق يُقال بعدده — naf-terms «ملخّص الاستيراد»
+            setMsg(`تم استيراد ${isolate(n)} عنصراً${unmatched ? ` · لم تُطابَق ${isolate(unmatched)} قيمة فتُركت فارغة.` : ''}`);
+            load();
+          }}
+        />
+      )}
       {showAssign && (
         <Modal title="نقل العناصر المحددة إلى حملة" onClose={() => setShowAssign(false)}>
           <div className="field">
@@ -677,13 +706,16 @@ function WorkloadView({ rows, range }: { rows: any[]; range: { from?: string; to
 }
 
 /* ===== نافذة الاستيراد ===== */
-function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: number) => void }) {
-  const [items, setItems] = useState<any[]>([]);
+/* الحقول تُطابَق عند الاستيراد لا عند اختيار الملف: الخيارات (المنصات والمسؤولون
+   والمحاور والحملات) تصل بعد فتح النافذة، والملفّ قد يُختار قبلها. */
+function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (created: number, unmatched: number) => void }) {
+  const [items, setItems] = useState<ImportRow[]>([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const options = usePlanOptions();
 
-  function parseCSV(text: string): any[] {
+  function parseCSV(text: string): string[][] {
     const rows: string[][] = [];
     let cur: string[] = [], field = '', q = false;
     for (let i = 0; i < text.length; i++) {
@@ -700,14 +732,24 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
       }
     }
     if (field !== '' || cur.length) { cur.push(field); rows.push(cur); }
-    if (rows.length < 2) return [];
-    const head = rows[0].map((h) => h.trim().toLowerCase());
-    const ti = head.findIndex((h) => ['title', 'العنوان'].includes(h));
-    const bi = head.findIndex((h) => ['body', 'content', 'المحتوى', 'النص'].includes(h));
-    return rows.slice(1).filter((r) => r.some((c) => c.trim())).map((r) => ({
-      title: ti >= 0 ? r[ti] : r[0],
-      body: bi >= 0 ? r[bi] : '',
-    }));
+    return rows;
+  }
+
+  /** عنصر JSON ← صفّ استيراد: ما يصدّره JSON (معرّفات ومنصاتٌ JSON) وما يُكتب يدوياً (أسماء). */
+  function fromJson(x: any): ImportRow {
+    const str = (v: unknown) => (v == null || v === '' ? undefined : String(v));
+    const plats = Array.isArray(x.planned_platforms) ? x.planned_platforms : parsePlatforms(x.planned_platforms);
+    return {
+      title: str(x.title),
+      body: str(x.body ?? x.content),
+      format: str(x.format ?? x.content_type),
+      planned_on: str(x.planned_on),
+      planned_platforms: plats.length ? plats.join(',') : str(x.planned_platforms),
+      assignee: str(x.assignee_id ?? x.assignee ?? x.assignee_name),
+      pillar: str(x.pillar),
+      brief: str(x.brief),
+      campaign: str(x.campaign_id ?? x.campaign ?? x.campaign_name),
+    };
   }
 
   function onFile(f: File) {
@@ -716,12 +758,12 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
     reader.onload = () => {
       try {
         const text = String(reader.result || '');
-        let parsed: any[];
+        let parsed: ImportRow[];
         if (f.name.endsWith('.json')) {
           const j = JSON.parse(text);
-          parsed = (Array.isArray(j) ? j : j.items || []).map((x: any) => ({ title: x.title, body: x.body || x.content || '', content_type: x.content_type }));
+          parsed = (Array.isArray(j) ? j : j.items || []).map(fromJson);
         } else {
-          parsed = parseCSV(text);
+          parsed = rowsFromTable(parseCSV(text));
         }
         if (!parsed.length) return setErr('لم يُعثر على عناصر صالحة (يلزم عمود عنوان)');
         setItems(parsed);
@@ -732,17 +774,33 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (n: num
 
   async function submit() {
     setBusy(true); setErr('');
+    const ctx = {
+      platforms: options.platforms.map((k) => ({ key: k, label: platformLabel(k, options.labels) })),
+      assignees: options.assignees,
+      pillars: options.pillars,
+      campaigns: options.campaigns,
+      formats: FORMAT_LABELS,
+    };
+    let unmatched = 0;
+    const mapped = items.map((row) => {
+      const r = mapImportRow(row, ctx);
+      unmatched += r.unmatched;
+      return r.item;
+    });
     try {
-      const d = await api.post('/posts/import', { items });
-      onDone(d.created);
+      const d = await api.post('/posts/import', { items: mapped });
+      onDone(d.created, unmatched);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   }
 
   return (
     <Modal title="استيراد محتوى" onClose={onClose}>
       <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        ارفع ملف <b>CSV</b> (بأعمدة: العنوان، المحتوى) أو <b>JSON</b> (مصفوفة عناصر فيها title و body).
-        تُنشأ العناصر كمسودات.
+        ارفع ملف <b>CSV</b> أو <b>JSON</b>. تُنشأ العناصر كمسودات.
+      </p>
+      {/* naf-terms «نصوص خطة المحتوى» ← شرح الاستيراد */}
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+        الأعمدة المقبولة: العنوان، المحتوى، الشكل، يوم النشر المستهدف، منصات التواصل، مسؤول التنفيذ، محور المحتوى، ملخّص الفكرة، الحملة. واليوم بصيغة <bdi>2026/10/31</bdi>.
       </p>
       <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
       <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={20} /> اختيار ملف</button>

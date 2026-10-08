@@ -9,6 +9,8 @@
 
 import { sortPlatforms } from './platformKeys';
 import { parsePlatforms } from './campaigns';
+import { toLatinDigits } from './lib/digits';
+import { formatDate } from './lib/format';
 
 export type YearMonth = { year: number; month: number }; // الشهر ١–١٢
 
@@ -156,6 +158,114 @@ export function pivotWeeks<T extends { planned_on?: string | null }>(
     w.total += 1;
   }
   return { weeks, keys: [...keys], truncated };
+}
+
+/* ═══ الاستيراد ═══
+
+   ملفُّ خطةٍ يُكتب في Excel بأسماء الأعمدة العربية المسجّلة (naf-terms «نصوص خطة
+   المحتوى» ← شرح الاستيراد)، أو بمفاتيحها اللاتينية كما يُصدّرها JSON. والقيم
+   أسماءٌ لا معرّفات — «إكس» و«قصة» واسم المسؤول — تُطابَق بخيارات المنصة، وما لا
+   يُطابَق يُترك فارغاً ويُعدّ ليُقال. */
+
+export type ImportField =
+  | 'title' | 'body' | 'format' | 'planned_on' | 'planned_platforms' | 'assignee' | 'pillar' | 'brief' | 'campaign';
+export type ImportRow = Partial<Record<ImportField, string>>;
+
+/** رؤوس الأعمدة المقبولة ← حقولها. تُقارَن بلا تشكيلٍ ولا حالة أحرف. */
+const IMPORT_HEADERS: Record<string, ImportField> = {
+  title: 'title', 'العنوان': 'title',
+  body: 'body', content: 'body', 'المحتوى': 'body', 'النص': 'body',
+  format: 'format', 'الشكل': 'format',
+  planned_on: 'planned_on', 'يوم النشر المستهدف': 'planned_on',
+  planned_platforms: 'planned_platforms', 'منصات التواصل': 'planned_platforms',
+  assignee: 'assignee', assignee_id: 'assignee', 'مسؤول التنفيذ': 'assignee',
+  pillar: 'pillar', 'محور المحتوى': 'pillar',
+  brief: 'brief', 'ملخص الفكرة': 'brief',
+  campaign: 'campaign', campaign_id: 'campaign', 'الحملة': 'campaign',
+};
+
+// التشكيل والتطويل لا يغيّران الاسم: «ملخّص» و«ملخص» رأسٌ واحد
+const headerKey = (h: string) => h.replace(/[ً-ْـ]/g, '').trim().toLowerCase();
+
+/** صفوف جدولٍ (أوّلها الرؤوس) ← صفوف استيراد. وبلا عمود عنوانٍ فالعمود الأول عنوان. */
+export function rowsFromTable(table: string[][]): ImportRow[] {
+  if (table.length < 2) return [];
+  const fields = table[0].map((h) => IMPORT_HEADERS[headerKey(h)]);
+  const titleless = !fields.includes('title');
+  return table.slice(1)
+    .filter((r) => r.some((c) => c.trim()))
+    .map((r) => {
+      const row: ImportRow = {};
+      r.forEach((cell, i) => {
+        const f = fields[i] ?? (titleless && i === 0 ? 'title' : undefined);
+        if (f && cell.trim() && row[f] === undefined) row[f] = cell.trim();
+      });
+      return row;
+    });
+}
+
+export type ImportContext = {
+  platforms: { key: string; label: string }[];
+  assignees: { id: string; name: string }[];
+  pillars: string[];
+  campaigns: { id: string; name: string }[];
+  formats: Record<string, string>; // المفتاح ← التسمية
+};
+
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** يومٌ بصيغة 2026/10/31 أو 2026-10-31، بأرقامٍ غربية أو هندية، ← 'YYYY-MM-DD'. */
+function importDay(v: string): string | null {
+  const m = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(toLatinDigits(v).trim());
+  if (!m) return null;
+  const ymd = `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+  // 2026-02-30 لا يُطوى إلى مارس
+  return addDays(ymd, 0) === ymd ? ymd : null;
+}
+
+/**
+ * صفّ استيراد ← عنصرٌ يقبله `POST /posts/import`، وعددُ ما لم يُطابَق من قيمه.
+ * كل قيمةٍ لم تُطابَق تُترك فارغة وتُعدّ مرّة؛ والمنصات قيمةً قيمة.
+ */
+export function mapImportRow(row: ImportRow, ctx: ImportContext): { item: Record<string, unknown>; unmatched: number } {
+  let unmatched = 0;
+  const item: Record<string, unknown> = { title: row.title || '', body: row.body || '' };
+
+  if (row.format) {
+    const key = Object.keys(ctx.formats).find((k) => same(k, row.format!) || same(ctx.formats[k], row.format!));
+    if (key) item.format = key; else unmatched++;
+  }
+  if (row.planned_on) {
+    const day = importDay(row.planned_on);
+    if (day) item.planned_on = day; else unmatched++;
+  }
+  if (row.planned_platforms) {
+    const keys: string[] = [];
+    for (const v of row.planned_platforms.split(/[،,;]/).map((x) => x.trim()).filter(Boolean)) {
+      const p = ctx.platforms.find((x) => same(x.key, v) || same(x.label, v));
+      if (p) { if (!keys.includes(p.key)) keys.push(p.key); } else unmatched++;
+    }
+    if (keys.length) item.planned_platforms = keys;
+  }
+  if (row.assignee) {
+    const a = ctx.assignees.find((x) => x.id === row.assignee || same(x.name, row.assignee!));
+    if (a) item.assignee_id = a.id; else unmatched++;
+  }
+  if (row.pillar) {
+    const p = ctx.pillars.find((x) => same(x, row.pillar!));
+    if (p) item.pillar = p; else unmatched++;
+  }
+  if (row.campaign) {
+    const c = ctx.campaigns.find((x) => x.id === row.campaign || same(x.name, row.campaign!));
+    if (c) item.campaign_id = c.id; else unmatched++;
+  }
+  if (row.brief) item.brief = row.brief;
+  return { item, unmatched };
+}
+
+/** اليوم كما يُكتب في ملف التصدير — صيغة `naf-format` نفسها (2026/10/31)، وهي ما يقبله الاستيراد. */
+export function exportDay(ymd: string | null | undefined): string {
+  return ymd ? formatDate(dayDate(ymd)) : '';
 }
 
 /** حقول خطة المحتوى كما تحرّرها الشاشة: '' للفارغ، ومصفوفةٌ للمنصات. */
