@@ -52,12 +52,15 @@ export function ayrshareErrors(data: any): string {
     })
     .filter(Boolean);
   if (parts.length) return parts.join(' · ');
-  return String(data?.message || '').trim();
+  const nested = data?.history && !Array.isArray(data.history) && typeof data.history === 'object' ? data.history : null;
+  return String(data?.message || nested?.message || '').trim();
 }
 
 /** رموز الأخطاء في الردّ — بها يُفرَّق بين الأسباب، لا بنصّ الرسالة. */
 export function errorCodes(data: any): number[] {
-  const codes = [data?.code, ...(Array.isArray(data?.errors) ? data.errors.map((e: any) => e?.code) : [])];
+  // السجلّ الفارغ يأتي بخطئه داخل `history`: {history: {code: 221, …}}
+  const nested = data?.history && !Array.isArray(data.history) && typeof data.history === 'object' ? data.history : null;
+  const codes = [data?.code, nested?.code, ...(Array.isArray(data?.errors) ? data.errors.map((e: any) => e?.code) : [])];
   return codes.map(Number).filter((n) => Number.isFinite(n));
 }
 

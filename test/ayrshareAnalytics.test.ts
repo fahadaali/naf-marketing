@@ -214,6 +214,13 @@ describe('سجلٌّ بأرقامٍ ناقصة', () => {
     expect((await readAnalyticsReport(env))?.errors).toEqual([]);
   });
 
+  it('سجلٌّ فارغ لما نُشر عبر Ayrshare — خطؤه داخل history — ليس فشلاً', async () => {
+    routes['GET /history'] = () => ({ status: 400, body: { history: { status: 'error', code: 221 } } });
+    routes['GET /history/instagram'] = () => ({ body: { status: 'success', posts: [{ id: 'ig_1', post: 'x', created: RECENT, likeCount: 1 }] } });
+    await pullAnalytics(env);
+    expect((await readAnalyticsReport(env))?.errors).toEqual([]);
+  });
+
   it('رفضٌ بلا رسالة يُذكر بمساره ورمزه', async () => {
     routes['GET /history/instagram'] = () => ({ status: 400, body: { status: 'error', code: 999 } });
     await pullAnalytics(env).catch(() => {});
