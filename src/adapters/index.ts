@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import type { PublishingProvider } from './provider';
 import { MockProvider } from './mock';
-import { AyrshareProvider } from './ayrshare';
+import { AyrshareProvider, type AyrshareAuth } from './ayrshare';
 import { BufferProvider } from './buffer';
 import { SocialApiProvider } from './socialapi';
 import { customPlatformLabels } from '../platformLabels';
@@ -16,6 +16,13 @@ export function providerKey(env: Env, name: string): string {
     n === 'ayrshare' ? env.AYRSHARE_API_KEY :
     undefined;
   return (specific || env.PROVIDER_API_KEY || '').trim();
+}
+
+/** مصادقة Ayrshare من الأسرار — المفتاح، ومفتاحا تطبيق إكس إن ضُبطا. `null` بلا مفتاح. */
+export function ayrshareAuth(env: Env): AyrshareAuth | null {
+  const key = providerKey(env, 'ayrshare');
+  if (!key) return null;
+  return { key, x: { key: env.AYRSHARE_X_API_KEY?.trim(), secret: env.AYRSHARE_X_API_SECRET?.trim() } };
 }
 
 /** المزوّدون الذين ينشرون فعلاً — وما عداهم تجريبيٌّ أو غير مدعوم. */
@@ -48,11 +55,7 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
   switch (name) {
     case 'ayrshare':
       if (!key) throw new Error('مفتاح Ayrshare غير مضبوط (AYRSHARE_API_KEY أو PROVIDER_API_KEY)');
-      return new AyrshareProvider(
-        key,
-        { key: env.AYRSHARE_X_API_KEY?.trim(), secret: env.AYRSHARE_X_API_SECRET?.trim() },
-        await customPlatformLabels(env),
-      );
+      return new AyrshareProvider(key, ayrshareAuth(env)?.x, await customPlatformLabels(env));
     case 'buffer': {
       if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();

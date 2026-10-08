@@ -7,7 +7,9 @@ import { periodOf, previousPeriod, riyadhToday } from '../src/services/period';
    الاختبار يخنق `fetch` ولا يبلغ الشبكة: ما يُتحقّق منه هو التخريط والترجيح
    وقاعدةُ «اللقطة لا تُكتب في فترةٍ منقضية». */
 
-const env = { SOCIALAPI_API_KEY: 'sapi_key_test' } as unknown as Env;
+// المصدر يقرأ المزوّد المختار من الإعدادات — SocialAPI هنا
+const db = { prepare: () => ({ first: async () => ({ value: 'socialapi' }) }) };
+const env = { DB: db, SOCIALAPI_API_KEY: 'sapi_key_test' } as unknown as Env;
 
 function stubFetch(routes: Record<string, unknown>): void {
   vi.stubGlobal('fetch', async (url: string) => {

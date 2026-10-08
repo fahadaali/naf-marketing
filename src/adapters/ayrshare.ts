@@ -1,7 +1,7 @@
 import type {
   PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult,
 } from './provider';
-import { fixedLengthBody, youtubeTitle } from './socialapi';
+import { BudgetExhausted, CallBudget, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
 
 /* ═══ Ayrshare ═══
@@ -56,7 +56,7 @@ export function ayrshareErrors(data: any): string {
 }
 
 /** رموز الأخطاء في الردّ — بها يُفرَّق بين الأسباب، لا بنصّ الرسالة. */
-function errorCodes(data: any): number[] {
+export function errorCodes(data: any): number[] {
   const codes = [data?.code, ...(Array.isArray(data?.errors) ? data.errors.map((e: any) => e?.code) : [])];
   return codes.map(Number).filter((n) => Number.isFinite(n));
 }
@@ -126,12 +126,30 @@ function ayrHeaders(auth: AyrshareAuth, json: boolean): Record<string, string> {
 }
 
 /** نداءٌ واحد للواجهة — يردّ الجسم، ويرمي `AyrshareError` بسببٍ يُقرأ. */
-export async function ayrshareCall<T = any>(auth: AyrshareAuth, method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: ayrHeaders(auth, body !== undefined),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+export async function ayrshareCall<T = any>(
+  auth: AyrshareAuth,
+  method: string,
+  path: string,
+  body?: unknown,
+  budget?: CallBudget,
+): Promise<T> {
+  // نداءات المزامنة بحصّة الاستدعاء — انظر `services/limits.ts`
+  budget?.spend();
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: ayrHeaders(auth, body !== undefined),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    // حدُّ طلبات الاستدعاء في كلاودفلير — يقف السحب ولا يُعدّ خطأ مزوّد
+    if (budget && /too many subrequests/i.test(String((err as Error)?.message || err))) {
+      budget.stop('platform_cap');
+      throw new BudgetExhausted();
+    }
+    throw err;
+  }
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text.slice(0, 200) }; }
@@ -151,6 +169,11 @@ export async function ayrshareCall<T = any>(auth: AyrshareAuth, method: string, 
     );
   }
   if (res.status === 429) {
+    // المزوّد طلب التمهّل: يقف السحب هنا ويُستأنف في دورته التالية
+    if (budget) {
+      budget.stop('rate_limit');
+      throw new BudgetExhausted();
+    }
     throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
   }
   throw new AyrshareError(ayrshareErrors(data) || `خطأ من Ayrshare (${res.status})`, res.status, data);
@@ -185,8 +208,11 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
     }));
 }
 
-export async function ayrshareUser(auth: AyrshareAuth): Promise<{ accounts: AyrshareAccount[]; messagingEnabled: boolean }> {
-  const user = await ayrshareCall<any>(auth, 'GET', '/user');
+export async function ayrshareUser(
+  auth: AyrshareAuth,
+  budget?: CallBudget,
+): Promise<{ accounts: AyrshareAccount[]; messagingEnabled: boolean }> {
+  const user = await ayrshareCall<any>(auth, 'GET', '/user', undefined, budget);
   return { accounts: mapAyrshareAccounts(user), messagingEnabled: user?.messagingEnabled === true };
 }
 
@@ -341,4 +367,325 @@ export class AyrshareProvider implements PublishingProvider {
     }
     return { reach, impressions, engagement };
   }
+}
+
+/* ═══ الأرقام: من أسماء Ayrshare إلى أسمائنا ═══
+
+   كل منصةٍ بأسمائها: إنستغرام `reachCount` و`savedCount`، وإكس تحت
+   `publicMetrics`، ويوتيوب `estimatedMinutesWatched`. فيُخرَّط كلٌّ إلى
+   الأنواع التي تقرؤها الحسابات في `services/metrics.ts` — `reach`
+   و`impressions` و`views` و`likes` أو `reactions` و`comments` و`shares`
+   و`saves` و`clicks`، والمدّة `totaltimewatched` بالدقائق، والإكمال
+   `completionrate` نسبةً مئوية — ثم يمرّ على `mapMetrics` كغيره.
+
+   والأسماء من صفحات التوثيق نفسها (Analytics on a Post، وGet post history for
+   a social platform). وقاعدتان:
+   - الغائب لا يُكتب: لا يُخترع صفرٌ لما لم تُعلنه المنصة.
+   - الإعجاب لا يُعدّ مرّتين: فيسبوك يعلن `reactions.total` وفيها الإعجاب،
+     فإن وُجدت أُخذت وحدها.
+
+   وفيسبوك ترك `impressions*` في ١٥ يونيو ٢٠٢٦: الظهور `mediaView` والوصول
+   `totalMediaViewUnique`. */
+
+type Metric = { type: string; name: string; value: number; unit: 'count' | 'percentage' | 'minutes' };
+
+function num(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** أوّل قيمةٍ رقمية من مسارات — `a.b.c`. */
+function at(o: any, ...paths: string[]): number | null {
+  for (const p of paths) {
+    const v = num(p.split('.').reduce((x, k) => (x == null ? undefined : x[k]), o));
+    if (v !== null) return v;
+  }
+  return null;
+}
+
+/**
+ * أرقام منشورٍ واحد بأسمائنا. `platform` باسم Ayrshare، و`o` كائن `analytics`
+ * من `/analytics/post` أو المنشور نفسه من `/history/:platform` — الأسماء
+ * واحدة فيهما.
+ */
+export function ayrshareMetrics(platform: string, o: any): Metric[] {
+  const out: Metric[] = [];
+  const put = (type: string, name: string, value: number | null, unit: Metric['unit'] = 'count') => {
+    if (value !== null) out.push({ type, name, value, unit });
+  };
+  if (!o || typeof o !== 'object') return out;
+
+  switch (platform) {
+    case 'facebook': {
+      put('impressions', 'mediaView', at(o, 'mediaView'));
+      put('reach', 'totalMediaViewUnique', at(o, 'totalMediaViewUnique'));
+      put('views', 'videoViews', at(o, 'videoViews', 'totalVideoViews'));
+      const reactions = at(o, 'reactions.total');
+      if (reactions !== null) put('reactions', 'reactions.total', reactions);
+      else put('likes', 'likeCount', at(o, 'likeCount'));
+      put('comments', 'commentsCount', at(o, 'commentsCount'));
+      put('shares', 'sharesCount', at(o, 'sharesCount'));
+      const ms = at(o, 'totalVideoViewTotalTime');
+      put('totaltimewatched', 'totalVideoViewTotalTime', ms === null ? null : ms / 60_000, 'minutes');
+      break;
+    }
+    case 'instagram':
+      put('reach', 'reachCount', at(o, 'reachCount'));
+      put('views', 'viewsCount', at(o, 'viewsCount', 'playsCount'));
+      put('likes', 'likeCount', at(o, 'likeCount'));
+      put('comments', 'commentsCount', at(o, 'commentsCount'));
+      put('shares', 'sharesCount', at(o, 'sharesCount'));
+      put('saves', 'savedCount', at(o, 'savedCount'));
+      break;
+    case 'linkedin': {
+      put('impressions', 'impressionCount', at(o, 'impressionCount'));
+      put('reach', 'uniqueImpressionsCount', at(o, 'uniqueImpressionsCount'));
+      put('views', 'videoViews', at(o, 'videoViews'));
+      put('likes', 'likeCount', at(o, 'likeCount'));
+      put('comments', 'commentCount', at(o, 'commentCount'));
+      put('shares', 'shareCount', at(o, 'shareCount'));
+      put('clicks', 'clickCount', at(o, 'clickCount'));
+      const ms = at(o, 'videoWatchTimeMs');
+      put('totaltimewatched', 'videoWatchTimeMs', ms === null ? null : ms / 60_000, 'minutes');
+      break;
+    }
+    case 'tiktok': {
+      put('reach', 'reach', at(o, 'reach'));
+      put('views', 'videoViews', at(o, 'videoViews'));
+      put('likes', 'likeCount', at(o, 'likeCount'));
+      put('comments', 'commentsCount', at(o, 'commentsCount'));
+      put('shares', 'shareCount', at(o, 'shareCount'));
+      const sec = at(o, 'totalTimeWatched');
+      put('totaltimewatched', 'totalTimeWatched', sec === null ? null : sec / 60, 'minutes');
+      const rate = at(o, 'fullVideoWatchedRate');
+      put('completionrate', 'fullVideoWatchedRate', rate === null ? null : Math.round(rate * 10_000) / 100, 'percentage');
+      break;
+    }
+    case 'twitter':
+      put('impressions', 'impressionCount', at(o, 'publicMetrics.impressionCount', 'nonPublicMetrics.impressionCount', 'organicMetrics.impressionCount'));
+      put('views', 'video.viewCount', at(o, 'organicMetrics.video.viewCount'));
+      put('likes', 'likeCount', at(o, 'publicMetrics.likeCount', 'organicMetrics.likeCount'));
+      put('comments', 'replyCount', at(o, 'publicMetrics.replyCount', 'organicMetrics.replyCount'));
+      put('retweets', 'retweetCount', at(o, 'publicMetrics.retweetCount', 'organicMetrics.retweetCount'));
+      put('quotes', 'quoteCount', at(o, 'publicMetrics.quoteCount'));
+      put('bookmarks', 'bookmarkCount', at(o, 'publicMetrics.bookmarkCount'));
+      break;
+    case 'youtube':
+      put('views', 'views', at(o, 'views'));
+      put('likes', 'likes', at(o, 'likes'));
+      put('comments', 'comments', at(o, 'comments'));
+      put('shares', 'shares', at(o, 'shares'));
+      put('totaltimewatched', 'estimatedMinutesWatched', at(o, 'estimatedMinutesWatched'), 'minutes');
+      put('completionrate', 'averageViewPercentage', at(o, 'averageViewPercentage'), 'percentage');
+      break;
+    case 'threads':
+      put('views', 'views', at(o, 'views'));
+      put('likes', 'likes', at(o, 'likes', 'likeCount'));
+      put('comments', 'replies', at(o, 'replies', 'replyCount'));
+      put('reposts', 'reposts', at(o, 'reposts', 'repostCount'));
+      put('quotes', 'quotes', at(o, 'quotes', 'quoteCount'));
+      put('shares', 'shares', at(o, 'shares'));
+      break;
+    case 'snapchat': {
+      // مصفوفةٌ بعنصرٍ لكل وسيط — تُجمع
+      const items: any[] = Array.isArray(o) ? o : [o];
+      const sum = (...paths: string[]) => {
+        let total: number | null = null;
+        for (const it of items) {
+          const v = at(it, ...paths);
+          if (v !== null) total = (total ?? 0) + v;
+        }
+        return total;
+      };
+      put('views', 'views', sum('views'));
+      put('reach', 'viewers', sum('viewers'));
+      put('comments', 'replies', sum('replies'));
+      put('shares', 'shares', sum('shares'));
+      const ms = sum('viewTime');
+      put('totaltimewatched', 'viewTime', ms === null ? null : ms / 60_000, 'minutes');
+      break;
+    }
+    default:
+      break;
+  }
+  return out;
+}
+
+/** الأرقام بالشكل الذي تكتبه اللقطة — الوصول والظهور والتفاعل وخامُها. */
+export function ayrshareMapped(platform: string, o: any): ReturnType<typeof mapMetrics> {
+  return mapMetrics(ayrshareMetrics(platform, o));
+}
+
+/* ═══ السجلّ ═══ */
+
+/** منشورٌ من سجلّ المنصة — بشكل `AccountPost` الذي تكتبه `ingestAccountPosts`. */
+export type AyrshareHistoryPost = {
+  id: string;
+  platform: string;
+  accountId: string;
+  title: string;
+  sentAt: string | null;
+  externalUrl: string | null;
+  metrics: ReturnType<typeof mapMetrics>;
+};
+
+function isoOrNull(v: unknown): string | null {
+  if (!v) return null;
+  const d = new Date(String(v));
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** المنصات التي لها `GET /history/:platform` — ومنها ما نُشر خارج Ayrshare. */
+export const AYRSHARE_HISTORY_PLATFORMS = new Set([
+  'bluesky', 'facebook', 'instagram', 'linkedin', 'pinterest', 'snapchat', 'threads', 'tiktok', 'twitter', 'youtube',
+]);
+
+/** المنصات التي تُطلب أرقامها بمعرّف المنصة (`searchPlatformId`). */
+export const AYRSHARE_SOCIAL_ID_PLATFORMS = new Set(['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'youtube']);
+
+export type PlatformHistoryPage = {
+  posts: AyrshareHistoryPost[];
+  /** مؤشّر الصفحة التالية — `null` حين لا مزيد. */
+  next: string | null;
+  /** «partial»: بعض المنشورات لم تُقرأ — لا يُعدّ السجلّ مكتملاً بها. */
+  partial: boolean;
+};
+
+/**
+ * صفحةٌ من سجلّ منصة. `platform` باسم Ayrshare، و`internal` مفتاحها عندنا.
+ * والمؤشّر `meta.pagination.next` لا يُعلنه التوثيق إلا لإكس وثريدز، فيُقرأ
+ * حيث وُجد: منصةٌ بلا مؤشّر تُقرأ بصفحةٍ واحدة حدُّها ٥٠٠.
+ */
+export async function ayrsharePlatformHistory(
+  auth: AyrshareAuth,
+  platform: string,
+  internal: string,
+  opts: { limit: number; next?: string | null; budget?: CallBudget },
+): Promise<PlatformHistoryPage> {
+  const q = new URLSearchParams({ limit: String(opts.limit) });
+  if (opts.next) q.set('next', opts.next);
+  // فيسبوك: ما نشرته الصفحة لا كلّ ما في خلاصتها من منشورات غيرها
+  if (platform === 'facebook') q.set('pagePublished', 'true');
+  const data = await ayrshareCall<any>(auth, 'GET', `/history/${platform}?${q}`, undefined, opts.budget);
+  const list: any[] = Array.isArray(data?.posts) ? data.posts : [];
+  const posts: AyrshareHistoryPost[] = [];
+  for (const p of list) {
+    const id = String(p?.id ?? '');
+    // منشورٌ يحمل خطأه (code 187) بلا معرّف لا يُكتب
+    if (!id || p?.status === 'error') continue;
+    posts.push({
+      id,
+      platform: internal,
+      accountId: '',
+      title: String(p?.post ?? p?.title ?? '').slice(0, 140),
+      sentAt: isoOrNull(p?.created ?? p?.publishedAt),
+      externalUrl: typeof p?.postUrl === 'string' ? p.postUrl : null,
+      metrics: ayrshareMapped(platform, p),
+    });
+  }
+  const pg = data?.meta?.pagination;
+  const next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+  return { posts, next, partial: String(data?.status || '') === 'partial' };
+}
+
+/** منشورٌ نُشر عبر Ayrshare ووجهاته — من `GET /history`. */
+export type AyrshareSentPost = {
+  ayrId: string;
+  created: string | null;
+  text: string;
+  targets: { platform: string; id: string; postUrl: string | null }[];
+};
+
+/**
+ * ما نُشر عبر Ayrshare — ومنه يُعرف معرّف كل وجهةٍ على منصتها، فيُربط
+ * المنشور على المنصة بجدول النشر عندنا (الجدول يحفظ معرّف Ayrshare).
+ * `lastDays: 0` = كلّه. ولا شيء فيه = رمز 221، لا خطأ.
+ */
+export async function ayrshareSentPosts(
+  auth: AyrshareAuth,
+  opts: { lastDays: number; limit: number; budget?: CallBudget },
+): Promise<AyrshareSentPost[]> {
+  const q = new URLSearchParams({ lastDays: String(opts.lastDays), limit: String(opts.limit) });
+  let data: any;
+  try {
+    data = await ayrshareCall<any>(auth, 'GET', `/history?${q}`, undefined, opts.budget);
+  } catch (err) {
+    if (err instanceof AyrshareError && errorCodes(err.body).includes(221)) return [];
+    throw err;
+  }
+  const list: any[] = Array.isArray(data?.history) ? data.history : [];
+  return list
+    .filter((h) => h?.id)
+    .map((h) => ({
+      ayrId: String(h.id),
+      created: isoOrNull(h.created),
+      text: String(h.post || ''),
+      targets: (Array.isArray(h.postIds) ? h.postIds : [])
+        .filter((t: any) => t?.id && t.id !== 'pending' && t.id !== 'failed' && String(t.status || 'success') !== 'error')
+        .map((t: any) => ({ platform: String(t.platform || ''), id: String(t.id), postUrl: typeof t.postUrl === 'string' ? t.postUrl : null })),
+    }));
+}
+
+/**
+ * الأرقام الحيّة لمنشوراتٍ بمعرّفاتها على منصتها — مئةٌ في الطلب الواحد.
+ * ويعمل لما نُشر من خارج Ayrshare أيضاً (يشترط خطة Launch فما فوق).
+ * يردّ خريطةً: معرّف المنشور ← أرقامه. والغائب عنها لم تُعلَن أرقامه.
+ */
+export async function ayrshareAnalyticsBySocialId(
+  auth: AyrshareAuth,
+  platform: string,
+  ids: string[],
+  budget?: CallBudget,
+): Promise<Map<string, ReturnType<typeof mapMetrics>>> {
+  const out = new Map<string, ReturnType<typeof mapMetrics>>();
+  if (!ids.length) return out;
+  const data = await ayrshareCall<any>(
+    auth, 'POST', '/analytics/post', { postIds: ids.slice(0, 100), platforms: [platform], searchPlatformId: true }, budget,
+  );
+  const block = data?.[platform];
+  const list: any[] = Array.isArray(block) ? block : block && typeof block === 'object' ? [block] : [];
+  for (const item of list) {
+    const id = String(item?.id ?? '');
+    if (!id || !item?.analytics) continue;
+    out.set(id, ayrshareMapped(platform, item.analytics));
+  }
+  return out;
+}
+
+/* ═══ أرقام الحساب: المتابعون والمراجعات ═══ */
+
+/** عدد المتابعين لكل منصةٍ مربوطة — من `POST /analytics/social`. */
+export async function ayrshareAudience(
+  auth: AyrshareAuth,
+  accounts: AyrshareAccount[],
+): Promise<{ platform: string; followers: number | null }[]> {
+  // الملف التجاري لا متابعين له، ومراجعاته من `/reviews`
+  const wanted = accounts.filter((a) => a.platform !== 'google');
+  if (!wanted.length) return [];
+  const platforms = [...new Set(wanted.map((a) => ayrsharePlatform(a.platform)))];
+  const data = await ayrshareCall<any>(auth, 'POST', '/analytics/social', { platforms });
+  return wanted.map((a) => {
+    const p = ayrsharePlatform(a.platform);
+    const an = data?.[p]?.analytics;
+    const o = Array.isArray(an) ? an[0] : an;
+    // تيك توك `followerCount` مفرداً، ويوتيوب `subscriberCount` نصّاً، وصفحة لينكدإن تحت `followers`
+    const followers = at(o, 'followersCount', 'followerCount', 'followers.totalFollowerCount', 'subscriberCount', 'subscribers');
+    return { platform: a.platform, followers };
+  });
+}
+
+/** عدد مراجعات الملف التجاري ومتوسّطها — من `GET /reviews?platform=gmb`. `null` = لا مراجعات. */
+export async function ayrshareReviewSummary(auth: AyrshareAuth): Promise<{ count: number; average: number | null } | null> {
+  let data: any;
+  try {
+    data = await ayrshareCall<any>(auth, 'GET', '/reviews?platform=gmb');
+  } catch (err) {
+    // 350 «Reviews not found»
+    if (err instanceof AyrshareError && errorCodes(err.body).includes(350)) return null;
+    throw err;
+  }
+  const count = num(data?.totalReviewCount);
+  if (!count) return null;
+  return { count, average: num(data?.averageRating) };
 }
