@@ -112,6 +112,95 @@ function uploadType(m: PublishMedia): { fileName: string; contentType?: string }
   return KNOWN[mime] ? { fileName, contentType: KNOWN[mime] } : { fileName };
 }
 
+/** ما يُصادَق به كل طلب: مفتاح الحساب، ومفتاحا تطبيق إكس إن ضُبطا. */
+export type AyrshareAuth = { key: string; x?: AyrshareXKeys };
+
+function ayrHeaders(auth: AyrshareAuth, json: boolean): Record<string, string> {
+  const h: Record<string, string> = { authorization: `Bearer ${auth.key}` };
+  if (json) h['content-type'] = 'application/json';
+  if (auth.x?.key && auth.x.secret) {
+    h['X-Twitter-OAuth1-Api-Key'] = auth.x.key;
+    h['X-Twitter-OAuth1-Api-Secret'] = auth.x.secret;
+  }
+  return h;
+}
+
+/** نداءٌ واحد للواجهة — يردّ الجسم، ويرمي `AyrshareError` بسببٍ يُقرأ. */
+export async function ayrshareCall<T = any>(auth: AyrshareAuth, method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: ayrHeaders(auth, body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text.slice(0, 200) }; }
+  if (res.ok) return data as T;
+
+  const codes = errorCodes(data);
+  if (codes.includes(419)) {
+    throw new AyrshareError(
+      'إكس يشترط مفتاحَي تطبيق المطوّر لدى Ayrshare. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET ثم أعد النشر',
+      res.status, data,
+    );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new AyrshareError(
+      `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
+      res.status, data,
+    );
+  }
+  if (res.status === 429) {
+    throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
+  }
+  throw new AyrshareError(ayrshareErrors(data) || `خطأ من Ayrshare (${res.status})`, res.status, data);
+}
+
+/* ═══ الحسابات المربوطة ═══
+
+   `GET /user` يردّ `displayNames` بحسابٍ لكل منصة مربوطة في الملف الرئيسي.
+   والاسم يختلف موضعه: يوتيوب `channelTitle` (و`displayName` فيه اسم صاحب
+   حساب جوجل لا القناة)، ولينكدإن `type` يفرّق الصفحة من الحساب الشخصي. */
+
+export type AyrshareAccount = { id: string; platform: string; name: string; messaging: boolean };
+
+/** مفتاح المنصة عندنا من حسابٍ في `displayNames`. */
+export function ayrshareAccountPlatform(entry: any): string {
+  const p = String(entry?.platform || '').toLowerCase();
+  if (p === 'twitter') return 'x';
+  if (p === 'gmb') return 'google';
+  if (p === 'linkedin') return String(entry?.type || '').toLowerCase() === 'corporate' ? 'linkedin_page' : 'linkedin';
+  return p;
+}
+
+export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
+  const list: any[] = Array.isArray(user?.displayNames) ? user.displayNames : [];
+  return list
+    .filter((e) => e && e.platform)
+    .map((e) => ({
+      id: String(e.id ?? e.channelId ?? e.platform),
+      platform: ayrshareAccountPlatform(e),
+      name: String(e.channelTitle || e.pageName || e.displayName || e.username || ''),
+      messaging: e.messagingActive === true,
+    }));
+}
+
+export async function ayrshareUser(auth: AyrshareAuth): Promise<{ accounts: AyrshareAccount[]; messagingEnabled: boolean }> {
+  const user = await ayrshareCall<any>(auth, 'GET', '/user');
+  return { accounts: mapAyrshareAccounts(user), messagingEnabled: user?.messagingEnabled === true };
+}
+
+/**
+ * الويب هوك المسجّلة — `GET /hook/webhook` يردّها كائناً: لكل حدثٍ رابطه
+ * (`social`, `scheduled`, `comments`…) ووقت تحديثه بجانبه.
+ */
+export async function listAyrshareWebhooks(auth: AyrshareAuth): Promise<{ event: string; url: string }[]> {
+  const data = await ayrshareCall<any>(auth, 'GET', '/hook/webhook');
+  return Object.entries(data || {})
+    .filter(([k, v]) => typeof v === 'string' && /^https:\/\//.test(v) && !k.endsWith('Updated'))
+    .map(([event, url]) => ({ event, url: url as string }));
+}
+
 export class AyrshareProvider implements PublishingProvider {
   private key: string;
 
@@ -120,45 +209,8 @@ export class AyrshareProvider implements PublishingProvider {
     this.key = (apiKey || '').trim();
   }
 
-  private headers(json = true): Record<string, string> {
-    const h: Record<string, string> = { authorization: `Bearer ${this.key}` };
-    if (json) h['content-type'] = 'application/json';
-    if (this.x.key && this.x.secret) {
-      h['X-Twitter-OAuth1-Api-Key'] = this.x.key;
-      h['X-Twitter-OAuth1-Api-Secret'] = this.x.secret;
-    }
-    return h;
-  }
-
-  /** نداءٌ واحد للواجهة — يردّ الجسم، ويرمي `AyrshareError` بسببٍ يُقرأ. */
-  private async call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: this.headers(body !== undefined),
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
-    let data: any = null;
-    try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text.slice(0, 200) }; }
-    if (res.ok) return data as T;
-
-    const codes = errorCodes(data);
-    if (codes.includes(419)) {
-      throw new AyrshareError(
-        'إكس يشترط مفتاحَي تطبيق المطوّر لدى Ayrshare. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET ثم أعد النشر',
-        res.status, data,
-      );
-    }
-    if (res.status === 401 || res.status === 403) {
-      throw new AyrshareError(
-        `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
-        res.status, data,
-      );
-    }
-    if (res.status === 429) {
-      throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
-    }
-    throw new AyrshareError(ayrshareErrors(data) || `خطأ من Ayrshare (${res.status})`, res.status, data);
+  private call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+    return ayrshareCall<T>({ key: this.key, x: this.x }, method, path, body);
   }
 
   /* ═══ رفعُ الوسيط ═══

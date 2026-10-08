@@ -408,7 +408,7 @@ function Platforms() {
         </div>
       )}
 
-      {provider === 'socialapi' && <IntegrationHealth />}
+      {(provider === 'socialapi' || provider === 'ayrshare') && <IntegrationHealth provider={provider} />}
       {provider === 'socialapi' && <SocialApiWebhook />}
 
       {msg && <p className="ok">{msg}</p>}
@@ -975,16 +975,17 @@ function Integrations() {
   );
 }
 
-/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة ===== */
-function IntegrationHealth() {
+/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة =====
+   المزوّدان يردّان الشكل نفسه من `/{provider}/health`، فالبطاقة واحدة. */
+function IntegrationHealth({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
   const [h, setH] = useState<any>(null);
   const [busy, setBusy] = useState(false);
 
   function load() {
     setBusy(true);
-    api.get('/socialapi/health').then(setH).catch(() => setH(null)).finally(() => setBusy(false));
+    api.get(`/${provider}/health`).then(setH).catch(() => setH(null)).finally(() => setBusy(false));
   }
-  useEffect(load, []);
+  useEffect(load, [provider]);
 
   if (!h?.configured) return null;
   const L = h.local || {};
