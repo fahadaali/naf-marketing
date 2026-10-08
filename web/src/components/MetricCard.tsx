@@ -45,6 +45,8 @@ export type MetricReading = {
   reviewed_at: string | null;
   review_due: boolean;
   breakdown: { dim_value: string; value: number; sample: number | null }[];
+  /** أمصدرُه مربوط الآن — ما لم يُربط يُعرض تحت «غير مربوط» لا بين المربوط. */
+  connected: boolean;
 };
 
 const CLASS_ICON: Record<MetricClass, LucideIcon> = {
@@ -196,7 +198,7 @@ export default function MetricCard({
         /* «لا قيمة مسجّلة» لا «لا توجد بيانات» — الشاشة الفارغة تدعو إلى فعل،
            وهذه تسمّي الفعلين المتاحين: التسجيل أو الربط. */
         <p className="metric-empty">
-          {m.source === 'integration'
+          {!m.connected
             ? 'لا مصدر مربوط لهذا المؤشر. اربط مصدره أو سجّل قيمته.'
             : 'لا قيمة مسجّلة لهذه الفترة. سجّلها أو اربط مصدرها.'}
         </p>
