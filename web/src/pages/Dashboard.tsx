@@ -16,7 +16,13 @@ import { useAuth } from '../auth';
    فصدرُ الشاشة الآن العشرةُ التي يقول الدليل إنها تُراجَع أسبوعياً، وخطُّ
    الإنتاج تحتها: هو عملُ اليوم لمن يفتح اللوحة، لا مقياسُ نتيجته. */
 
-const STATUS_ORDER = ['draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published', 'rejected'];
+const STATUS_ORDER = ['idea', 'draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published', 'rejected'];
+
+/** مرحلة المنشور في خطّ الإنتاج: حالته المعروضة، و«متأخر» داخل «مجدول» كما كان. */
+const stageOf = (p: any) => {
+  const s = displayStatus(p);
+  return s === 'late' ? 'scheduled' : s;
+};
 
 export default function Dashboard() {
   const { user, can } = useAuth();
@@ -61,7 +67,7 @@ export default function Dashboard() {
 
   const pipeline = STATUS_ORDER.map((s) => ({
     status: s,
-    count: posts.filter((p) => p.status === s).length,
+    count: posts.filter((p) => stageOf(p) === s).length,
   }));
 
   return (

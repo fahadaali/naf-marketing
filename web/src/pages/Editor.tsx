@@ -35,6 +35,7 @@ import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
+import { isBlankHtml } from '../contentFlow';
 
 /* رسالة النجاح تحمل اسم الإجراء نفسه، على صيغة «تم + المصدر»
    من naf-terms.md §4. الزر الذي يقول «رفض» ينتج «تم الرفض». */
@@ -54,6 +55,8 @@ export default function Editor() {
   const [postId, setPostId] = useState<string | undefined>(id);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  // النصّ كما حُفظ في الخادم — به تُعرف «الفكرة» (مسودةٌ لم يُحفظ لها نصّ)
+  const [savedBody, setSavedBody] = useState('');
   const [contentType, setContentType] = useState('text');
   const [campaignId, setCampaignId] = useState('');
   const [status, setStatus] = useState('draft');
@@ -109,6 +112,7 @@ export default function Editor() {
     const d = await api.get(`/posts/${pid}`);
     setTitle(d.post.title);
     setBody(d.post.body);
+    setSavedBody(d.post.body);
     setContentType(d.post.content_type);
     setCampaignId(d.post.campaign_id || '');
     setStatus(d.post.status);
@@ -161,7 +165,7 @@ export default function Editor() {
 
   const readOnly = !['draft', 'rejected'].includes(status) && !can('content.review');
 
-  async function save() {
+  async function save(): Promise<boolean> {
     setErr(''); setMsg('');
     try {
       if (!postId) {
@@ -178,9 +182,13 @@ export default function Editor() {
       } else {
         await api.patch(`/posts/${postId}`, { title, body, content_type: contentType, campaign_id: campaignId || null });
       }
+      // الخادم يطبّع النصّ الفارغ إلى '' — فالفكرة تبقى فكرةً حتى يُحفظ لها نصّ
+      setSavedBody(isBlankHtml(body) ? '' : body);
       setMsg('تم الحفظ');
+      return true;
     } catch (e: any) {
       setErr(e.message);
+      return false;
     }
   }
 
@@ -189,7 +197,11 @@ export default function Editor() {
   async function doAction(action: string, note?: string) {
     setErr(''); setMsg('');
     try {
-      if (!postId) { await save(); }
+      /* الإرسال يحفظ أولاً: ما كُتب ولم يُحفظ كان يُرسَل بنسخته القديمة — وفي
+         الفكرة نسختُها القديمة بلا نصّ، فيردّها الخادم. */
+      if (!postId || action === 'submit') {
+        if (!(await save())) return;
+      }
       const pid = postId;
       if (!pid) return;
       const d = await api.post(`/posts/${pid}/action`, { action, note });
@@ -297,7 +309,9 @@ export default function Editor() {
   const overdue =
     status === 'scheduled' &&
     schedules.some((s) => ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now());
-  const effStatus = overdue ? 'late' : status;
+  const effStatus = overdue ? 'late' : postId && status === 'draft' && savedBody === '' ? 'idea' : status;
+  // لا إرسال لما لا نصّ فيه بعد — فكرةٌ تُكتب أولاً، والخادم يردّها إن وصلت
+  const hasText = !isBlankHtml(body);
 
   return (
     <div>
@@ -409,7 +423,7 @@ export default function Editor() {
           <div className="card" style={{ marginBottom: 14 }}>
             <h4 style={{ marginTop: 0 }}>الإجراءات</h4>
             <div className="grid" style={{ gap: 8 }}>
-              {['draft', 'rejected'].includes(status) && can('content.submit') && postId && (
+              {['draft', 'rejected'].includes(status) && can('content.submit') && postId && hasText && (
                 <button className="btn" onClick={() => doAction('submit')}><Send size={20} /> إرسال للمراجعة</button>
               )}
               {status === 'pending_marketing' && can('content.review') && (

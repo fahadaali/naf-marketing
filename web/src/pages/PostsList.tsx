@@ -8,7 +8,7 @@ import {
   Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Upload, FileOutput,
   FolderInput, ArrowUpDown, ChevronDown, CheckSquare,
 } from 'lucide-react';
-import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, TYPE_LABELS, formatRiyadh, displayStatus } from '../api';
+import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, TYPE_LABELS, IDEA_NO_TEXT, formatRiyadh, displayStatus } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import { PlatformIcons, platformsOf } from '../platforms';
 import PostKanban, { moveAction } from '../components/PostKanban';
@@ -81,7 +81,12 @@ export default function ContentManagement() {
 
   const filtered = useMemo(() => {
     let r = posts.filter((p) => {
-      if (fStatus && displayStatus(p) !== fStatus && p.status !== fStatus) return false;
+      /* بالحالة المعروضة: «مسودة» لا تضمّ الأفكار وإن كانت مسوداتٍ في القاعدة،
+         و«مجدول» يضمّ ما فات موعده («متأخر») كما يضمّه عمودُه في اللوحة. */
+      if (fStatus) {
+        const ds = displayStatus(p);
+        if (ds !== fStatus && !(fStatus === 'scheduled' && ds === 'late')) return false;
+      }
       if (fSource && p.source !== fSource) return false;
       if (fType && p.content_type !== fType) return false;
       if (fCampaign && p.campaign_id !== fCampaign) return false;
@@ -155,9 +160,13 @@ export default function ContentManagement() {
 
   async function onMove(post: any, toCol: string) {
     setErr(''); setMsg('');
-    const action = moveAction(post.status, toCol);
+    const from = displayStatus(post);
+    const action = moveAction(from, toCol);
     if (!action) {
-      setErr('انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
+      // الفكرة تصير مسودةً بكتابة نصّها لا بسحب — والرسالة رسالةُ الخادم نفسها
+      setErr(from === 'idea' && toCol === 'pending_marketing'
+        ? IDEA_NO_TEXT
+        : 'انتقال غير مسموح — تُدار الجدولة والنشر من المحرر، ولا يمكن تجاوز مراحل الاعتماد.');
       return;
     }
     // الرفض يحتاج سبباً إلزامياً — يُطلب في نافذة بحقلٍ وتحقّقٍ ورسالة
@@ -228,7 +237,7 @@ export default function ContentManagement() {
                 aria-pressed={fStatus === ''} onClick={() => setFStatus('')}>
           الكل <b><bdi>{posts.length}</bdi></b>
         </button>
-        {['draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
+        {['idea', 'draft', 'pending_marketing', 'pending_gm', 'approved', 'scheduled', 'late', 'published', 'rejected', 'archived']
           .filter((s) => counts[s])
           .map((s) => (
             <button type="button" key={s} className={`chip-stat ${fStatus === s ? 'on' : ''}`}

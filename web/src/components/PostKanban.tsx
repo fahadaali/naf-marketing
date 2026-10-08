@@ -4,41 +4,20 @@ import { Lightbulb } from 'lucide-react';
 import { SOURCE_LABELS, displayStatus } from '../api';
 import StatusBadge from './StatusBadge';
 import { PlatformIcons, platformsOf } from '../platforms';
+import { KANBAN_COLS } from '../contentFlow';
 
-/* لوحة المحتوى — أعمدةٌ بحالاته الثماني، بالسحب والإفلات.
+export { moveAction } from '../contentFlow';
+
+/* لوحة المحتوى — أعمدةٌ بحالاته، بالسحب والإفلات.
 
    كانت داخل pages/PostsList.tsx، ونسخةٌ ثانيةٌ مختصرة داخل صفحة الحملات
    تعرض خمسةً من ثمانية: منشورٌ «معتمد» أو «مرفوض» أو «مؤرشف» لا يظهر في
    أي عمود، والبطاقة تقول «٥ منشور» واللوحة تعرض اثنين بلا إشارة. جدولان
-   للحالات في ملفّين هما علّةُ ذلك بعينها، فصارا واحداً هنا. */
+   للحالات في ملفّين هما علّةُ ذلك بعينها، فصارا واحداً — وهو اليوم في
+   `contentFlow.ts` مع قاعدة النقل، حيث يصلهما الاختبار. */
 
-export const KANBAN_COLS: { key: string; statuses: string[] }[] = [
-  { key: 'draft', statuses: ['draft'] },
-  { key: 'rejected', statuses: ['rejected'] },
-  { key: 'pending_marketing', statuses: ['pending_marketing'] },
-  { key: 'pending_gm', statuses: ['pending_gm'] },
-  { key: 'approved', statuses: ['approved'] },
-  { key: 'scheduled', statuses: ['scheduled', 'late'] },
-  { key: 'published', statuses: ['published'] },
-  { key: 'archived', statuses: ['archived'] },
-];
-
-/** الأعمدة التي تبقى ظاهرةً وإن خلت — بقيّتها تظهر عند أول عنصر فيها. */
+/** الأعمدة التي تبقى ظاهرةً وإن خلت — بقيّتها، و«فكرة» منها، تظهر عند أول عنصر فيها. */
 const ALWAYS_SHOWN = ['draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published'];
-
-/**
- * الإجراء الذي يقابل نقل بطاقةٍ من حالةٍ إلى عمود، أو `null` إن كان
- * الانتقال ممنوعاً. يحترم تسلسل الاعتماد — والخادم يتحقّق منه كذلك،
- * وهذا حارسٌ للقارئ لا حاجزٌ أمني.
- */
-export function moveAction(from: string, toCol: string): 'submit' | 'approve' | 'reject' | 'archive' | null {
-  if (toCol === 'pending_marketing' && ['draft', 'rejected'].includes(from)) return 'submit';
-  if (toCol === 'pending_gm' && from === 'pending_marketing') return 'approve';
-  if (toCol === 'approved' && from === 'pending_gm') return 'approve';
-  if (toCol === 'rejected' && ['pending_marketing', 'pending_gm'].includes(from)) return 'reject';
-  if (toCol === 'archived' && from === 'published') return 'archive';
-  return null;
-}
 
 export default function PostKanban({
   rows,

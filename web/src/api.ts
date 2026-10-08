@@ -83,6 +83,7 @@ export const api = {
 
 // ===== ثوابت العرض =====
 export const STATUS_LABELS: Record<string, string> = {
+  idea: 'فكرة',
   draft: 'مسودة',
   pending_marketing: 'بانتظار المراجعة',
   pending_gm: 'بانتظار الاعتماد',
@@ -109,6 +110,7 @@ export const TYPE_LABELS: Record<string, string> = {
 };
 
 export const STATUS_BADGE: Record<string, string> = {
+  idea: 'gray',
   draft: 'gray',
   pending_marketing: 'amber',
   pending_gm: 'amber',
@@ -120,8 +122,21 @@ export const STATUS_BADGE: Record<string, string> = {
   rejected: 'red',
 };
 
-// الحالة المعروضة: المنشور المجدول الذي فات موعده دون نشر يدوي يظهر «متأخر».
-export function displayStatus(post: { status: string; pending_at?: string | null }): string {
+/**
+ * «فكرة»: مسودةٌ لم يُكتب نصّها بعد — حالةُ عرضٍ مشتقّة كـ«متأخر» لا عمودٌ في
+ * القاعدة. والخادم يطبّع النصّ الفارغ إلى '' عند كل كتابة، فالفراغ هنا قطعيّ.
+ * وما لا يحمل `body` من الردود لا يُحكم عليه فكرةً.
+ */
+export function isIdea(post: { status: string; body?: string | null }): boolean {
+  return post.status === 'draft' && post.body === '';
+}
+
+/** رسالة الخادم نفسها حين تُرسَل فكرةٌ بلا نصّ — naf-terms §٤ «الأخطاء». */
+export const IDEA_NO_TEXT = 'لا نصّ لهذه الفكرة بعد. اكتب المحتوى ثم أرسله للمراجعة.';
+
+// الحالة المعروضة: المسودة بلا نصّ «فكرة»، والمجدول الذي فات موعده دون نشر يدوي «متأخر».
+export function displayStatus(post: { status: string; pending_at?: string | null; body?: string | null }): string {
+  if (isIdea(post)) return 'idea';
   if (post.status === 'scheduled' && post.pending_at && new Date(post.pending_at).getTime() < Date.now()) {
     return 'late';
   }

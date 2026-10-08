@@ -437,9 +437,10 @@ postRoutes.post('/:id/action', async (c) => {
   const user = c.get('user');
   const { action, note } = await c.req.json<{ action: Action; note?: string }>();
 
-  const post = await c.env.DB.prepare('SELECT id, status, author_id FROM content_posts WHERE id = ?')
+  // `body` لحكم الإرسال: فكرةٌ بلا نصّ لا تُرسَل للمراجعة
+  const post = await c.env.DB.prepare('SELECT id, status, author_id, body FROM content_posts WHERE id = ?')
     .bind(id)
-    .first<{ id: string; status: string; author_id: string }>();
+    .first<{ id: string; status: string; author_id: string; body: string }>();
   if (!post) return c.json({ error: 'غير موجود' }, 404);
 
   const result = await transition(c.env, user, post, action, note);
