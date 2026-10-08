@@ -1,10 +1,11 @@
-import { ChevronRight, ChevronLeft, Plus } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Import, Plus } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatRiyadh, displayStatus, STATUS_LABELS } from '../api';
 import { useAuth } from '../auth';
 import StatusBadge from '../components/StatusBadge';
 import PlanItemModal from '../components/PlanItemModal';
+import PlanImportModal, { PlanExportMenu, exportPlanFile, importSummary } from '../components/PlanImport';
 import { platformLabel, platformsOf, PlatformIcons, usePlatformLabels } from '../platforms';
 import { formatDate, formatMonth, isolate } from '../lib/format';
 import {
@@ -39,6 +40,7 @@ export default function Calendar() {
      فيتخطّى الزرّ «التالي» فبراير. ويبدأ من شهر اليوم في الرياض. */
   const [ym, setYm] = useState<YearMonth>(() => monthOf(riyadhToday()));
   const [reload, setReload] = useState(0);
+  const [importing, setImporting] = useState(false);
 
   /* مواعيد الشهر المعروض وحده. كانت تُجلب أقدمَ خمس مئة موعدٍ مرّةً واحدة،
      فلمّا تجاوز السجلّ خمس مئة خرجت الأشهر القادمة من التقويم بلا إشارة. */
@@ -84,6 +86,16 @@ export default function Calendar() {
         </div>
         {layer === 'plan' && (
           <span className="muted cal-count"><bdi>{planned.length}</bdi> عنصراً في هذا الشهر</span>
+        )}
+        {/* استيراد الخطة وتصدير الشهر المعروض بقالب الاستيراد — naf-terms «قالب الاستيراد» */}
+        {canAdd && (
+          <button type="button" className="btn ghost sm" onClick={() => { setMsg(''); setImporting(true); }}><Import size={20} /> استيراد</button>
+        )}
+        {layer === 'plan' && (
+          <PlanExportMenu
+            disabled={planned.length === 0}
+            onExport={(fmt) => exportPlanFile(planned, fmt, `content-plan-${ym.year}-${String(ym.month).padStart(2, '0')}`, labels)}
+          />
         )}
         <div className="spacer" />
         {msg && <span className="ok">{msg}</span>}
@@ -144,6 +156,13 @@ export default function Calendar() {
           </div>
         </div>
       </div>
+
+      {importing && (
+        <PlanImportModal
+          onClose={() => setImporting(false)}
+          onDone={(r) => { setImporting(false); setMsg(importSummary(r)); setReload((n) => n + 1); }}
+        />
+      )}
 
       {adding && (
         <PlanItemModal

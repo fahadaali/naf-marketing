@@ -872,3 +872,16 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 /* الشارة سطرٌ واحد في الجدول: بعمودَي الخطة ضاق العمود فانكسرت «بانتظار المراجعة»
    و«منشور نصي» على سطرين بحدٍّ مستدير. والجدول يُمرَّر داخل بطاقته. */
 .table .badge { white-space: nowrap; }
+
+/* معاينة الاستيراد: عناوين أوّل عشرين صفّاً في صندوقٍ يُمرَّر */
+.import-preview {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  max-height: calc(var(--spacing) * 40);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-xs);
+}
+.import-preview li { padding-block: var(--space-1); }

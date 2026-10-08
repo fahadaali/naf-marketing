@@ -171,16 +171,20 @@ export type ImportField =
   | 'title' | 'body' | 'format' | 'planned_on' | 'planned_platforms' | 'assignee' | 'pillar' | 'brief' | 'campaign';
 export type ImportRow = Partial<Record<ImportField, string>>;
 
-/** رؤوس الأعمدة المقبولة ← حقولها. تُقارَن بلا تشكيلٍ ولا حالة أحرف. */
+/**
+ * رؤوس الأعمدة المقبولة ← حقولها. تُقارَن بلا تشكيلٍ ولا حالة أحرف. عناوين «قالب
+ * الاستيراد» المختصرة (naf-terms v1.62.0) وأسماء الحقول الكاملة معاً، وأسماءٌ
+ * قديمة كـ«محور المحتوى» كي يُقرأ ملفٌّ صُدّر قبل الاستبدال.
+ */
 const IMPORT_HEADERS: Record<string, ImportField> = {
   title: 'title', 'العنوان': 'title',
   body: 'body', content: 'body', 'المحتوى': 'body', 'النص': 'body',
   format: 'format', 'الشكل': 'format',
-  planned_on: 'planned_on', 'يوم النشر المستهدف': 'planned_on',
-  planned_platforms: 'planned_platforms', 'منصات التواصل': 'planned_platforms',
+  planned_on: 'planned_on', 'التاريخ': 'planned_on', 'يوم النشر المستهدف': 'planned_on',
+  planned_platforms: 'planned_platforms', 'المنصات': 'planned_platforms', 'منصات التواصل': 'planned_platforms',
   assignee: 'assignee', assignee_id: 'assignee', 'مسؤول التنفيذ': 'assignee',
-  pillar: 'pillar', 'محور المحتوى': 'pillar',
-  brief: 'brief', 'ملخص الفكرة': 'brief',
+  pillar: 'pillar', 'السلسلة': 'pillar', 'محور المحتوى': 'pillar',
+  brief: 'brief', 'الفكرة': 'brief', 'ملخص الفكرة': 'brief',
   campaign: 'campaign', campaign_id: 'campaign', 'الحملة': 'campaign',
 };
 
@@ -214,11 +218,28 @@ export type ImportContext = {
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** يومٌ بصيغة 2026/10/31 أو 2026-10-31، بأرقامٍ غربية أو هندية، ← 'YYYY-MM-DD'. */
-function importDay(v: string): string | null {
-  const m = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(toLatinDigits(v).trim());
-  if (!m) return null;
-  const ymd = `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+/** أيام Excel التسلسلية تبدأ من ٣٠ ديسمبر ١٨٩٩ (بعد خطأ ١٩٠٠ الكبيسة الموروث). */
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+
+/**
+ * يومٌ كما يُكتب في ملف الاستيراد ← 'YYYY-MM-DD'، أو `null` إن لم يُقرأ:
+ * 2026/10/31 و2026-10-31 (صيغة التصدير)، و31/10/2026 (يومٌ ثم شهر كما يُكتب
+ * عندنا)، بأرقامٍ غربية أو هندية، وبوقتٍ ملحقٍ يُهمل — وما يحفظه Excel رقماً
+ * تسلسلياً حين يتعرّف التاريخ في الخلية.
+ */
+export function importDay(v: string): string | null {
+  const t = toLatinDigits(v).trim().replace(/[T\s].*$/, '');
+  let y: number, mo: number, d: number;
+  let m = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/.exec(t);
+  if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t))) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else if (/^\d{5}(\.\d+)?$/.test(t)) {
+    // من ١٩٥٤ إلى ٢١١٩ — رقمٌ خارجها ليس تاريخاً كتبه أحد في خطة محتوى
+    const serial = Math.floor(Number(t));
+    if (serial < 20000 || serial > 80000) return null;
+    return new Date(EXCEL_EPOCH + serial * 86_400_000).toISOString().slice(0, 10);
+  } else return null;
+  const ymd = `${y}-${pad(mo)}-${pad(d)}`;
   // 2026-02-30 لا يُطوى إلى مارس
   return addDays(ymd, 0) === ymd ? ymd : null;
 }

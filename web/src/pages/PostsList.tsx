@@ -2,10 +2,10 @@ import { isolate, formatDate, formatNumber } from '../lib/format';
 
 // إزاحة الرياض الثابتة (+3 بلا توقيت صيفي) — كما في api.ts
 const RIYADH_OFFSET = 3 * 60 * 60 * 1000;
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Grid3x3, Upload, FileOutput,
+  Plus, Trash2, Search, LayoutGrid, Table2, GanttChart, Grid3x3, Import, FileOutput,
   FolderInput, ArrowUpDown, ChevronDown, CheckSquare,
 } from 'lucide-react';
 import { api, STATUS_LABELS, STATUS_BADGE, SOURCE_LABELS, FORMAT_LABELS, IDEA_NO_TEXT, formatRiyadh, displayStatus } from '../api';
@@ -13,9 +13,8 @@ import StatusBadge from '../components/StatusBadge';
 import { PlatformIcon, PlatformIcons, platformLabel, platformsOf, sortPlatforms, usePlatformLabels } from '../platforms';
 import PlanItemModal from '../components/PlanItemModal';
 import { KANBAN_COLS } from '../contentFlow';
-import { dayDate, exportDay, mapImportRow, pivotWeeks, rowsFromTable, type ImportRow } from '../planning';
-import { parsePlatforms } from '../campaigns';
-import { usePlanOptions } from '../components/PlanItemModal';
+import { dayDate, exportDay, pivotWeeks } from '../planning';
+import PlanImportModal, { exportPlanFile, importSummary } from '../components/PlanImport';
 import PostKanban, { moveAction } from '../components/PostKanban';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
@@ -42,9 +41,6 @@ const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--mute
 
 /** قيمة «بلا …» في مرشّحَي المسؤول والسلسلة — لا تتصادم مع معرّفٍ ولا اسم. */
 const NONE = '__none';
-
-/** علامةُ ترتيب البايتات — بدونها يقرأ Excel العربية محارفَ مبعثرة. */
-const BOM = '\uFEFF';
 
 function stripHtml(s: string) {
   return (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -218,32 +214,15 @@ export default function ContentManagement() {
     }
   }
 
-  function doExport(fmt: 'csv' | 'json' | 'md') {
+  function doExport(fmt: 'xlsx' | 'csv' | 'json' | 'md') {
     const rows = (sel.size ? selectedPosts() : filtered);
     const stamp = new Date().toISOString().slice(0, 10);
     if (fmt === 'json') {
       saveText(JSON.stringify(rows, null, 2), `content-${stamp}.json`, 'application/json');
-    } else if (fmt === 'csv') {
-      /* حقول الخطة بأسمائها المسجّلة وقيمها أسماءً لا معرّفات — فالملف نفسه
-         يُعاد استيراداً بعد تعديله في Excel (naf-terms «شرح الاستيراد»). */
-      const cols = ['id', 'title', 'status', 'source', 'format', 'campaign_name', 'author_name',
-        'planned_on', 'planned_platforms', 'assignee_name', 'pillar', 'brief', 'created_at', 'updated_at', 'body'];
-      const head = ['المعرّف', 'العنوان', 'الحالة', 'المصدر', 'الشكل', 'الحملة', 'الكاتب',
-        'يوم النشر المستهدف', 'منصات التواصل', 'مسؤول التنفيذ', 'محور المحتوى', 'ملخّص الفكرة', 'أُنشئ', 'حُدّث', 'المحتوى'];
-      const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      const cell = (p: any, c: string) => {
-        if (c === 'status') return STATUS_LABELS[displayStatus(p)];
-        if (c === 'body') return stripHtml(p.body);
-        if (c === 'format') return FORMAT_LABELS[p.format || p.content_type] || p.format;
-        if (c === 'planned_on') return exportDay(p.planned_on);
-        if (c === 'planned_platforms') return parsePlatforms(p.planned_platforms).map((k) => platformLabel(k, platLabels)).join('، ');
-        return p[c];
-      };
-      const lines = [head.join(',')];
-      for (const p of rows) lines.push(cols.map((c) => esc(cell(p, c))).join(','));
-      /* العلامة لـCSV وحده: بها يقرأ Excel العربية سليمةً، وفي JSON
-         تكسر `JSON.parse`. والعلّة في `lib/download.ts`. */
-      saveText(BOM + lines.join('\n'), `content-${stamp}.csv`, 'text/csv;charset=utf-8');
+    } else if (fmt === 'xlsx' || fmt === 'csv') {
+      /* أعمدة «قالب الاستيراد» السبعة وقيمها أسماءً لا معرّفات — فالملف نفسه يُعاد
+         استيراده بعد تعديله في Excel. والنسخة الكاملة بحالاتها ونصوصها في JSON. */
+      exportPlanFile(rows, fmt, `content-${stamp}`, platLabels);
     } else {
       let md = `# تصدير المحتوى — ${stamp}\n\n`;
       for (const p of rows) {
@@ -351,7 +330,7 @@ export default function ContentManagement() {
           </div>
           <div className="spacer" />
           <span className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{filtered.length}</bdi> عنصر</span>
-          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Upload size={20} /> استيراد</button>}
+          {can('draft.edit') && <button className="btn ghost sm" onClick={() => setShowImport(true)}><Import size={20} /> استيراد</button>}
           <Popover
             render={({ toggle }) => (
               <button className="btn ghost sm" onClick={toggle}><FileOutput size={20} /> تصدير <ChevronDown size={20} /></button>
@@ -359,7 +338,8 @@ export default function ContentManagement() {
           >
             {({ close }) => (
               <div className="menu">
-                <button onClick={() => { doExport('csv'); close(); }}>CSV (إكسل)</button>
+                <button onClick={() => { doExport('xlsx'); close(); }}>Excel</button>
+                <button onClick={() => { doExport('csv'); close(); }}>CSV</button>
                 <button onClick={() => { doExport('json'); close(); }}>JSON</button>
                 <button onClick={() => { doExport('md'); close(); }}>Markdown</button>
               </div>
@@ -377,7 +357,7 @@ export default function ContentManagement() {
           <span>محدّد: {sel.size}</span>
           <div className="spacer" />
           {can('content.schedule') && <button className="btn ghost sm" onClick={() => setShowAssign(true)}><FolderInput size={20} /> نقل إلى حملة</button>}
-          <button className="btn ghost sm" onClick={() => doExport('csv')}><FileOutput size={20} /> تصدير المحدد</button>
+          <button className="btn ghost sm" onClick={() => doExport('xlsx')}><FileOutput size={20} /> تصدير المحدد</button>
           <button className="btn danger sm" onClick={askBulkDelete}><Trash2 size={20} /> حذف</button>
           <button className="btn ghost sm" onClick={() => setSel(new Set())}>إلغاء</button>
         </div>
@@ -437,12 +417,12 @@ export default function ContentManagement() {
       )}
 
       {showImport && (
-        <ImportModal
+        <PlanImportModal
           onClose={() => setShowImport(false)}
-          onDone={(n, unmatched) => {
+          onDone={(r) => {
             setShowImport(false);
-            // ما لم يُطابَق يُقال بعدده — naf-terms «ملخّص الاستيراد»
-            setMsg(`تم استيراد ${isolate(n)} عنصراً${unmatched ? ` · لم تُطابَق ${isolate(unmatched)} قيمة فتُركت فارغة.` : ''}`);
+            // ما لم يُطابَق وما تُرك يُقالان بعددهما — naf-terms «ملخّص الاستيراد»
+            setMsg(importSummary(r));
             load();
           }}
         />
@@ -704,119 +684,3 @@ function WorkloadView({ rows, range }: { rows: any[]; range: { from?: string; to
   );
 }
 
-/* ===== نافذة الاستيراد ===== */
-/* الحقول تُطابَق عند الاستيراد لا عند اختيار الملف: الخيارات (المنصات والمسؤولون
-   والمحاور والحملات) تصل بعد فتح النافذة، والملفّ قد يُختار قبلها. */
-function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: (created: number, unmatched: number) => void }) {
-  const [items, setItems] = useState<ImportRow[]>([]);
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const options = usePlanOptions();
-
-  function parseCSV(text: string): string[][] {
-    const rows: string[][] = [];
-    let cur: string[] = [], field = '', q = false;
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (q) {
-        if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-        else if (ch === '"') q = false;
-        else field += ch;
-      } else {
-        if (ch === '"') q = true;
-        else if (ch === ',') { cur.push(field); field = ''; }
-        else if (ch === '\n' || ch === '\r') { if (field !== '' || cur.length) { cur.push(field); rows.push(cur); cur = []; field = ''; } if (ch === '\r' && text[i + 1] === '\n') i++; }
-        else field += ch;
-      }
-    }
-    if (field !== '' || cur.length) { cur.push(field); rows.push(cur); }
-    return rows;
-  }
-
-  /** عنصر JSON ← صفّ استيراد: ما يصدّره JSON (معرّفات ومنصاتٌ JSON) وما يُكتب يدوياً (أسماء). */
-  function fromJson(x: any): ImportRow {
-    const str = (v: unknown) => (v == null || v === '' ? undefined : String(v));
-    const plats = Array.isArray(x.planned_platforms) ? x.planned_platforms : parsePlatforms(x.planned_platforms);
-    return {
-      title: str(x.title),
-      body: str(x.body ?? x.content),
-      format: str(x.format ?? x.content_type),
-      planned_on: str(x.planned_on),
-      planned_platforms: plats.length ? plats.join(',') : str(x.planned_platforms),
-      assignee: str(x.assignee_id ?? x.assignee ?? x.assignee_name),
-      pillar: str(x.pillar),
-      brief: str(x.brief),
-      campaign: str(x.campaign_id ?? x.campaign ?? x.campaign_name),
-    };
-  }
-
-  function onFile(f: File) {
-    setErr('');
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const text = String(reader.result || '');
-        let parsed: ImportRow[];
-        if (f.name.endsWith('.json')) {
-          const j = JSON.parse(text);
-          parsed = (Array.isArray(j) ? j : j.items || []).map(fromJson);
-        } else {
-          parsed = rowsFromTable(parseCSV(text));
-        }
-        if (!parsed.length) return setErr('لم يُعثر على عناصر صالحة (يلزم عمود عنوان)');
-        setItems(parsed);
-      } catch (e: any) { setErr('تعذّر قراءة الملف: ' + e.message); }
-    };
-    reader.readAsText(f);
-  }
-
-  async function submit() {
-    setBusy(true); setErr('');
-    const ctx = {
-      platforms: options.platforms.map((k) => ({ key: k, label: platformLabel(k, options.labels) })),
-      assignees: options.assignees,
-      pillars: options.pillars,
-      campaigns: options.campaigns,
-      formats: FORMAT_LABELS,
-    };
-    let unmatched = 0;
-    const mapped = items.map((row) => {
-      const r = mapImportRow(row, ctx);
-      unmatched += r.unmatched;
-      return r.item;
-    });
-    try {
-      const d = await api.post('/posts/import', { items: mapped });
-      onDone(d.created, unmatched);
-    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
-  }
-
-  return (
-    <Modal title="استيراد محتوى" onClose={onClose}>
-      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        ارفع ملف <b>CSV</b> أو <b>JSON</b>. تُنشأ العناصر كمسودات.
-      </p>
-      {/* naf-terms «نصوص خطة المحتوى» ← شرح الاستيراد */}
-      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-        الأعمدة المقبولة: العنوان، المحتوى، الشكل، يوم النشر المستهدف، منصات التواصل، مسؤول التنفيذ، محور المحتوى، ملخّص الفكرة، الحملة. واليوم بصيغة <bdi>2026/10/31</bdi>.
-      </p>
-      <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
-      <button className="btn ghost" onClick={() => fileRef.current?.click()}><Upload size={20} /> اختيار ملف</button>
-
-      {items.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <p className="ok">جاهز للاستيراد: <bdi>{items.length}</bdi> عنصراً</p>
-          <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 8 }}>
-            {items.slice(0, 20).map((it, i) => <div key={i} style={{ fontSize: 'var(--text-xs)', padding: '2px 0' }}>• {it.title || '(بدون عنوان)'}</div>)}
-            {items.length > 20 && <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>… و<bdi>{items.length - 20}</bdi> غيرها</div>}
-          </div>
-        </div>
-      )}
-      {err && <p className="err">{err}</p>}
-      <button className="btn" style={{ marginTop: 12 }} disabled={!items.length || busy} onClick={submit}>
-        {busy ? 'جارٍ الاستيراد…' : `استيراد ${isolate(items.length || '')} عنصراً`}
-      </button>
-    </Modal>
-  );
-}
