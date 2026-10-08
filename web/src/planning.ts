@@ -116,7 +116,7 @@ export const PIVOT_MAX_WEEKS = 60;
 
 /**
  * «حجم العمل»: المحتوى المخطَّط أسبوعاً بأسبوع (الأحد–السبت)، وفي كل أسبوع عددُه
- * بحسب ما يُرجعه `keysOf` — مسؤولٌ أو منصةٌ أو شكلٌ أو محورٌ أو حالة.
+ * بحسب ما يُرجعه `keysOf` — مسؤولٌ أو منصةٌ أو شكلٌ أو سلسلةٌ أو حالة.
  *
  * - المفتاح الفارغ '' خانةُ «بلا …»، وصفٌّ بلا مفاتيح يُعدّ فيها.
  * - العنصر متعدّد المفاتيح (المنصات) يُعدّ في كل مفتاح، ومرةً واحدة في الإجمالي.
@@ -274,7 +274,7 @@ export type PlanDraft = {
   planned_platforms: string[];
   format: string;
   assignee_id: string; // '' = بلا مسؤول
-  pillar: string; // '' = بلا محور
+  pillar: string; // '' = بلا سلسلة
   campaign_id: string; // '' = بدون حملة
   brief: string;
 };
@@ -315,12 +315,12 @@ export function dayDate(ymd: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/** حدّ طول المحور — يطابق `PILLAR_MAX` في `src/services/planning.ts`. */
+/** حدّ طول اسم السلسلة — يطابق `PILLAR_MAX` في `src/services/planning.ts`. */
 export const PILLAR_MAX = 80;
 
 /**
- * محاور المحتوى من الإعدادات (`content_pillars`): نصوصٌ مقصوصةٌ بلا فراغ ولا
- * تكرار، بترتيبها. وما ليس مصفوفةً — إعدادٌ لم يُحفظ بعد أو مشوَّه — لا محاور.
+ * السلاسل من الإعدادات (`content_pillars`، والمفتاح باقٍ من اسمها القديم «محاور المحتوى»): نصوصٌ مقصوصةٌ بلا فراغ ولا
+ * تكرار، بترتيبها. وما ليس مصفوفةً — إعدادٌ لم يُحفظ بعد أو مشوَّه — لا سلاسل.
  */
 export function pillarsFrom(settings: { content_pillars?: unknown } | null | undefined): string[] {
   const raw = settings?.content_pillars;

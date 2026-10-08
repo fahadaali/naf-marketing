@@ -40,7 +40,7 @@ const BADGE_COLOR: Record<string, string> = {
 };
 const statusColor = (st: string) => BADGE_COLOR[STATUS_BADGE[st]] || 'var(--muted-foreground)';
 
-/** قيمة «بلا …» في مرشّحَي المسؤول والمحور — لا تتصادم مع معرّفٍ ولا اسم. */
+/** قيمة «بلا …» في مرشّحَي المسؤول والسلسلة — لا تتصادم مع معرّفٍ ولا اسم. */
 const NONE = '__none';
 
 /** علامةُ ترتيب البايتات — بدونها يقرأ Excel العربية محارفَ مبعثرة. */
@@ -92,7 +92,7 @@ export default function ContentManagement() {
   useEffect(load, []);
 
   const authors = useMemo(() => Array.from(new Set(posts.map((p) => p.author_name).filter(Boolean))), [posts]);
-  // خيارات المرشّحَين ممّا يحمله المحتوى نفسه — مسؤولٌ أو محورٌ بلا محتوى لا يُصفّى به شيء
+  // خيارات المرشّحَين ممّا يحمله المحتوى نفسه — مسؤولٌ أو سلسلةٌ بلا محتوى لا يُصفّى به شيء
   const assignees = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of posts) if (p.assignee_id) m.set(p.assignee_id, p.assignee_name || p.assignee_id);
@@ -250,7 +250,7 @@ export default function ContentManagement() {
         const plan = [
           p.planned_on && `- يوم النشر المستهدف: ${exportDay(p.planned_on)}`,
           p.assignee_name && `- مسؤول التنفيذ: ${p.assignee_name}`,
-          p.pillar && `- محور المحتوى: ${p.pillar}`,
+          p.pillar && `- السلسلة: ${p.pillar}`,
           p.brief && `- ملخّص الفكرة: ${p.brief}`,
         ].filter(Boolean).map((l) => `${l}\n`).join('');
         md += `## ${p.title}\n\n- الحالة: ${STATUS_LABELS[displayStatus(p)]}\n- المصدر: ${SOURCE_LABELS[p.source] || p.source}\n- الحملة: ${p.campaign_name || '—'}\n- الكاتب: ${p.author_name || '—'}\n${plan}\n${stripHtml(p.body)}\n\n---\n\n`;
@@ -318,8 +318,8 @@ export default function ContentManagement() {
             {assignees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
           <select className="select fit" value={fPillar} onChange={(e) => setFPillar(e.target.value)}>
-            <option value="">كل المحاور</option>
-            <option value={NONE}>بلا محور</option>
+            <option value="">كل السلاسل</option>
+            <option value={NONE}>بلا سلسلة</option>
             {pillars.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
           {/* الخيار المختار يقول نفسه، والتسمية لقارئ الشاشة — naf-terms «التصفية بتاريخ» */}
@@ -598,13 +598,13 @@ const BREAKDOWN_LABELS: Record<Breakdown, string> = {
   assignee: 'مسؤول التنفيذ',
   platform: 'منصات التواصل',
   format: 'الشكل',
-  pillar: 'محور المحتوى',
+  pillar: 'السلسلة',
   status: 'الحالة',
 };
 const NONE_LABELS: Partial<Record<Breakdown, string>> = {
   assignee: 'بلا مسؤول',
   platform: 'بلا منصة',
-  pillar: 'بلا محور',
+  pillar: 'بلا سلسلة',
 };
 const STATUS_ORDER = KANBAN_COLS.flatMap((c) => c.statuses);
 

@@ -813,7 +813,7 @@ button.metric-card:hover .metric-spark { opacity: 1; }
 }
 
 /* ===== خطة المحتوى ===== */
-/* محاور المحتوى في الإعدادات: صفٌّ لكل محور، وحقل الإضافة يأخذ ما بقي من سطره */
+/* السلاسل في الإعدادات: صفٌّ لكل سلسلة، وحقل الإضافة يأخذ ما بقي من سطره */
 .pillar-list { list-style: none; margin: 0 0 var(--space-4); padding: 0; }
 .pillar-list li {
   display: flex; align-items: center; gap: var(--space-3);
