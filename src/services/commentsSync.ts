@@ -1377,7 +1377,11 @@ async function syncAyrshareComments(
   queue.sort((a, b) => a.rank - b.rank);
 
   let cut = false;
-  const failedPlatforms = new Set<string>();
+  /* أوّلُ رفضٍ لكل منصة، ومنصّاتٌ قُرئ منها منشورٌ واحد على الأقل. فرفضُ
+     منشورٍ بعينه — إنستغرام يرفض بعض منشوراته — لا يجعل الوارد كلَّه «تعذّر
+     السحب» ما دامت بقيّتها تُقرأ. ويُقال حين ترفض المنصة كل ما طُلب منها. */
+  const refused = new Map<string, string>();
+  const reached = new Set<string>();
   for (const q of queue) {
     if (budget.left <= reserve) {
       cut = true;
@@ -1394,16 +1398,14 @@ async function syncAyrshareComments(
       // منشورٌ حُذف أو لا تُقرأ تعليقاته — يُختم كي لا يأكل حصّة كل دورة
       if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500 && err.status !== 429)) throw err;
       /* وكان الرفض كلُّه يُبتلع: إكس رفض طلب التعليقات لكل منشور فلم يظهر تعليقٌ
-         واحد منه، ولا سطرٌ يقول لماذا. فيُقال الرفض مرّةً لكل منصة بسببه، إلا
+         واحد منه، ولا سطرٌ يقول لماذا. فيُحفظ الرفض لكل منصة بسببه، إلا
          «لا يوجد» (404 و186): منشورٌ حُذف لا عطلَ فيه. */
       const notFound = err.status === 404 || errorCodes(err.body).includes(186);
-      if (!notFound && !failedPlatforms.has(q.internal)) {
-        failedPlatforms.add(q.internal);
-        report.errors.push(`تعليقات ${platformName(q.internal)}: ${err.message}`);
-      }
+      if (!notFound && !refused.has(q.internal)) refused.set(q.internal, err.message);
       data = null;
     }
     if (data) {
+      reached.add(q.internal);
       const keys = byInternal.get(q.internal)?.ownerKeys ?? [];
       const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
       report.kinds.comment.items += items.length;
@@ -1418,6 +1420,9 @@ async function syncAyrshareComments(
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET signature = excluded.signature, synced_at = excluded.synced_at`,
     ).bind(q.postId, `ayrshare:${q.ayr}`, q.internal, q.signature, nowIso(), nowIso()).run();
+  }
+  for (const [p, message] of refused) {
+    if (!reached.has(p)) report.errors.push(`تعليقات ${platformName(p)}: ${message}`);
   }
   if (cut) report.complete = false;
   // السجلّ اكتمل حين لا يبقى منشورٌ قديم لم يُقرأ
