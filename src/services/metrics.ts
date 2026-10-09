@@ -309,11 +309,14 @@ async function computeInbox(env: Env, p: Period, written?: Written): Promise<voi
   const { from, to } = periodBoundsUtc(p);
 
   const { results } = await env.DB.prepare(
-    `SELECT kind, platform, body, reply_body, replied_at, created_at FROM platform_comments
+    `SELECT kind, platform, body, reply_body, replied_at, created_at, ignored_at FROM platform_comments
      WHERE created_at >= ? AND created_at < ?`,
   )
     .bind(from, to)
-    .all<{ kind: string; platform: string; body: string | null; reply_body: string | null; replied_at: string | null; created_at: string }>();
+    .all<{
+      kind: string; platform: string; body: string | null; reply_body: string | null; replied_at: string | null;
+      created_at: string; ignored_at: string | null;
+    }>();
 
   if (!results.length) return;
 
@@ -337,7 +340,10 @@ async function computeInbox(env: Env, p: Period, written?: Written): Promise<voi
 
   /* المردود عليه: ما رُدّ عليه من هنا، وما رُدّ عليه من تطبيق المنصّة وعُرف
      ردُّه — وقتُه قد لا يُعلَن فيُعدّ ردّاً ولا يدخل زمن الاستجابة. */
-  await put('first_reply_rate', pct(results.filter((r) => r.reply_body !== null || r.replied_at !== null).length, results.length));
+  /* والمتجاهَل بلا ردٍّ خارج المقام: لم يكن ينتظر ردّاً — شكرٌ عابر أو رسالةٌ
+     آلية — فلا يُحسب سؤالاً لم يُجَب. */
+  const answerable = results.filter((r) => !(r.ignored_at && r.reply_body === null && r.replied_at === null));
+  await put('first_reply_rate', pct(answerable.filter((r) => r.reply_body !== null || r.replied_at !== null).length, answerable.length));
 
   /* زمن الاستجابة الأول — المؤشر التنافسي في القطاع القانوني: من يردّ أولاً
      غالباً يفوز بالعميل. ويُحسب على ما رُدّ عليه فقط؛ إدخالُ ما لم يُرَد

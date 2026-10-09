@@ -463,14 +463,22 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
       row.body !== it.body || row.author_name !== it.authorName || row.kind !== it.kind ||
       (row.is_hidden ? 1 : 0) !== (it.isHidden ? 1 : 0) || (row.capabilities_json ?? null) !== caps ||
       (row.rating ?? null) !== (it.rating ?? null) || interaction !== null;
+    const reopened = it.kind === 'dm' && row.body !== it.body;
     if (changed) {
       updates.push(
         env.DB.prepare(
+          /* رسالةٌ متجاهَلة كتب صاحبها من جديد تعود إلى «بلا رد»: التجاهل كان
+             لما قاله، لا لما سيقوله. */
           `UPDATE platform_comments
            SET kind = ?, body = ?, author_name = ?, capabilities_json = ?, is_hidden = ?, rating = ?,
-               provider_interaction_id = COALESCE(provider_interaction_id, ?)
+               provider_interaction_id = COALESCE(provider_interaction_id, ?),
+               ignored_at = CASE WHEN ? THEN NULL ELSE ignored_at END,
+               ignored_by = CASE WHEN ? THEN NULL ELSE ignored_by END
            WHERE id = ?`,
-        ).bind(it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null, interaction, row.id),
+        ).bind(
+          it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null, interaction,
+          reopened ? 1 : 0, reopened ? 1 : 0, row.id,
+        ),
       );
     }
     if (it.repliedBody && row.reply_body === null) {
@@ -1059,7 +1067,7 @@ async function syncConversations(
         env.DB.prepare(
           `UPDATE platform_comments
            SET body = ?, created_at = ?, reply_body = NULL, replied_at = NULL, replied_by = NULL,
-               reply_provider_id = NULL, reply_source = NULL
+               reply_provider_id = NULL, reply_source = NULL, ignored_at = NULL, ignored_by = NULL
            WHERE id = ?`,
         ).bind(text, at, row.id),
       );
@@ -1468,7 +1476,7 @@ async function writeAyrshareConversations(
         env.DB.prepare(
           `UPDATE platform_comments
            SET body = ?, created_at = ?, reply_body = NULL, replied_at = NULL, replied_by = NULL,
-               reply_provider_id = NULL, reply_source = NULL
+               reply_provider_id = NULL, reply_source = NULL, ignored_at = NULL, ignored_by = NULL
            WHERE id = ?`,
         ).bind(text, at, row.id),
       );

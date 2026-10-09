@@ -1,6 +1,6 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight, BellOff } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -53,11 +53,15 @@ function SyncLine({ sync }: { sync: SyncReport | null }) {
   );
 }
 
+/* التبويبات: «متجاهَل» ما لم يُردّ عليه ولا يحتاج ردّاً — يخرج من «بلا رد»
+   ولا يُحذف، ويعود بـ«إلغاء التجاهل». */
+type Filter = '' | '0' | '1' | 'ignored';
+
 export default function Comments() {
   const [comments, setComments] = useState<any[]>([]);
-  const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number }>({ all: 0, unreplied: 0, replied: 0 });
+  const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number; ignored: number }>({ all: 0, unreplied: 0, replied: 0, ignored: 0 });
   const [sync, setSync] = useState<SyncReport | null>(null);
-  const [filter, setFilter] = useState<'' | '0' | '1'>('');
+  const [filter, setFilter] = useState<Filter>('');
   // النطاق يوماً بيوم كما يختاره المنتقي، والصفحة منه — والقديم محفوظٌ يُرى بنطاقه
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -150,7 +154,18 @@ export default function Comments() {
     } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
   }
 
-  const tab = (key: '' | '0' | '1', label: string, n: number) => (
+  async function setIgnored(id: string, on: boolean) {
+    setBusy(id);
+    setMsg('');
+    try {
+      if (on) await api.post(`/comments/${id}/ignore`);
+      else await api.del(`/comments/${id}/ignore`);
+      if (on) setMsg('تم التجاهل');
+      load();
+    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
+  }
+
+  const tab = (key: Filter, label: string, n: number) => (
     <button className={filter === key ? 'on' : ''} onClick={() => { setFilter(key); setPage(1); }}>
       {label} <span className="count-pill">{n}</span>
     </button>
@@ -175,6 +190,7 @@ export default function Comments() {
           {tab('', 'الكل', counts.all)}
           {tab('0', 'بلا رد', counts.unreplied)}
           {tab('1', 'تم الرد', counts.replied)}
+          {tab('ignored', 'متجاهَل', counts.ignored)}
         </div>
         <div className="spacer" />
         <div className="field" style={{ margin: 0 }}>
@@ -253,6 +269,14 @@ export default function Comments() {
                   <button className="btn sm" disabled={busy === c.id || !editing[c.id]?.trim()} onClick={() => saveEdit(c.id)}>حفظ</button>
                   <button className="btn sm ghost" onClick={() => setEditing((e) => { const n = { ...e }; delete n[c.id]; return n; })}>إلغاء</button>
                 </div>
+              ) : c.ignored_at ? (
+                <div className="row" style={{ gap: 'var(--space-2)' }}>
+                  <span className="muted row" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-xs)' }}>
+                    <BellOff size={16} aria-hidden="true" /> متجاهَل
+                  </span>
+                  <div className="spacer" />
+                  <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setIgnored(c.id, false)}>إلغاء التجاهل</button>
+                </div>
               ) : (
                 <div>
                   {sugg.length > 0 && (
@@ -277,6 +301,9 @@ export default function Comments() {
                     </button>
                     <button className="btn sm" disabled={busy === c.id || !replyDrafts[c.id]?.trim()} onClick={() => reply(c.id)}>
                       <Send size={20} /> إرسال
+                    </button>
+                    <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setIgnored(c.id, true)}>
+                      <BellOff size={20} /> تجاهل
                     </button>
                   </div>
                   {isComment && canPrivate && (
