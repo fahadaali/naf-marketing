@@ -23,7 +23,7 @@ const PAGE_SIZE = 100;
    والنطاق لحظتان `ISO` بتوقيت الرياض تحسبهما الشاشة، كما في لوحة التحليلات. */
 commentRoutes.get('/', async (c) => {
   const platform = c.req.query('platform');
-  const replied = c.req.query('replied'); // '1' | '0'
+  const replied = c.req.query('replied'); // '1' | '0' | 'ignored'
   const from = c.req.query('from');
   const to = c.req.query('to');
   const page = Math.max(1, Math.floor(Number(c.req.query('page')) || 1));
@@ -37,8 +37,11 @@ commentRoutes.get('/', async (c) => {
   const where = [...range];
   const binds = [...rangeBinds];
   if (platform) { where.push('pc.platform = ?'); binds.push(platform); }
+  /* المتجاهَل ما لم يُردّ عليه وتُجوهل — فلا يُعدّ «بلا رد». وما رُدّ عليه بعد
+     تجاهله ردٌّ كغيره. */
   if (replied === '1') where.push('pc.reply_body IS NOT NULL');
-  if (replied === '0') where.push('pc.reply_body IS NULL');
+  if (replied === '0') where.push('pc.reply_body IS NULL AND pc.ignored_at IS NULL');
+  if (replied === 'ignored') where.push('pc.reply_body IS NULL AND pc.ignored_at IS NOT NULL');
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   // عنصرٌ زائد يقول إن بعد الصفحة صفحة — بلا عدٍّ ثانٍ
@@ -57,18 +60,21 @@ commentRoutes.get('/', async (c) => {
   // أعداد لكل حالة في النطاق (بلا تأثّر بفلتر الرد) — لعرضها على أزرار التبويب
   const counts = await c.env.DB.prepare(
     `SELECT COUNT(*) AS all_count,
-            SUM(CASE WHEN reply_body IS NULL THEN 1 ELSE 0 END) AS unreplied,
-            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied
+            SUM(CASE WHEN reply_body IS NULL AND ignored_at IS NULL THEN 1 ELSE 0 END) AS unreplied,
+            SUM(CASE WHEN reply_body IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+            SUM(CASE WHEN reply_body IS NULL AND ignored_at IS NOT NULL THEN 1 ELSE 0 END) AS ignored
      FROM platform_comments pc ${range.length ? `WHERE ${range.join(' AND ')}` : ''}`,
   )
     .bind(...rangeBinds)
-    .first<{ all_count: number; unreplied: number; replied: number }>();
+    .first<{ all_count: number; unreplied: number; replied: number; ignored: number }>();
 
   return c.json({
     comments: results.slice(0, PAGE_SIZE),
     page,
     hasMore: results.length > PAGE_SIZE,
-    counts: { all: counts?.all_count || 0, unreplied: counts?.unreplied || 0, replied: counts?.replied || 0 },
+    counts: {
+      all: counts?.all_count || 0, unreplied: counts?.unreplied || 0, replied: counts?.replied || 0, ignored: counts?.ignored || 0,
+    },
     // تقرير آخر سحب — يقول للشاشة متى سُحب الصندوق وهل اكتمل وما تعذّر منه
     sync: await readInboxReport(c.env),
   });
@@ -188,4 +194,21 @@ commentRoutes.post('/:id/private-reply', async (c) => {
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 502);
   }
+});
+
+/* تجاهلُ عنصرٍ لا يحتاج ردّاً، وإلغاؤه — في القاعدة وحدها، لا يمسّ المنصة. */
+commentRoutes.post('/:id/ignore', async (c) => {
+  const user = c.get('user');
+  const r = await c.env.DB.prepare(
+    "UPDATE platform_comments SET ignored_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), ignored_by = ? WHERE id = ?",
+  ).bind(user.id, c.req.param('id')).run();
+  if (!r.meta.changes) return c.json({ error: 'العنصر غير موجود' }, 404);
+  return c.json({ ok: true });
+});
+
+commentRoutes.delete('/:id/ignore', async (c) => {
+  const r = await c.env.DB.prepare('UPDATE platform_comments SET ignored_at = NULL, ignored_by = NULL WHERE id = ?')
+    .bind(c.req.param('id')).run();
+  if (!r.meta.changes) return c.json({ error: 'العنصر غير موجود' }, 404);
+  return c.json({ ok: true });
 });

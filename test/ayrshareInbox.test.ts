@@ -190,9 +190,11 @@ describe('مزامنة صندوق Ayrshare', () => {
       { id: 'm4', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'هل غداً متاح؟', created: ago(0.5), senderDetails: { name: 'ريم' } },
       { id: 'm3', conversationId: 'c1', senderId: 'fb_page', recipientId: 'psid_1', action: 'sent', message: 'أهلاً، كيف نخدمك؟', created: ago(1) },
     ] } });
+    // تجوهلت قبل أن يكتب صاحبها — والجديد يعيدها إلى «بلا رد»
+    db.prepare("UPDATE platform_comments SET ignored_at = '2026-10-08T00:00:00Z' WHERE kind = 'dm'").run();
     await syncComments(env);
     const [again] = db.prepare("SELECT * FROM platform_comments WHERE kind = 'dm'").all();
-    expect(again).toMatchObject({ body: 'هل غداً متاح؟', reply_body: null });
+    expect(again).toMatchObject({ body: 'هل غداً متاح؟', reply_body: null, ignored_at: null });
   });
 
   it('بلا تفعيل الرسائل في الحساب لا يُطلب منها شيء', async () => {

@@ -118,7 +118,7 @@ describe('تقرير سحب الصندوق في قائمة التعليقات', 
               ('c2','instagram','p|a|2','comment','سؤال آخر؟',NULL,NULL,'2026-09-01T11:00:00Z')`,
     ).run();
     const { body } = await get('/comments?replied=1');
-    expect(body.counts).toEqual({ all: 2, unreplied: 1, replied: 1 });
+    expect(body.counts).toEqual({ all: 2, unreplied: 1, replied: 1, ignored: 0 });
     expect(body.comments.map((c: any) => c.id)).toEqual(['c1']);
     expect(body.comments[0].reply_source).toBe('external');
   });
@@ -138,7 +138,7 @@ describe('الصندوق بفتراته وصفحاته', () => {
 
     const { body } = await get('/comments?from=2025-10-31T21:00:00.000Z&to=2025-11-30T20:59:59.000Z');
     expect(body.comments.map((c: any) => c.id)).toEqual(['c_old2', 'c_old']);
-    expect(body.counts).toEqual({ all: 2, unreplied: 1, replied: 1 });
+    expect(body.counts).toEqual({ all: 2, unreplied: 1, replied: 1, ignored: 0 });
 
     const replied = await get('/comments?replied=1&from=2025-10-31T21:00:00.000Z&to=2025-11-30T20:59:59.000Z');
     expect(replied.body.comments.map((c: any) => c.id)).toEqual(['c_old']);
@@ -176,5 +176,32 @@ describe('السجلّ القديم في «مصادر الأرقام»', () => {
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'buffer')").run();
     const { body } = await get(`/analytics/sources?period=monthly&start=${JULY.start}`);
     expect(body.history).toBeNull();
+  });
+});
+
+describe('تجاهل عنصرٍ في الصندوق', () => {
+  const req = async (method: string, path: string) => {
+    const res = await app.request(`http://localhost${path}`, { method }, { DB: d1(db) } as any);
+    return { status: res.status, body: (await res.json()) as any };
+  };
+
+  it('يخرج من «بلا رد» إلى «متجاهَل» ويعود بإلغائه — ولا يُحسب في معدل الرد', async () => {
+    db.prepare(
+      `INSERT INTO platform_comments (id, platform, provider_comment_id, kind, body, reply_body, created_at)
+       VALUES ('c1','x','ayc|twitter|P|1|','comment','شكراً',NULL,'2026-09-01T10:00:00Z'),
+              ('c2','x','ayc|twitter|P|2|','comment','كم الرسوم؟',NULL,'2026-09-01T11:00:00Z')`,
+    ).run();
+
+    expect((await req('POST', '/comments/c1/ignore')).status).toBe(200);
+    const unreplied = await req('GET', '/comments?replied=0');
+    expect(unreplied.body.comments.map((c: any) => c.id)).toEqual(['c2']);
+    expect(unreplied.body.counts).toEqual({ all: 2, unreplied: 1, replied: 0, ignored: 1 });
+    const ignored = await req('GET', '/comments?replied=ignored');
+    expect(ignored.body.comments.map((c: any) => c.id)).toEqual(['c1']);
+    expect(ignored.body.comments[0].ignored_by).toBe('usr_t');
+
+    expect((await req('DELETE', '/comments/c1/ignore')).status).toBe(200);
+    expect((await req('GET', '/comments?replied=0')).body.counts.unreplied).toBe(2);
+    expect((await req('POST', '/comments/nope/ignore')).status).toBe(404);
   });
 });
