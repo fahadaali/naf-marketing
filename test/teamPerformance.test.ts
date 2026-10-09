@@ -97,3 +97,17 @@ describe('خط الإنتاج في لوحة التحليلات', () => {
     expect(by).toMatchObject({ idea: 2, draft: 1, scheduled: 1 });
   });
 });
+
+describe('قائمة المنصات في لوحة التحليلات', () => {
+  it('كل منصةٍ لها منشورات — ولو لم تُفعَّل للنشر، وبلا النشرة البريدية', async () => {
+    const add = db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, source, metrics_json) VALUES (?, ?, ?, ?, '[]')");
+    add.run('s1', 'Y1', 'youtube', null);
+    add.run('s2', 'X1', 'x', null);
+    add.run('s3', 'N1', 'email', 'newsletter');
+    const app = new Hono();
+    app.use('*', async (c, next) => { c.set('sub', 'usr_gm'); await next(); });
+    app.route('/analytics', analyticsRoutes);
+    const res = await app.request('http://localhost/analytics/dashboard?platform=x', {}, { DB: d1(db) } as any);
+    expect(((await res.json()) as any).platforms).toEqual(['x', 'youtube']);
+  });
+});

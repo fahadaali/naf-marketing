@@ -23,6 +23,8 @@ function numOrDash(v: number | null | undefined) {
 export type DashboardData = {
   totals?: Record<string, number>;
   // `null` = لم يُعلنه المزوّد لأيّ منشورٍ في المنصّة
+  /** منصّاتٌ لها منشورات — بلا مرشّح. */
+  platforms?: string[];
   byPlatform?: { platform: string; impressions: number | null; reach: number | null; engagement: number | null }[];
   topPosts?: {
     post_id: string | null; title: string; platform: string; external_url: string | null;

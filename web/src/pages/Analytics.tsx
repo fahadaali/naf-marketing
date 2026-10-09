@@ -191,6 +191,10 @@ export default function Analytics() {
     }
   }
 
+  /* المفعّلة للنشر وما له منشوراتٌ في القاعدة — يوتيوب يُقرأ ولو لم يُفعَّل
+     للنشر، ومقاطعه لا تُبلغ إلا باختياره. */
+  const platformOptions = Array.from(new Set([...platforms, ...(dash?.platforms || [])]));
+
   /** ألواح لقطات المزوّد بفلاترها — بين المربوط، أو تحت «غير مربوط» ما دام المزوّد تجريبياً. */
   function providerPanels() {
     if (!PROVIDER_PANEL_LAYERS.has(tab)) return null;
@@ -206,7 +210,7 @@ export default function Analytics() {
               <label htmlFor="an-platform">المنصة</label>
               <select id="an-platform" className="select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
                 <option value="">كل منصات التواصل</option>
-                {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
+                {platformOptions.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
               </select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 160 }}>
