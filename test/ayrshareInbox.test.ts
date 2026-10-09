@@ -204,6 +204,27 @@ describe('مزامنة صندوق Ayrshare', () => {
   });
 });
 
+describe('رفض المنصة لطلب التعليقات', () => {
+  it('يُقال بسببه مرّةً لكل منصة — ولا يُبتلع فيغيب تعليقها كلُّه بلا سطر', async () => {
+    const add = db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES (?, ?, 'x', ?, '[]')");
+    add.run('a1', 'T1', RECENT);
+    add.run('a2', 'T2', RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
+    routes['GET /comments/T1'] = () => ({ status: 403, body: { status: 'error', code: 459, message: 'X API: client-not-enrolled' } });
+    routes['GET /comments/T2'] = () => ({ status: 403, body: { status: 'error', code: 459, message: 'X API: client-not-enrolled' } });
+    const report = await syncComments(env);
+    expect(report?.errors.filter((e) => e.startsWith('تعليقات إكس'))).toHaveLength(1);
+    expect(report?.errors[0]).toContain('client-not-enrolled');
+  });
+
+  it('المنشور المحذوف لا يُعدّ عطلاً', async () => {
+    db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'T9', 'x', ?, '[]')").run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
+    routes['GET /comments/T9'] = () => ({ status: 400, body: { status: 'error', code: 186, message: 'Post ID not found' } });
+    expect((await syncComments(env))?.errors).toEqual([]);
+  });
+});
+
 describe('ردود لينكدإن', () => {
   it('تُطلب لكل تعليقٍ بلا ردّ — فما رددنا به من تطبيق لينكدإن يُعرف', async () => {
     const URN = 'urn:li:comment:(urn:li:activity:71,74)';

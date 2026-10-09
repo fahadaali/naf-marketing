@@ -148,6 +148,51 @@ export async function diagnoseAyrshare(env: Env, auth: AyrshareAuth): Promise<Re
   }
   out.inbox = inbox;
 
+  /* ١أ) إكس: أحدث منشورٍ عندنا وما يردّه Ayrshare لتعليقاته — أو سبب رفضه */
+  const { results: xPosts } = await env.DB.prepare(
+    `SELECT provider_post_id, sent_at, metrics_json FROM analytics_snapshots
+     WHERE platform = 'x' AND sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 3`,
+  ).all<{ provider_post_id: string; sent_at: string; metrics_json: string | null }>();
+  const xState = await env.DB.prepare(
+    "SELECT COUNT(*) AS n, MAX(synced_at) AS last FROM inbox_post_state WHERE account_id = 'ayrshare:twitter'",
+  ).first<{ n: number; last: string | null }>();
+  const xRows = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM platform_comments WHERE platform = 'x' AND substr(provider_comment_id, 1, 4) = 'ayc|'",
+  ).first<{ n: number }>();
+  const xProbe: Record<string, unknown> = {
+    hasAccount: !!owners.x,
+    xKeysSet: !!(auth.x?.key && auth.x.secret),
+    recentPosts: xPosts.map((p) => {
+      let comments: unknown = null;
+      try { comments = (JSON.parse(p.metrics_json || '[]') as any[]).find((m) => m?.type === 'comments')?.value ?? null; } catch { /* */ }
+      return { id: p.provider_post_id, sent: p.sent_at, commentsInMetrics: comments };
+    }),
+    postsSyncedForComments: xState?.n ?? 0,
+    lastSynced: xState?.last ?? null,
+    xCommentRowsStored: xRows?.n ?? 0,
+  };
+  // أوّل منشورٍ عليه تعليقاتٌ في أرقامه، وإلا أحدثُها
+  const probe = xPosts.find((p) => /"comments"[^}]*"value":\s*[1-9]/.test(p.metrics_json || '')) ?? xPosts[0];
+  if (probe && owners.x) {
+    const q = new URLSearchParams({ searchPlatformId: 'true', platform: 'twitter' });
+    try {
+      const data = await ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(probe.provider_post_id)}?${q}`);
+      const list: any[] = Array.isArray(data?.twitter) ? data.twitter : [];
+      const ownSet = new Set(owners.x ?? []);
+      xProbe.probe = {
+        postId: probe.provider_post_id,
+        status: data?.status ?? null,
+        topKeys: Object.keys(data || {}).sort(),
+        errors: data?.errors ?? null,
+        count: list.length,
+        entries: list.slice(0, 10).map((e) => ({ ...identity(e, ownSet), isOwn: isOwnAyrshareComment(e, owners.x ?? []) })),
+      };
+    } catch (e: any) {
+      xProbe.probe = { postId: probe.provider_post_id, error: String(e?.message || e), body: e?.body ?? null };
+    }
+  }
+  out.x = xProbe;
+
   /* ١ب) ردود لينكدإن تُطلب لكل تعليق — شكلُ ردّها لأوّل تعليقٍ ينتظر */
   const li = [...posts.values()].find((p) => p.ayr === 'linkedin');
   if (li) {

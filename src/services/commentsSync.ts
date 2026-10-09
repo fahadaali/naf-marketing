@@ -3,7 +3,7 @@ import type { ModerateAction } from '../adapters/provider';
 import { ayrshareAuth, getProvider, providerKey } from '../adapters';
 import {
   AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReply, ayrshareMessages,
-  ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, mapAyrshareComments,
+  ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, errorCodes, mapAyrshareComments,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
 import {
@@ -1377,6 +1377,7 @@ async function syncAyrshareComments(
   queue.sort((a, b) => a.rank - b.rank);
 
   let cut = false;
+  const failedPlatforms = new Set<string>();
   for (const q of queue) {
     if (budget.left <= reserve) {
       cut = true;
@@ -1392,6 +1393,14 @@ async function syncAyrshareComments(
       }
       // منشورٌ حُذف أو لا تُقرأ تعليقاته — يُختم كي لا يأكل حصّة كل دورة
       if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500 && err.status !== 429)) throw err;
+      /* وكان الرفض كلُّه يُبتلع: إكس رفض طلب التعليقات لكل منشور فلم يظهر تعليقٌ
+         واحد منه، ولا سطرٌ يقول لماذا. فيُقال الرفض مرّةً لكل منصة بسببه، إلا
+         «لا يوجد» (404 و186): منشورٌ حُذف لا عطلَ فيه. */
+      const notFound = err.status === 404 || errorCodes(err.body).includes(186);
+      if (!notFound && !failedPlatforms.has(q.internal)) {
+        failedPlatforms.add(q.internal);
+        report.errors.push(`تعليقات ${platformName(q.internal)}: ${err.message}`);
+      }
       data = null;
     }
     if (data) {
