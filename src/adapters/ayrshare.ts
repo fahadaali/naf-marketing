@@ -201,6 +201,8 @@ export type AyrshareAccount = {
   messaging: boolean;
   /** معرّفات الحساب وأسماؤه بحروفٍ صغيرة — بها يُعرف ردٌّ كتبه حسابُنا. */
   ownerKeys: string[];
+  /** معرّف قناة يوتيوب بحروفه (`UC…`) — به تُقرأ قائمة مقاطعها العامة. */
+  channelId?: string;
 };
 
 /** مفتاحٌ موحَّد للمقارنة: بحروفٍ صغيرة وبلا «@». */
@@ -229,6 +231,7 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
       ownerKeys: [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle]
         .map(ownerKey)
         .filter(Boolean),
+      ...(typeof e.channelId === 'string' && e.channelId ? { channelId: e.channelId } : {}),
     }));
 }
 
@@ -1050,4 +1053,63 @@ export async function registerAyrshareWebhook(auth: AyrshareAuth, action: string
 
 export async function deleteAyrshareWebhook(auth: AyrshareAuth, action: string): Promise<void> {
   await ayrshareCall(auth, 'DELETE', '/hook/webhook', { action });
+}
+
+/* ═══ مقاطع يوتيوب من القناة نفسها ═══
+
+   سجلُّ يوتيوب في Ayrshare لا يردّ المقاطع القصيرة (Shorts): قناةٌ فيها عشرات
+   المقاطع ردّ منها مقطعين. وأرقامُه بمعرّف المقطع تعمل لكل مقطع. فالمعرّفات من
+   قائمة القناة العامة في يوتيوب نفسه — `feeds/videos.xml` بلا مفتاح، وفيها
+   أحدث خمسة عشر مقطعاً قصيرها وطويلها — والأرقام من Ayrshare كغيرها. */
+
+export type YouTubeFeedVideo = { id: string; title: string; published: string | null; url: string };
+
+/** يخرّط قائمة القناة (Atom) — المعرّف والعنوان والتاريخ والرابط. */
+export function parseYouTubeFeed(xml: string): YouTubeFeedVideo[] {
+  const out: YouTubeFeedVideo[] = [];
+  const decode = (t: string) =>
+    t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  for (const entry of xml.split('<entry>').slice(1)) {
+    const id = /<yt:videoId>([^<]+)<\/yt:videoId>/.exec(entry)?.[1]?.trim();
+    if (!id) continue;
+    const title = decode(/<title>([^<]*)<\/title>/.exec(entry)?.[1] ?? '').trim();
+    const published = /<published>([^<]+)<\/published>/.exec(entry)?.[1] ?? null;
+    const href = /<link[^>]*rel="alternate"[^>]*href="([^"]+)"/.exec(entry)?.[1] ?? `https://www.youtube.com/watch?v=${id}`;
+    out.push({ id, title, published: isoOrNull(published), url: decode(href) });
+  }
+  return out;
+}
+
+export async function youtubeChannelVideos(channelId: string, budget?: CallBudget): Promise<YouTubeFeedVideo[]> {
+  budget?.spend();
+  const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`);
+  if (!res.ok) throw new Error(`تعذّرت قراءة قائمة قناة يوتيوب (${res.status})`);
+  return parseYouTubeFeed(await res.text());
+}
+
+/* ═══ ردود لينكدإن ═══
+
+   لينكدإن لا يُعشّش الردود في التعليق: «Fetch with GET /comments/<commentId>
+   ?commentId=true&searchPlatformId=true&platform=linkedin». فكان ردُّنا من تطبيق
+   لينكدإن لا يُرى أبداً — قائمة الردود في التعليق فارغةٌ دائماً. وشكلُ الردّ غير
+   موثّق كاملاً، فيُقرأ تسامحاً: الردود في القائمة أو في `replies` من كلٍّ منها،
+   سوى التعليق نفسه. */
+export async function ayrshareLinkedInReply(
+  auth: AyrshareAuth,
+  commentId: string,
+  ownerKeys: string[],
+  budget?: CallBudget,
+): Promise<{ text: string; at: string | null } | null> {
+  const q = new URLSearchParams({ commentId: 'true', searchPlatformId: 'true', platform: 'linkedin' });
+  const data = await ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(commentId)}?${q}`, undefined, budget);
+  const block = data?.linkedin;
+  const list: any[] = Array.isArray(block) ? block : block && typeof block === 'object' ? [block] : [];
+  const all = list.flatMap((c) => [c, ...(Array.isArray(c?.replies) ? c.replies : [])]);
+  const own = all
+    .filter((c) => String(c?.commentId ?? c?.commentUrn ?? '') !== commentId && isOwnAyrshareComment(c, ownerKeys))
+    .sort((a, b) => String(a?.created ?? '').localeCompare(String(b?.created ?? '')))
+    .pop();
+  if (!own) return null;
+  const text = String(own.comment ?? own.text ?? '').trim();
+  return text ? { text, at: isoOrNull(own.created) } : null;
 }

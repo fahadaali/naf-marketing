@@ -28,7 +28,7 @@ describe('حسابات Ayrshare', () => {
   });
 
   it('الاسم من موضعه في كل منصة، والمراسلة من messagingActive', () => {
-    expect(mapAyrshareAccounts(USER).map(({ ownerKeys: _k, ...a }) => a)).toEqual([
+    expect(mapAyrshareAccounts(USER).map(({ ownerKeys: _k, channelId: _c, ...a }) => a)).toEqual([
       { id: '106638152329', platform: 'facebook', name: 'ناف', messaging: true },
       { id: 'gmb', platform: 'google', name: 'NAF Law', messaging: false },
       { id: '72157', platform: 'linkedin_page', name: 'NAF', messaging: false },
@@ -37,6 +37,8 @@ describe('حسابات Ayrshare', () => {
     ]);
     // معرّفات الحساب وأسماؤه — بها يُعرف ردُّنا
     expect(mapAyrshareAccounts(USER)[4].ownerKeys).toEqual(['1068', 'fahad', 'قناة ناف', 'ucx']);
+    // ومعرّف القناة بحروفه — به تُقرأ قائمة مقاطعها
+    expect(mapAyrshareAccounts(USER)[4].channelId).toBe('UCx');
     // بلا حسابات لا يردّ Ayrshare `displayNames` أصلاً
     expect(mapAyrshareAccounts({})).toEqual([]);
   });

@@ -2,7 +2,7 @@ import type { Env } from '../types';
 import type { ModerateAction } from '../adapters/provider';
 import { ayrshareAuth, getProvider, providerKey } from '../adapters';
 import {
-  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareMessages,
+  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReply, ayrshareMessages,
   ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, mapAyrshareComments,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
@@ -1399,6 +1399,7 @@ async function syncAyrshareComments(
       const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
       report.kinds.comment.items += items.length;
       await adoptLegacy(env, legacy, items);
+      if (q.ayr === 'linkedin') await linkedInReplies(env, auth, budget, reserve, items, keys);
       const res = await writeItems(env, items);
       report.added += res.added;
       report.externalReplies += res.externalReplies;
@@ -1412,6 +1413,40 @@ async function syncAyrshareComments(
   if (cut) report.complete = false;
   // السجلّ اكتمل حين لا يبقى منشورٌ قديم لم يُقرأ
   if (history && !cut && posts.length < 400) await setSetting(env, HISTORY_DONE_KEY, nowIso());
+}
+
+/**
+ * ردودنا على تعليقات لينكدإن — تُطلب لكل تعليقٍ بلا ردٍّ عندنا (لينكدإن لا
+ * يُعشّشها في التعليق)، وتُكتب في العنصر قبل كتابته فينتقل إلى «تم الرد».
+ */
+async function linkedInReplies(
+  env: Env,
+  auth: AyrshareAuth,
+  budget: CallBudget,
+  reserve: number,
+  items: InboxItem[],
+  ownerKeys: string[],
+): Promise<void> {
+  const pending = items.filter((it) => !it.repliedBody);
+  if (!pending.length) return;
+  const rows = await rowsByIds(env, pending.map((it) => it.id));
+  for (const it of pending) {
+    if (rows.get(it.id)?.reply_body) continue; // رُدّ عليه عندنا
+    if (budget.left <= reserve) break;
+    const d = decodeAyrshareId(it.id);
+    if (d?.type !== 'comment') continue;
+    try {
+      const reply = await ayrshareLinkedInReply(auth, d.urn || d.commentId, ownerKeys, budget);
+      if (reply) {
+        it.repliedBody = reply.text;
+        it.repliedAt = reply.at;
+      }
+    } catch (err) {
+      if (err instanceof BudgetExhausted) break;
+      // تعليقٌ لا تُقرأ ردوده (حُذف) — يبقى كما هو ويُعاد في الدورة التالية
+      if (!(err instanceof AyrshareError)) throw err;
+    }
+  }
 }
 
 /**

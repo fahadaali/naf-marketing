@@ -68,7 +68,7 @@ beforeEach(() => {
   calls = [];
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const url = new URL(String(input));
-    const key = `${(init?.method || 'GET').toUpperCase()} ${url.pathname.replace(/^\/api/, '')}`;
+    const key = `${(init?.method || 'GET').toUpperCase()} ${decodeURIComponent(url.pathname).replace(/^\/api/, '')}`;
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ key, url, body });
     const r = routes[key]?.(url, body) ?? { status: 404, body: { status: 'error', code: 101, message: 'not found' } };
@@ -201,6 +201,29 @@ describe('مزامنة صندوق Ayrshare', () => {
     routes['GET /user'] = () => ({ body: { messagingEnabled: false, displayNames: [{ id: 'fb_page', platform: 'facebook', messagingActive: true }] } });
     await syncComments(env);
     expect(calls.some((c) => c.key.startsWith('GET /messages'))).toBe(false);
+  });
+});
+
+describe('ردود لينكدإن', () => {
+  it('تُطلب لكل تعليقٍ بلا ردّ — فما رددنا به من تطبيق لينكدإن يُعرف', async () => {
+    const URN = 'urn:li:comment:(urn:li:activity:71,74)';
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'urn:li:share:7', 'linkedin_page', ?, '[]')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: '107440355', platform: 'linkedin', type: 'corporate', displayName: 'شركة ناف القانونية' }] } });
+    routes['GET /comments/urn:li:share:7'] = () => ({ body: { status: 'success', linkedin: [
+      { comment: 'هل تقدّمون استشارة؟', commentId: URN, commentUrn: URN, created: RECENT, from: { name: 'ريم', id: 'rz_1' }, userName: 'reem' },
+    ] } });
+    routes[`GET /comments/${URN}`] = (url) => {
+      expect(url.searchParams.get('commentId')).toBe('true');
+      expect(url.searchParams.get('platform')).toBe('linkedin');
+      return { body: { linkedin: [
+        { comment: 'هل تقدّمون استشارة؟', commentId: URN, from: { name: 'ريم' } },
+        { comment: 'نعم، راسلنا', commentId: '75', created: RECENT, from: { name: 'شركة ناف القانونية', id: 'org' } },
+      ] } };
+    };
+    await syncComments(env);
+    expect(rows()[0]).toMatchObject({ platform: 'linkedin_page', reply_body: 'نعم، راسلنا', reply_source: 'external' });
   });
 });
 

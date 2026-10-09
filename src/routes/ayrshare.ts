@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, listAyrshareWebhooks, type AyrshareAuth,
+  ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth,
 } from '../adapters/ayrshare';
 import { ayrshareAuth, providerKey } from '../adapters';
 import { localSyncHealth } from './socialapi';
@@ -92,9 +92,11 @@ export async function diagnoseAyrshare(env: Env, auth: AyrshareAuth): Promise<Re
   const out: Record<string, unknown> = { configured: true, at: new Date().toISOString() };
 
   let owners: Record<string, string[]> = {};
+  let channelId = '';
   try {
     const { accounts } = await ayrshareUser(auth);
     owners = Object.fromEntries(accounts.map((a) => [a.platform, a.ownerKeys]));
+    channelId = accounts.find((a) => a.platform === 'youtube')?.channelId ?? '';
     out.owners = owners;
   } catch (e: any) {
     out.owners_error = String(e?.message || e);
@@ -145,6 +147,59 @@ export async function diagnoseAyrshare(env: Env, auth: AyrshareAuth): Promise<Re
     }
   }
   out.inbox = inbox;
+
+  /* ١ب) ردود لينكدإن تُطلب لكل تعليق — شكلُ ردّها لأوّل تعليقٍ ينتظر */
+  const li = [...posts.values()].find((p) => p.ayr === 'linkedin');
+  if (li) {
+    const q = new URLSearchParams({ commentId: 'true', searchPlatformId: 'true', platform: 'linkedin' });
+    try {
+      const data = await ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(li.waiting[0])}?${q}`);
+      const block = data?.linkedin;
+      const list: any[] = Array.isArray(block) ? block : block ? [block] : [];
+      const ownSet = new Set(owners[li.internal] ?? []);
+      out.linkedinReplies = {
+        commentId: li.waiting[0],
+        topKeys: Object.keys(data || {}).sort(),
+        shape: Array.isArray(block) ? 'array' : typeof block,
+        entries: list.slice(0, 10).map((e) => ({
+          ...identity(e, ownSet),
+          isOwn: isOwnAyrshareComment(e, owners[li.internal] ?? []),
+          replies: (Array.isArray(e?.replies) ? e.replies : []).slice(0, 10).map((r: any) => ({
+            ...identity(r, ownSet), isOwn: isOwnAyrshareComment(r, owners[li.internal] ?? []),
+          })),
+        })),
+      };
+    } catch (e: any) {
+      out.linkedinReplies = { commentId: li.waiting[0], error: String(e?.message || e) };
+    }
+  }
+
+  /* ١ج) ما بقي بلا ردّ من أيام SocialAPI — بلا نصّ: المنصة والنوع وشكل المعرّف
+     والتاريخ. فما لم يُضمّ يُعرف لماذا: منشورٌ لا يُقرأ، أو معرّفٌ لا يُطابَق. */
+  const { results: legacy } = await env.DB.prepare(
+    `SELECT platform, kind, provider_comment_id, created_at FROM platform_comments
+     WHERE reply_body IS NULL AND ignored_at IS NULL AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')
+     ORDER BY created_at DESC LIMIT 30`,
+  ).all<{ platform: string; kind: string; provider_comment_id: string; created_at: string }>();
+  out.legacyUnreplied = legacy.map((r) => ({
+    platform: r.platform,
+    kind: r.kind,
+    created: r.created_at,
+    // الشكل لا القيمة: عدد الأجزاء وبادئتها، وآخر جزءٍ (معرّف المنصة) بطوله
+    idShape: r.provider_comment_id.includes('|')
+      ? `${r.provider_comment_id.split('|').length} أجزاء بـ|، آخرها ${mask(r.provider_comment_id.split('|').pop())}`
+      : `${r.provider_comment_id.split(':')[0]}:… (${r.provider_comment_id.length})`,
+  }));
+
+  // ٢أ) قائمة القناة العامة — ومنها المقاطع القصيرة التي لا يردّها سجلُّ Ayrshare
+  if (channelId) {
+    try {
+      const videos = await youtubeChannelVideos(channelId);
+      out.youtubeFeed = { channelId, returned: videos.length, ids: videos.map((v) => ({ id: v.id, published: v.published, url: v.url })) };
+    } catch (e: any) {
+      out.youtubeFeed = { channelId, error: String(e?.message || e) };
+    }
+  }
 
   // ٢) يوتيوب: ما في سجلّه، وما عندنا منه، وما تردّه أرقامه
   if (owners.youtube) {
