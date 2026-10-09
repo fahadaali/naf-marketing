@@ -9,7 +9,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
   DatabaseSync: new (path: string) => any;
 };
 
-import { diagnoseAyrshare } from '../src/routes/ayrshare';
+import { diagnoseAyrshare, tweetId } from '../src/routes/ayrshare';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -56,5 +56,29 @@ describe('تشخيص Ayrshare', () => {
     expect(post).toMatchObject({ platform: 'x', postId: 'T0', waitingCommentIds: ['T1'], count: 2 });
     expect(post.entries[0]).toMatchObject({ commentId: 'T1', isOwn: false, author: { userName: { hint: 'cus…(15)', ours: false } } });
     expect(post.entries[1]).toMatchObject({ commentId: 'T2', isOwn: true, author: { userName: { ours: true } } });
+  });
+
+  it('تغريدةٌ بعينها من رابطها — تُفحص بدل أحدث منشوراتنا', async () => {
+    expect(tweetId('https://x.com/naflaw/status/1844000000000000001?s=20')).toBe('1844000000000000001');
+    expect(tweetId(' 1844000000000000001 ')).toBe('1844000000000000001');
+    expect(tweetId('https://x.com/naflaw')).toBeNull();
+
+    const db = new DatabaseSync(':memory:');
+    for (const f of readdirSync(MIGRATIONS).filter((f) => /^0\d+.*\.sql$/.test(f)).sort()) {
+      db.exec(readFileSync(join(MIGRATIONS, f), 'utf8'));
+    }
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', async (input: string) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/user') return new Response(JSON.stringify({ displayNames: [{ id: 'x1', platform: 'twitter', username: 'naflaw' }] }));
+      if (path.startsWith('/api/comments/')) {
+        asked.push(path);
+        return new Response(JSON.stringify({ status: 'success', twitter: [] }));
+      }
+      return new Response('{}', { status: 404 });
+    });
+    const out = await diagnoseAyrshare({ DB: d1(db) } as any, { key: 'k' }, { xPost: 'https://x.com/naflaw/status/1844000000000000001' });
+    expect(asked).toEqual(['/api/comments/1844000000000000001']);
+    expect((out.x as any).probe).toMatchObject({ postId: '1844000000000000001', count: 0 });
   });
 });

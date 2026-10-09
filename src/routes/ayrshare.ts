@@ -85,10 +85,21 @@ function identity(c: any, owners: Set<string>) {
 ayrshareRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {
   const auth: AyrshareAuth | null = ayrshareAuth(c.env);
   if (!auth) return c.json({ configured: false });
-  return c.json(await diagnoseAyrshare(c.env, auth));
+  return c.json(await diagnoseAyrshare(c.env, auth, { xPost: c.req.query('x') }));
 });
 
-export async function diagnoseAyrshare(env: Env, auth: AyrshareAuth): Promise<Record<string, unknown>> {
+/** معرّف تغريدةٍ من رابطها أو من أرقامه وحدها — وإلا لا شيء. */
+export function tweetId(raw: string | undefined): string | null {
+  const v = (raw || '').trim();
+  return /^\d+$/.test(v) ? v : (v.match(/\/status(?:es)?\/(\d+)/)?.[1] ?? null);
+}
+
+/** `xPost`: تغريدةٌ يعرف صاحبها أن عليها ردوداً — تُفحص بدل أحدث منشوراتنا. */
+export async function diagnoseAyrshare(
+  env: Env,
+  auth: AyrshareAuth,
+  opts: { xPost?: string } = {},
+): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { configured: true, at: new Date().toISOString() };
 
   let owners: Record<string, string[]> = {};
@@ -172,7 +183,11 @@ export async function diagnoseAyrshare(env: Env, auth: AyrshareAuth): Promise<Re
     xCommentRowsStored: xRows?.n ?? 0,
   };
   // أوّل منشورٍ عليه تعليقاتٌ في أرقامه، وإلا أحدثُها
-  const probe = xPosts.find((p) => /"comments"[^}]*"value":\s*[1-9]/.test(p.metrics_json || '')) ?? xPosts[0];
+  const asked = tweetId(opts.xPost);
+  if (opts.xPost && !asked) xProbe.askedPost = 'رابط التغريدة غير صالح';
+  const probe = asked
+    ? { provider_post_id: asked }
+    : xPosts.find((p) => /"comments"[^}]*"value":\s*[1-9]/.test(p.metrics_json || '')) ?? xPosts[0];
   if (probe && owners.x) {
     const q = new URLSearchParams({ searchPlatformId: 'true', platform: 'twitter' });
     try {

@@ -217,6 +217,16 @@ describe('رفض المنصة لطلب التعليقات', () => {
     expect(report?.errors[0]).toContain('client-not-enrolled');
   });
 
+  it('رفضُ منشورٍ بعينه لا يُقال ما دامت المنصة تُقرأ', async () => {
+    const add = db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES (?, ?, 'instagram', ?, '[]')");
+    add.run('a1', 'I1', RECENT);
+    add.run('a2', 'I2', RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'ig1', platform: 'instagram', username: 'naf' }] } });
+    routes['GET /comments/I1'] = () => ({ status: 400, body: { status: 'error', code: 400, message: 'instagram: Error getting comments' } });
+    routes['GET /comments/I2'] = () => ({ body: { status: 'success', instagram: [] } });
+    expect((await syncComments(env))?.errors).toEqual([]);
+  });
+
   it('المنشور المحذوف لا يُعدّ عطلاً', async () => {
     db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'T9', 'x', ?, '[]')").run(RECENT);
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });

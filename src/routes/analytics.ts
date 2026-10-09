@@ -107,8 +107,16 @@ analyticsRoutes.get('/dashboard', async (c) => {
       : e.sum, // عدد → مجموع
   }));
 
+  /* منصّاتٌ لها منشورات — بلا مرشّح، لقائمة «المنصة» في الشاشة. كانت القائمة
+     من «المنصات المفعّلة» للنشر وحدها، فغاب منها يوتيوب ومقاطعُه في القاعدة. */
+  const withPosts = await c.env.DB.prepare(
+    `SELECT DISTINCT platform FROM analytics_snapshots
+     WHERE COALESCE(source, '') <> 'newsletter' AND platform <> 'email' ORDER BY platform`,
+  ).all<{ platform: string }>();
+
   return c.json({
     totals: { ...t, engagement_rate: engRate },
+    platforms: withPosts.results.map((r) => r.platform),
     metrics,
     byPlatform: byPlatform.results,
     topPosts: topPosts.results,
