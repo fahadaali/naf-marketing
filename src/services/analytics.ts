@@ -9,6 +9,7 @@ import {
 import {
   AYRSHARE_HISTORY_PLATFORMS, AYRSHARE_SOCIAL_ID_PLATFORMS, AyrshareError, ayrshareAnalyticsBySocialId,
   ayrsharePlatform, ayrsharePlatformHistory, ayrshareSentPosts, ayrshareUser, errorCodes as ayrshareErrorCodes,
+  youtubeChannelVideos,
   type AyrshareAccount,
 } from '../adapters/ayrshare';
 import { ayrshareAuth } from '../adapters';
@@ -899,6 +900,28 @@ async function pullAllAyrshare(
       if (st.doneAt && Date.now() - Date.parse(st.doneAt) < 30 * DAY) done++;
     }
     report.historyDone = done;
+  }
+
+  /* ٣ب) مقاطع يوتيوب من قائمة القناة نفسها — سجلُّ Ayrshare لا يردّ القصيرة
+     منها. تُكتب بلا أرقام، وأرقامُها من الخطوة التالية بمعرّف المقطع. */
+  const yt = accounts.find((a) => a.platform === 'youtube' && a.channelId);
+  if (yt?.channelId && !budget.stoppedBy && budget.left > 4) {
+    try {
+      const videos = await youtubeChannelVideos(yt.channelId, budget);
+      captured += await ingestAccountPosts(env, report, videos.map((v) => ({
+        id: v.id,
+        platform: 'youtube',
+        accountId: '',
+        title: v.title.slice(0, 140),
+        sentAt: v.published,
+        externalUrl: v.url,
+        metrics: mapMetrics([]),
+      })), 'youtube', nativeIndex);
+    } catch (err) {
+      // القائمة زيادةٌ على السجلّ: تعذّرها يُقال ولا يوقف السحب
+      if (err instanceof BudgetExhausted) report.complete = false;
+      else report.errors.push(errorText(err));
+    }
   }
 
   /* ٤) الأرقام الحيّة بمعرّف المنصة — أقدمُها طلباً أوّلاً. والموعد بوقت

@@ -13,7 +13,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 };
 
 import { pullAnalytics, readAnalyticsReport, readAnalyticsHistoryReport } from '../src/services/analytics';
-import { ayrshareMetrics, ayrshareMapped } from '../src/adapters/ayrshare';
+import { ayrshareMetrics, ayrshareMapped, parseYouTubeFeed } from '../src/adapters/ayrshare';
 import { SOURCES } from '../src/adapters/sources';
 import { periodOf } from '../src/services/period';
 
@@ -67,7 +67,7 @@ beforeEach(() => {
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
     calls.push({ key, url, body });
     const r = routes[key]?.(url, body) ?? { status: 404, body: { status: 'error', code: 101, message: 'not found' } };
-    return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+    return new Response(typeof r.body === 'string' ? r.body : JSON.stringify(r.body), { status: r.status ?? 200 });
   });
   routes['GET /user'] = () => ({
     body: {
@@ -203,6 +203,48 @@ describe('السحب من Ayrshare', () => {
     expect(calls.some((c) => c.key === 'GET /history/twitter')).toBe(false);
     expect(calls.some((c) => c.key === 'GET /history/instagram')).toBe(true);
     expect((await readAnalyticsReport(env))?.errors[0]).toMatch(/AYRSHARE_X_API_KEY/);
+  });
+});
+
+const FEED = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+ <title>ناف القانونية</title>
+ <entry>
+  <id>yt:video:SHORT1</id><yt:videoId>SHORT1</yt:videoId>
+  <title>حقوق العامل &amp; صاحب العمل</title>
+  <link rel="alternate" href="https://www.youtube.com/shorts/SHORT1"/>
+  <published>${RECENT}</published>
+ </entry>
+ <entry>
+  <id>yt:video:LONG1</id><yt:videoId>LONG1</yt:videoId>
+  <title>شرح نظام الشركات</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=LONG1"/>
+  <published>${RECENT}</published>
+ </entry>
+</feed>`;
+
+describe('مقاطع يوتيوب القصيرة', () => {
+  it('تُقرأ من قائمة القناة: المعرّف والعنوان والرابط', () => {
+    expect(parseYouTubeFeed(FEED)).toEqual([
+      { id: 'SHORT1', title: 'حقوق العامل & صاحب العمل', published: new Date(RECENT).toISOString(), url: 'https://www.youtube.com/shorts/SHORT1' },
+      { id: 'LONG1', title: 'شرح نظام الشركات', published: new Date(RECENT).toISOString(), url: 'https://www.youtube.com/watch?v=LONG1' },
+    ]);
+  });
+
+  it('سجلُّ Ayrshare لا يردّها — فتُكتب من القائمة وأرقامُها بمعرّفها', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'g1', platform: 'youtube', channelId: 'UCzfTY8z4', channelTitle: 'ناف' }] } });
+    routes['GET /history/youtube'] = () => ({ body: { status: 'success', posts: [{ id: 'LONG1', post: 'شرح', created: RECENT }] } });
+    routes['GET /feeds/videos.xml'] = (url) => {
+      expect(url.searchParams.get('channel_id')).toBe('UCzfTY8z4');
+      return { body: FEED };
+    };
+    routes['POST /analytics/post'] = (_u, body) => ({
+      body: { youtube: body.postIds.map((id: string) => ({ id, analytics: { views: id === 'SHORT1' ? 1200 : 300, likes: 10 } })) },
+    });
+    await pullAnalytics(env);
+    const rows = snaps();
+    expect(rows.map((r) => r.provider_post_id)).toEqual(['LONG1', 'SHORT1']);
+    expect(rows[1]).toMatchObject({ platform: 'youtube', impressions: 1200, external_url: 'https://www.youtube.com/shorts/SHORT1' });
   });
 });
 
