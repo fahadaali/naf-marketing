@@ -317,3 +317,119 @@ describe('النشر عبر Ayrshare', () => {
     expect(row(db, 'sch_p6_tiktok')).toMatchObject({ status: 'published' });
   });
 });
+
+describe('المقطع بارزاً عبر Ayrshare', () => {
+  const ok = (id: string) => () => ({ body: { status: 'success', errors: [], postIds: [{ status: 'success', id }], id } });
+
+  function video(id: string, w: number, h: number, ms: number): void {
+    db.prepare('INSERT INTO media_assets (id, r2_key, mime_type, filename, width, height, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, `k/${id}`, 'video/mp4', `${id}.mp4`, w, h, ms);
+    env.MEDIA._put(`k/${id}`);
+  }
+
+  beforeEach(() => {
+    replies['GET /media/uploadUrl'] = (url) => ({
+      body: { accessUrl: `https://media.ayrshare.com/${url.searchParams.get('fileName')}`, uploadUrl: STORAGE },
+    });
+    replies[`PUT ${STORAGE}`] = () => ({ body: {} });
+  });
+
+  const sent = () => calls.filter((c) => c.key === 'POST /post').map((c) => c.body);
+
+  it('إنستغرام: ريلز يظهر في الخلاصة والريلز معاً', async () => {
+    video('v_ig', 1080, 1920, 30_000);
+    post(db, 'r1', '<p>نص</p><img src="/api/media/v_ig">', ['instagram']);
+    replies['POST /post'] = ok('A1');
+    await runDuePublishes(env);
+    expect(sent()[0]).toMatchObject({ isVideo: true, instagramOptions: { shareReelsFeed: true } });
+  });
+
+  it('فيسبوك: الطوليّ حتى ٩٠ ثانية ريلز، والأفقيّ فيديو عادي', async () => {
+    video('v_fb', 1080, 1920, 45_000);
+    video('v_wide', 1920, 1080, 45_000);
+    post(db, 'r2', '<img src="/api/media/v_fb">', ['facebook']);
+    post(db, 'r3', '<img src="/api/media/v_wide">', ['facebook']);
+    replies['POST /post'] = ok('A2');
+    await runDuePublishes(env);
+    const [reel, plain] = sent();
+    expect(reel.faceBookOptions).toEqual({ reels: true });
+    expect(plain.faceBookOptions).toBeUndefined();
+  });
+
+  it('يوتيوب: الطوليّ حتى ثلاث دقائق شورتس', async () => {
+    video('v_yt', 1080, 1920, 60_000);
+    post(db, 'r4', '<img src="/api/media/v_yt">', ['youtube']);
+    replies['POST /post'] = ok('A3');
+    await runDuePublishes(env);
+    expect(sent()[0].youTubeOptions).toMatchObject({ shorts: true, visibility: 'public' });
+  });
+
+  it('سناب: المقطع سبوتلايت وقصة محفوظة وقصة — والمعرّفات كلها محفوظة', async () => {
+    video('v_sc', 1080, 1920, 20_000);
+    post(db, 'r5', '<img src="/api/media/v_sc">', ['snapchat']);
+    let n = 0;
+    replies['POST /post'] = () => ok(`S${++n}`)();
+    await runDuePublishes(env);
+    expect(sent().map((b) => b.snapChatOptions)).toEqual([{ spotlight: true }, { savedStory: true }, undefined]);
+    // الوسيط يُرفع مرّةً واحدة للنشرات الثلاث
+    expect(calls.filter((c) => c.key === 'GET /media/uploadUrl')).toHaveLength(1);
+    expect(row(db, 'sch_r5_snapchat')).toMatchObject({ status: 'published', provider_post_id: 'S1', error: null });
+    expect(JSON.parse(row(db, 'sch_r5_snapchat').extra_provider_ids)).toEqual(['S2', 'S3']);
+  });
+
+  it('سناب: الصورة قصة محفوظة وقصة، وما فشل منها يُكتب تحت الموعد المنشور', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename, width, height) VALUES ('i_sc', 'k/i_sc', 'image/jpeg', 'a.jpg', 1080, 1920)").run();
+    env.MEDIA._put('k/i_sc');
+    post(db, 'r6', '<img src="/api/media/i_sc">', ['snapchat']);
+    replies['POST /post'] = (_u, init) => {
+      const b = JSON.parse(String(init?.body));
+      return b.snapChatOptions?.savedStory
+        ? { status: 400, body: { status: 'error', errors: [{ code: 300, message: 'Public profile required', platform: 'snapchat' }] } }
+        : ok('S9')();
+    };
+    await runDuePublishes(env);
+    expect(sent().map((b) => b.snapChatOptions)).toEqual([{ savedStory: true }, undefined]);
+    const r = row(db, 'sch_r6_snapchat');
+    expect(r).toMatchObject({ status: 'published', provider_post_id: 'S9' });
+    expect(r.error).toMatch(/لم يُنشر على سناب: القصة المحفوظة: .*Public profile required/);
+  });
+
+  it('سناب: إن فشلت كلها فشل الموعد بأسبابها', async () => {
+    video('v_sc2', 1080, 1920, 20_000);
+    post(db, 'r7', '<img src="/api/media/v_sc2">', ['snapchat']);
+    replies['POST /post'] = () => ({ status: 400, body: { status: 'error', errors: [{ code: 1, message: 'nope', platform: 'snapchat' }] } });
+    await runDuePublishes(env);
+    const r = row(db, 'sch_r7_snapchat');
+    expect(r.status).toBe('failed');
+    expect(r.error).toMatch(/سبوتلايت: .*nope.* · القصة المحفوظة: .* · القصة: /);
+  });
+
+  it('الغلاف يُرفع ويُرسل thumbNail، وشورتس بلا غلاف', async () => {
+    video('v_li', 1920, 1080, 30_000);
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('c_1', 'k/c_1', 'image/jpeg', 'cover.jpg')").run();
+    env.MEDIA._put('k/c_1');
+    post(db, 'r8', '<img src="/api/media/v_li">', ['linkedin', 'x']);
+    db.prepare("UPDATE content_posts SET video_cover_id = 'c_1' WHERE id = 'r8'").run();
+    video('v_short', 1080, 1920, 30_000);
+    post(db, 'r9', '<img src="/api/media/v_short">', ['youtube']);
+    db.prepare("UPDATE content_posts SET video_cover_id = 'c_1' WHERE id = 'r9'").run();
+    replies['POST /post'] = ok('A9');
+    await runDuePublishes(env);
+    const bodies = sent();
+    const li = bodies.find((b) => b.platforms[0] === 'linkedin');
+    const x = bodies.find((b) => b.platforms[0] === 'twitter');
+    const yt = bodies.find((b) => b.platforms[0] === 'youtube');
+    expect(li.linkedInOptions).toEqual({ thumbNail: 'https://media.ayrshare.com/cover.jpg' });
+    expect(x.twitterOptions).toEqual({ thumbNail: 'https://media.ayrshare.com/cover.jpg' });
+    expect(yt.youTubeOptions.shorts).toBe(true);
+    expect(yt.youTubeOptions.thumbNail).toBeUndefined();
+  });
+
+  it('مدّةٌ خارج حدّ المنصة تُرفض قبل الرفع بنصٍّ يقول ما يُفعل', async () => {
+    video('v_long', 1080, 1920, 90_000);
+    post(db, 'r10', '<img src="/api/media/v_long">', ['snapchat']);
+    await runDuePublishes(env);
+    expect(row(db, 'sch_r10_snapchat').error).toMatch(/أطول من حدّ هذه المنصة \(60 ثانية/);
+    expect(calls).toEqual([]);
+  });
+});

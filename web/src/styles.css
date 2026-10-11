@@ -549,6 +549,10 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .media-embed:hover { border-color: var(--primary); box-shadow: var(--shadow-md); }
 .media-thumb { display: block; width: 100%; max-height: 240px; object-fit: cover; background: var(--muted); }
+/* المقطع مشغّلٌ بعرض المحتوى كله لا بعرض بطاقة الصورة — والطوليّ لا يتجاوز
+   ارتفاع الشاشة، فتبقى أزراره في متناول اليد. */
+.media-embed.media-video { max-width: 100%; cursor: default; }
+.media-player { display: block; width: 100%; max-height: 72vh; background: var(--surface-deep); }
 .media-cap {
   padding: var(--space-2) var(--space-3); font-size: var(--text-xs); font-weight: 500; color: var(--foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -565,6 +569,39 @@ h3, h4 { letter-spacing: -0.01em; }
 .media-card.k-file .media-ic { background: var(--muted-foreground); }
 .media-meta { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
 .media-sub { font-size: var(--text-xs); color: var(--muted-foreground); }
+
+/* ===== نسخة كل منصة (PlatformVariants) =====
+   المعاينة صورة الخادم نفسها بنسبتها: الارتفاع ثابتٌ من سلّم المسافات،
+   والعرض يتبعه — فيظهر الفرق بين ‎9:16‎ و‎1.91:1‎ كما سيُنشر. */
+.pv-card { margin-bottom: var(--space-4); }
+.pv-title { margin: 0; }
+.pv-count { font-size: var(--text-xs); }
+.pv-body { margin-top: var(--space-3); }
+.pv-hint { font-size: var(--text-xs); margin-top: 0; }
+.pv-platform { margin-bottom: var(--space-4); }
+.pv-head { margin-bottom: var(--space-2); gap: var(--space-2); }
+.pv-label { font-size: var(--text-xs); }
+.pv-media { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-2); }
+.pv-item { margin: 0; display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-start; }
+.pv-thumb {
+  display: block; height: calc(var(--spacing) * 28); width: auto; max-width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); object-fit: contain;
+}
+.pv-file { display: grid; place-items: center; padding: var(--space-2); font-size: var(--text-xs); color: var(--muted-foreground); }
+.pv-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.pv-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }
+.pv-comment { margin-top: var(--space-2); }
+
+/* ===== صورة الغلاف (VideoCover) ===== */
+.vc-card { margin-bottom: var(--space-4); }
+.vc-title { margin-top: 0; }
+.vc-hint { font-size: var(--text-xs); margin-top: 0; }
+.vc-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; margin-bottom: var(--space-3); }
+.vc-player, .vc-thumb {
+  display: block; height: calc(var(--spacing) * 48); width: auto; max-width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-deep); object-fit: contain;
+}
+.vc-actions { gap: var(--space-2); }
 
 /* ===== نافذة استعراض الوسائط ===== */
 .mv-overlay {

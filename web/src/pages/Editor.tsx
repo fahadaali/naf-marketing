@@ -33,7 +33,11 @@ import ConfirmModal from '../components/ConfirmModal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
-import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
+import { mediaFromEl, mediaEmbedHtml, upgradeVideoEmbeds, type MediaInfo } from '../mediaEmbed';
+import { uploadMedia } from '../mediaUpload';
+import PlatformVariants, { type VariantRow } from '../components/PlatformVariants';
+import { ensureTikTokVideo } from '../tiktokVideo';
+import VideoCover from '../components/VideoCover';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
@@ -75,10 +79,10 @@ export default function Editor() {
   const [basecampSynced, setBasecampSynced] = useState(false);
   const [syncingNotes, setSyncingNotes] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
-  const [variants, setVariants] = useState<Record<string, string>>({}); // نص مخصّص لكل منصة (فارغ = النص الأساسي)
-  const [firstComments, setFirstComments] = useState<Record<string, string>>({}); // أول تعليق لكل منصة
-  const [savingVariant, setSavingVariant] = useState('');
+  // نسخة كل منصة كما في الخادم — النص المخصّص وأول تعليق ووسيطها (`PlatformVariants`)
+  const [variants, setVariants] = useState<VariantRow[]>([]);
   const [showVariants, setShowVariants] = useState(false);
+  const [coverId, setCoverId] = useState<string | null>(null); // غلاف المقطع (`VideoCover`)
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
@@ -117,7 +121,8 @@ export default function Editor() {
   async function loadPost(pid: string) {
     const d = await api.get(`/posts/${pid}`);
     setTitle(d.post.title);
-    setBody(d.post.body);
+    // بطاقات المقاطع القديمة تصير مشغّلاً (`upgradeVideoEmbeds`)
+    setBody(upgradeVideoEmbeds(d.post.body));
     setSavedBody(d.post.body);
     setPlan(planFromPost(d.post));
     setAssigneeName(d.post.assignee_name || '');
@@ -135,14 +140,8 @@ export default function Editor() {
     setNotes(d.notes || []);
     setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
-    const vmap: Record<string, string> = {};
-    const fcmap: Record<string, string> = {};
-    for (const v of d.variants || []) {
-      if (v.body_override) vmap[v.platform] = v.body_override;
-      if (v.first_comment) fcmap[v.platform] = v.first_comment;
-    }
-    setVariants(vmap);
-    setFirstComments(fcmap);
+    setVariants(d.variants || []);
+    setCoverId(d.post.video_cover_id || null);
     /* الصمت قرار: النسخ زيادةٌ على المحتوى، وفشلُ جلبها يخفي زرّ
        «سجل النسخ» ولا يمنع التحرير ولا الحفظ. */
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
@@ -239,6 +238,9 @@ export default function Editor() {
     if (!postId) return;
     setConfirming(null);
     setErr(''); setMsg('');
+    // تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل النشر (`tiktokVideo.ts`)
+    const tiktokDue = schedules.some((s) => s.platform === 'tiktok' && ['pending', 'failed'].includes(s.status));
+    const tiktokErr = tiktokDue ? await prepareTikTok(postId, setMsg) : '';
     try {
       const d = await api.post('/schedules/publish-now', { post_id: postId });
       // الحالة من الخادم لا من الضغط: منشورٌ رُفض على كل منصاته لم يُنشر
@@ -251,7 +253,8 @@ export default function Editor() {
       if (d.failed > 0) {
         setErr(
           (d.errors || [])
-            .map((e: { platform: string; error: string }) => `${platformLabel(e.platform, platLabels)}: ${e.error}`)
+            .map((e: { platform: string; error: string }) =>
+              `${platformLabel(e.platform, platLabels)}: ${e.platform === 'tiktok' && tiktokErr ? tiktokErr : e.error}`)
             .join(' · '),
         );
       }
@@ -271,24 +274,6 @@ export default function Editor() {
     }
   }
 
-  // يحفظ النص المخصّص لمنصة واحدة (يستخدمه النشر بدل النص الأساسي عند وجوده)
-  async function saveVariant(platform: string) {
-    if (!postId) return;
-    setSavingVariant(platform);
-    setErr('');
-    try {
-      await api.put(`/posts/${postId}/variants/${platform}`, {
-        body_override: variants[platform]?.trim() || null,
-        first_comment: firstComments[platform]?.trim() || null,
-      });
-      setMsg('تم الحفظ');
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSavingVariant('');
-    }
-  }
-
   // إلغاء موعد نشر معلّق أو فاشل (الخادم يرفض إلغاء ما نُشر فعلاً)
   async function cancelSchedule(sid: string) {
     if (!postId) return;
@@ -303,18 +288,27 @@ export default function Editor() {
   }
 
   // يرفع الملف ويُعيد بياناته؛ المحرر يتولّى إدراجه عند موضع المؤشر.
-  async function uploadFn(file: File) {
-    setErr(''); setMsg('جارٍ رفع الوسيط…');
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const d = await api.upload('/media', form);
-      setMsg('تم إدراج الوسيط');
-      return d;
-    } catch (e: any) {
-      setErr(e.message);
-      return null;
+  // وعند اختيار عدّة ملفات يُستدعى لكلٍّ منها بترتيبه (`RichEditor`)، والخطأ يُجمع لا يُمحى،
+  // والرسالة الأخيرة تعدّ ما أُدرج فعلاً لا ما اختير.
+  const uploadedInBatch = useRef(0);
+  async function uploadFn(file: File, index = 0, total = 1) {
+    if (index === 0) {
+      setErr('');
+      uploadedInBatch.current = 0;
     }
+    setMsg(total > 1 ? `جارٍ رفع الوسيط ${isolate(index + 1)} من ${isolate(total)}…` : 'جارٍ رفع الوسيط…');
+    let d = null;
+    try {
+      d = await uploadMedia(file);
+      uploadedInBatch.current++;
+    } catch (e: any) {
+      setErr((prev) => [prev, total > 1 ? `«${file.name}»: ${e.message}` : e.message].filter(Boolean).join(' · '));
+    }
+    if (index === total - 1) {
+      const n = uploadedInBatch.current;
+      setMsg(!n ? '' : total > 1 ? `تم إدراج الوسائط (${isolate(n)})` : 'تم إدراج الوسيط');
+    }
+    return d;
   }
 
   const overdue =
@@ -393,7 +387,7 @@ export default function Editor() {
                 </button>
               </div>
               <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '6px 0 0' }}>
-                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، ويمكن اختيار عدّة ملفات معاً فتُدرج بترتيبها. واضغط على الوسيط لاحقاً لاستعراضه.
               </p>
             </div>
           )}
@@ -478,54 +472,24 @@ export default function Editor() {
             </div>
           </div>
 
-          {/* نصوص مخصّصة لكل منصة — النشر يستخدمها بدل النص الأساسي عند وجودها */}
+          {/* غلاف المقطع — يظهر حين يكون وسيط المحتوى مقطعاً واحداً */}
+          {postId && can('draft.edit') && (
+            <VideoCover postId={postId} body={body} coverId={coverId} onChange={setCoverId} onError={setErr} onMsg={setMsg} />
+          )}
+
+          {/* نسخة كل منصة — النص المخصّص وأول تعليق، ومعاينة ما سيصل كل منصة من الوسائط */}
           {postId && platforms.length > 0 && can('draft.edit') && (
-            <div className="card" style={{ marginBottom: 14 }}>
-              <button type="button" className="row row-link" aria-expanded={showVariants} onClick={() => setShowVariants((v) => !v)}>
-                <h4 style={{ margin: 0 }}>نصوص مخصّصة وأول تعليق لكل منصة</h4>
-                <div className="spacer" />
-                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                  {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
-                </span>
-              </button>
-              {showVariants && (
-                <div style={{ marginTop: 10 }}>
-                  <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
-                    اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
-                  </p>
-                  {platforms.map((p) => (
-                    <div key={p} style={{ marginBottom: 10 }}>
-                      <div className="row" style={{ marginBottom: 4 }}>
-                        <PlatformIcon platform={p} size={16} />
-                        <span style={{ fontSize: 'var(--text-xs)' }}>{platformLabel(p, platLabels)}</span>
-                        <div className="spacer" />
-                        <button
-                          className="btn sm ghost"
-                          disabled={savingVariant === p}
-                          onClick={() => saveVariant(p)}
-                        >
-                          {savingVariant === p ? 'جارٍ الحفظ…' : 'حفظ'}
-                        </button>
-                      </div>
-                      <textarea
-                        className="input"
-                        rows={3}
-                        placeholder="(يُستخدم النص الأساسي)"
-                        value={variants[p] || ''}
-                        onChange={(e) => setVariants((v) => ({ ...v, [p]: e.target.value }))}
-                      />
-                      <input
-                        className="input"
-                        style={{ marginTop: 6 }}
-                        placeholder="أول تعليق (اختياري) — للروابط والوسوم"
-                        value={firstComments[p] || ''}
-                        onChange={(e) => setFirstComments((v) => ({ ...v, [p]: e.target.value }))}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PlatformVariants
+              postId={postId}
+              platforms={platforms}
+              platLabels={platLabels}
+              body={body}
+              variants={variants}
+              open={showVariants}
+              onToggle={setShowVariants}
+              onError={setErr}
+              onMsg={setMsg}
+            />
           )}
 
           {/* الجداول */}
@@ -561,11 +525,12 @@ export default function Editor() {
                       )}
                     </div>
                     {/* سبب الفشل كما ردّه المزوّد أو المنصة، وما سترفضه المنصة إن فُحص عند الجدولة */}
-                    {['failed', 'pending'].includes(s.status) && s.error && (() => {
+                    {/* والمنشور قد يحمل ملاحظة: نشرةٌ من نشرات موعده لم تُنشر (سناب) */}
+                    {['failed', 'pending', 'published'].includes(s.status) && s.error && (() => {
                       // رسالة المزوّد الإنجليزية في سطرها باتجاهها، لا ملفوفةً في الفقرة العربية
                       const { ar, ltr } = splitProviderReason(s.error);
                       return (
-                        <div className="err" style={{ fontSize: 'var(--text-xs)' }}>
+                        <div className={s.status === 'published' ? 'muted' : 'err'} style={{ fontSize: 'var(--text-xs)' }}>
                           <bdi>{ltr ? `${ar}:` : ar}</bdi>
                           {ltr && <div dir="ltr">{ltr}</div>}
                         </div>
@@ -840,9 +805,7 @@ function MediaGenModal({
     setErr('');
     try {
       setBusy('جارٍ رفع الوسيط…');
-      const form = new FormData();
-      form.append('file', file);
-      const up = await api.upload('/media', form);
+      const up = await uploadMedia(file);
       setBusy('جارٍ تحليل الوسيط وتوليد المحتوى…');
       const d = await api.post(`/media/${up.id}/generate`, { platform, tone, length });
       onResult(d.text);
@@ -1256,6 +1219,19 @@ function RejectModal({ onClose, onReject }: { onClose: () => void; onReject: (re
 
 type ScheduleIssue = { platform: string; error: string };
 
+/** يجهّز مقطع تيك توك إن احتاجه — ويردّ سبب التعذّر نصّاً، أو '' إن لم يتعذّر. */
+async function prepareTikTok(postId: string, progress: (m: string) => void): Promise<string> {
+  try {
+    progress('جارٍ تجهيز مقطع تيك توك…');
+    await ensureTikTokVideo(postId);
+    return '';
+  } catch (e: any) {
+    return String(e?.message || e);
+  } finally {
+    progress('');
+  }
+}
+
 /* تبدأ بمنصات الخطة ويومها المستهدف إن لم يمضِ — والوقت يُدخل يدوياً: اليوم
    المستهدف يومٌ لا ساعة، وساعةٌ مقترحة تُجدول ما لم يقصده أحد. */
 function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initialDay = '', onClose, onDone }: {
@@ -1270,6 +1246,7 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
   const [selected, setSelected] = useState<string[]>(initialPlatforms);
   const [when, setWhen] = useState(initialDay ? `${initialDay}T` : '');
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
 
   function toggle(p: string) {
     setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
@@ -1283,9 +1260,14 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
       // ووقتٌ مُسح من حقله يترك «2026-10-04T» فيرمي التحويل «Invalid time value».
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) return setErr('هذا الحقل مطلوب');
       const iso = new Date(`${when}:00+03:00`).toISOString();
+      /* تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل الجدولة، فيمرّ فحصُها. وإن
+         تعذّر قيل سببه مكان سبب الفحص — هو الأصل وما بعده نتيجته. */
+      const tiktokErr = selected.includes('tiktok') ? await prepareTikTok(postId, setBusy) : '';
+      setBusy('');
       const d = await api.post<{ issues?: ScheduleIssue[] }>('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
-      onDone(d.issues || []);
+      onDone((d.issues || []).map((i) => (i.platform === 'tiktok' && tiktokErr ? { ...i, error: tiktokErr } : i)));
     } catch (e: any) {
+      setBusy('');
       setErr(e.message);
     }
   }
@@ -1307,7 +1289,8 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
         <DateTimePicker value={when} onChange={setWhen} inline />
       </div>
       {err && <p className="err">{err}</p>}
-      <button className="btn gold" disabled={!selected.length || !when} onClick={submit}>تأكيد الجدولة</button>
+      {busy && <p className="muted" role="status">{busy}</p>}
+      <button className="btn gold" disabled={!selected.length || !when || !!busy} onClick={submit}>تأكيد الجدولة</button>
     </Modal>
   );
 }

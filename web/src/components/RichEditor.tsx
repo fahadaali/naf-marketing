@@ -14,7 +14,8 @@ const RichEditor = forwardRef<
     value: string;
     onChange: (html: string) => void;
     placeholder?: string;
-    onUpload?: (file: File) => Promise<UploadResult>;
+    /** يُستدعى لكل ملف — ومعه ترتيبه وعدد المختار، لرسالة التقدّم. */
+    onUpload?: (file: File, index: number, total: number) => Promise<UploadResult>;
     onMediaClick?: (m: MediaInfo) => void;
   }
 >(({ value, onChange, placeholder, onUpload, onMediaClick }, ref) => {
@@ -66,12 +67,17 @@ const RichEditor = forwardRef<
 
   useImperativeHandle(ref, () => ({ focus: () => el.current?.focus(), insertHtml }));
 
-  async function handleFile(file: File) {
-    if (!onUpload) return;
+  /* عدّة ملفات في اختيارٍ واحد — أربع صورٍ لمنشورٍ واحد لا تُرفع واحدةً
+     واحدة. تُرفع بالترتيب الذي اختيرت به، وكلٌّ يُدرج بعد سابقه فيبقى
+     ترتيبها في المحتوى ترتيبَ نشرها. وما تعذّر رفعه لا يوقف ما بعده. */
+  async function handleFiles(files: File[]) {
+    if (!onUpload || !files.length) return;
     setBusy(true);
     try {
-      const res = await onUpload(file);
-      if (res) insertHtml(mediaEmbedHtml(res));
+      for (let i = 0; i < files.length; i++) {
+        const res = await onUpload(files[i], i, files.length);
+        if (res) insertHtml(mediaEmbedHtml(res));
+      }
     } finally {
       setBusy(false);
     }
@@ -118,10 +124,10 @@ const RichEditor = forwardRef<
               ref={fileRef}
               type="file"
               hidden
+              multiple
               accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFile(f);
+                handleFiles(Array.from(e.target.files || []));
                 e.target.value = '';
               }}
             />

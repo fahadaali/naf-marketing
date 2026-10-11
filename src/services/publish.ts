@@ -3,6 +3,7 @@ import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds } from '../util';
 import { notifyPublishFailed } from './notify';
+import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -36,27 +37,56 @@ export function missingRequirement(platform: string, text: string, media: Publis
   /* تيك توك: منشور الصور صورتان فأكثر — «photo posts require at least 2
      images» كما ردّه تحقّق SocialAPI. والمقطع الواحد يكفي. */
   if (platform === 'tiktok' && media.length && media.every((m) => m.mimeType.startsWith('image/')) && media.length < 2) {
-    return 'تيك توك لا يقبل منشور صورٍ بأقلّ من صورتين. أضف صورة ثانية أو ضع مقطع فيديو مكان الصورة، ثم أعد النشر';
+    /* والصورة الواحدة يصنع منها المحرر مقطعاً حين يُضغط «جدولة النشر» أو
+       «نشر الآن» (`web/src/tiktokVideo.ts`) — فلا يصل هنا إلا ما جُدول من
+       غيره، أو تغيّرت صورته بعد التوليد. */
+    return 'تيك توك لا يقبل منشور صورٍ بأقلّ من صورتين. افتح المحتوى في المحرر واضغط «نشر الآن» ليُجهَّز من الصورة مقطع، أو أضف صورة ثانية';
   }
   if (!text && !media.length) return 'المنشور فارغ: لا نصّ فيه ولا وسيط. أضف محتوى ثم أعد النشر';
   return null;
 }
 
-/** ما يُرسل للمزوّد لمنصةٍ واحدة — يُبنى هكذا عند النشر وعند الفحص المسبق. */
-async function prepareInput(env: Env, job: Job): Promise<PublishInput> {
+/** ما سترفضه المنصة من المقاطع — مدّةً أو حجماً (`mediaSpecs.ts`). */
+export function mediaIssues(platform: string, media: PublishMedia[]): string[] {
+  return media
+    .filter((m) => m.mimeType.startsWith('video/'))
+    .flatMap((m) => videoIssues(platform, m));
+}
+
+/** ما يُرسل للمزوّد لمنصةٍ واحدة — يُبنى هكذا عند النشر وعند الفحص المسبق.
+    والفحص المسبق لا يكيّف الصور (`adapt: false`): يكفيه أن يعرف ما سيُرسل. */
+async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}): Promise<PublishInput> {
   const variant = await env.DB.prepare(
-    'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+     FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(job.post_id, job.platform)
-    .first<{ body_override: string | null; media_asset_id: string | null; first_comment: string | null }>();
+    .first<{
+      body_override: string | null; media_asset_id: string | null; first_comment: string | null;
+      generated_media_id: string | null; generated_from_id: string | null;
+    }>();
 
   // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
   const rawBody = variant?.body_override || job.body || '';
   const text = (htmlToText(rawBody) || job.title || '').trim();
 
   // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
-  const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
-  const media = await loadMedia(env, assetIds);
+  let assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  /* مقطعٌ وُلّد من صورة المنصة الواحدة (تيك توك) يحلّ محلّها — ما دامت هي
+     الصورة نفسها. فإن تغيّرت بعده أُرسلت الصورة، فيقول `missingRequirement`
+     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. */
+  if (variant?.generated_media_id && assetIds.length === 1 && assetIds[0] === variant.generated_from_id) {
+    assetIds = [variant.generated_media_id];
+  }
+  let media = await loadMedia(env, assetIds);
+
+  /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها
+     (`adaptImage`). وبلا ربط `IMAGES` تُرسل كما هي، كما كانت. */
+  if (opts.adapt && env.IMAGES) {
+    const adapted: PublishMedia[] = [];
+    for (const m of media) adapted.push(await adaptImage(env.IMAGES, job.platform, m));
+    media = adapted;
+  }
 
   return {
     platforms: [job.platform],
@@ -64,7 +94,37 @@ async function prepareInput(env: Env, job: Job): Promise<PublishInput> {
     title: job.title || undefined,
     media,
     firstComment: variant?.first_comment || undefined,
+    cover: opts.adapt ? await loadCover(env, job.post_id, media) : undefined,
   };
+}
+
+/* ═══ غلاف المقطع ═══
+
+   صورةٌ يختارها الفريق للمقطع (`video_cover_id`)، تظهر قبل التشغيل حيث
+   تقبلها المنصة. وتُوضع في إطارٍ بأبعاد المقطع نفسه — لينكدإن يشترطها،
+   وفي غيره لا يُقصّ الغلاف عند العرض. ولا غلاف إلا لمقطعٍ واحد. */
+const COVER_MAX_SIDE = 1920;
+
+async function loadCover(env: Env, postId: string, media: PublishMedia[]): Promise<PublishMedia | undefined> {
+  const video = media.length === 1 && media[0].mimeType.startsWith('video/') ? media[0] : null;
+  if (!video) return undefined;
+  const row = await env.DB.prepare('SELECT video_cover_id FROM content_posts WHERE id = ?')
+    .bind(postId)
+    .first<{ video_cover_id: string | null }>();
+  if (!row?.video_cover_id) return undefined;
+  // غلافٌ حُذف من المكتبة لا يمنع نشر المقطع — يُنشر بلا غلاف
+  const [cover] = await loadMedia(env, [row.video_cover_id]).catch(() => [] as PublishMedia[]);
+  if (!cover || !cover.mimeType.startsWith('image/')) return undefined;
+  if (!env.IMAGES || !video.width || !video.height) return cover;
+  const scale = Math.min(1, COVER_MAX_SIDE / Math.max(video.width, video.height));
+  const frame: [number, number] = [Math.round(video.width * scale), Math.round(video.height * scale)];
+  const dims = await imageDims(env.IMAGES, cover);
+  if (!dims) return cover;
+  return frameImage(env.IMAGES, cover, dims, frame, 'cover');
+}
+
+function extraIds(ids?: string[]): string | null {
+  return ids?.length ? JSON.stringify(ids) : null;
 }
 
 async function failJob(env: Env, job: Job, errMsg: string): Promise<void> {
@@ -109,25 +169,28 @@ async function publishJobs(
     try {
       if (!provider) throw new Error(providerError);
 
-      const input = await prepareInput(env, job);
+      const input = await prepareInput(env, job, { adapt: true });
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
+      const issues = mediaIssues(job.platform, input.media || []);
+      if (issues.length) throw new Error(issues.join(' · '));
 
       const result = await provider.publish(input);
 
       if (result.state === 'pending') {
         /* قبله المزوّد ولم يؤكّد نشره: يبقى «قيد النشر» ومعه معرّفه، ويُسأل
            عنه في الدورات التالية حتى يُنشر أو يُرفض. */
-        await env.DB.prepare('UPDATE schedules SET provider_post_id = ? WHERE id = ?')
-          .bind(result.providerPostId, job.id)
+        await env.DB.prepare('UPDATE schedules SET provider_post_id = ?, extra_provider_ids = ? WHERE id = ?')
+          .bind(result.providerPostId, extraIds(result.extraIds), job.id)
           .run();
         pending++;
         continue;
       }
+      // `note`: نشرةٌ من نشرات الموعد لم تُنشر وغيرها نُشر (سناب) — يُكتب تحته
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = NULL WHERE id = ?",
+        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?, extra_provider_ids = ? WHERE id = ?",
       )
-        .bind(result.providerPostId, nowIso(), job.id)
+        .bind(result.providerPostId, nowIso(), result.note || null, extraIds(result.extraIds), job.id)
         .run();
       published++;
     } catch (err: any) {
@@ -152,10 +215,13 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
   const out: PublishMedia[] = [];
   for (const id of assetIds.slice(0, 4)) {
     const asset = await env.DB.prepare(
-      'SELECT r2_key, mime_type, filename FROM media_assets WHERE id = ?',
+      'SELECT r2_key, mime_type, filename, width, height, duration_ms FROM media_assets WHERE id = ?',
     )
       .bind(id)
-      .first<{ r2_key: string; mime_type: string | null; filename: string | null }>();
+      .first<{
+        r2_key: string; mime_type: string | null; filename: string | null;
+        width: number | null; height: number | null; duration_ms: number | null;
+      }>();
     const head = asset ? await env.MEDIA.head(asset.r2_key) : null;
     if (!asset || !head) {
       throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
@@ -166,6 +232,9 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
       size: head.size,
       mimeType: asset.mime_type || 'application/octet-stream',
       filename: asset.filename || asset.r2_key.split('/').pop() || 'media',
+      width: asset.width,
+      height: asset.height,
+      duration_ms: asset.duration_ms,
     });
   }
   return out;
@@ -366,6 +435,7 @@ export async function preflightSchedules(
       const input = await prepareInput(env, { id: '', post_id: postId, platform, body: post.body, title: post.title });
       const missing = missingRequirement(platform, input.text, input.media || []);
       if (missing) issues.push(missing);
+      issues.push(...mediaIssues(platform, input.media || []));
       if (provider.preflight) issues.push(...(await provider.preflight(input)));
     } catch (err: any) {
       issues.push(String(err?.message || err));

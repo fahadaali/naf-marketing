@@ -17,6 +17,10 @@ export interface PublishMedia {
   mimeType: string;
   filename: string;
   url?: string; // رابط عام إن توفّر (لمزوّدين يقبلون الروابط مثل Buffer)
+  /** أبعاد الوسيط ومدّة المقطع كما حُفظت عند الرفع — الغائب لا يُعرف. */
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
 }
 
 export interface PublishInput {
@@ -27,6 +31,8 @@ export interface PublishInput {
   media?: PublishMedia[];
   firstComment?: string; // أول تعليق يُنشر بعد المنشور (روابط/وسوم)
   scheduleAt?: string; // ISO 8601, UTC
+  /** غلاف المقطع — مكيّفاً إلى أبعاده — للمنصات التي تقبله. */
+  cover?: PublishMedia;
 }
 
 /**
@@ -43,6 +49,10 @@ export interface PublishResult {
   status: string;
   /** غيابه = «منشور» — سلوك المزوّدين الذين لا يُعلنون غيره. */
   state?: PublishState;
+  /** منشوراتٌ أخرى للموعد نفسه (سناب: سبوتلايت وقصة محفوظة وقصة). */
+  extraIds?: string[];
+  /** ما فشل منها والموعد منشورٌ بغيره — يُكتب تحت الموعد. */
+  note?: string;
 }
 
 export interface PublishCheck {

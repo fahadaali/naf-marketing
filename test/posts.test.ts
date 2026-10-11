@@ -370,3 +370,41 @@ describe('منصات المحتوى المجدولة في القوائم', () =>
     expect(queue.map((p: any) => [p.id, p.scheduled_platforms])).toEqual([['p2', 'linkedin']]);
   });
 });
+
+describe('نسخة المنصة', () => {
+  const variant = (platform: string) =>
+    db.prepare('SELECT * FROM post_variants WHERE post_id = ? AND platform = ?').get('pst_v', platform);
+
+  beforeEach(() => {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES ('pst_v', 'ع', '<p>نص</p>', 'draft', 'usr_mgr')").run();
+  });
+
+  it('حفظ النص وحده لا يمحو وسيط المنصة ولا مقطعها المولّد', async () => {
+    let r = await call('PUT', '/posts/pst_v/variants/tiktok', {
+      media_asset_id: 'media_a', generated_media_id: 'media_vid', generated_from_id: 'media_a',
+    });
+    expect(r.status).toBe(200);
+    r = await call('PUT', '/posts/pst_v/variants/tiktok', { body_override: 'نص تيك توك', first_comment: null });
+    expect(r.status).toBe(200);
+    expect(variant('tiktok')).toMatchObject({
+      body_override: 'نص تيك توك',
+      media_asset_id: 'media_a',
+      generated_media_id: 'media_vid',
+      generated_from_id: 'media_a',
+      first_comment: null,
+    });
+  });
+
+  it('استبدال الوسيط باليد لا يمسّ المقطع المولّد، والفارغ يعيد الأصل', async () => {
+    await call('PUT', '/posts/pst_v/variants/snapchat', { media_asset_id: 'media_hand' });
+    expect(variant('snapchat')).toMatchObject({ media_asset_id: 'media_hand', generated_media_id: null });
+    await call('PUT', '/posts/pst_v/variants/snapchat', { media_asset_id: null });
+    expect(variant('snapchat')).toMatchObject({ media_asset_id: null });
+  });
+
+  it('مقطعٌ مولّد بلا صورته لا يُحفظ لها مصدر، وإزالته تزيل مصدره', async () => {
+    await call('PUT', '/posts/pst_v/variants/tiktok', { generated_media_id: 'media_vid', generated_from_id: 'media_a' });
+    await call('PUT', '/posts/pst_v/variants/tiktok', { generated_media_id: null });
+    expect(variant('tiktok')).toMatchObject({ generated_media_id: null, generated_from_id: null });
+  });
+});

@@ -295,6 +295,7 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
     assignee_id?: string | null;
     pillar?: string | null;
     brief?: string | null;
+    video_cover_id?: string | null;
   }>();
   const fields: string[] = [];
   const binds: unknown[] = [];
@@ -324,6 +325,8 @@ postRoutes.patch('/:id', requirePermission('draft.edit'), async (c) => {
   const brief = b.brief === undefined ? undefined : cleanText(b.brief, BRIEF_MAX);
   if (brief !== undefined) set('brief', brief);
   if (body !== undefined && takesAuthorship(user, post, body)) set('author_id', user.id);
+  // غلاف المقطع: وسيطٌ من المكتبة، والفارغ يزيله
+  if (b.video_cover_id !== undefined) set('video_cover_id', b.video_cover_id || null);
 
   const idea = isIdeaRow({ status: post.status, body: body ?? post.body });
   if (!fields.length) return c.json({ ok: true, idea });
@@ -456,21 +459,38 @@ postRoutes.post('/:id/action', async (c) => {
 });
 
 // نسخ المنصات (variants)
+//
+// الحقل الغائب من الطلب يبقى كما كان. وكان كل حفظٍ يكتب الحقول كلها،
+// فحفظُ النص المخصّص من المحرر — ولا يرسل الوسيط — يمحو وسيط المنصة.
+// والمقطع المولّد (`generated_*`) يُرسل معاً: مقطعٌ بلا صورته لا يُعرف أهو قديم.
 postRoutes.put('/:id/variants/:platform', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const platform = c.req.param('platform');
-  const { body_override, media_asset_id, first_comment } = await c.req.json<{
-    body_override?: string;
-    media_asset_id?: string;
-    first_comment?: string;
+  const b = await c.req.json<{
+    body_override?: string | null;
+    media_asset_id?: string | null;
+    first_comment?: string | null;
+    generated_media_id?: string | null;
+    generated_from_id?: string | null;
   }>();
-  await c.env.DB.prepare(
-    `INSERT INTO post_variants (id, post_id, platform, body_override, media_asset_id, first_comment)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override,
-       media_asset_id = excluded.media_asset_id, first_comment = excluded.first_comment`,
+  const prev = await c.env.DB.prepare(
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+     FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
-    .bind(newId('var'), id, platform, body_override || null, media_asset_id || null, first_comment || null)
+    .bind(id, platform)
+    .first<Record<string, string | null>>();
+  const pick = (k: keyof typeof b) => (k in b ? b[k] || null : prev?.[k] ?? null);
+  const generated = pick('generated_media_id');
+  const from = generated ? pick('generated_from_id') : null;
+  await c.env.DB.prepare(
+    `INSERT INTO post_variants
+       (id, post_id, platform, body_override, media_asset_id, first_comment, generated_media_id, generated_from_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override,
+       media_asset_id = excluded.media_asset_id, first_comment = excluded.first_comment,
+       generated_media_id = excluded.generated_media_id, generated_from_id = excluded.generated_from_id`,
+  )
+    .bind(newId('var'), id, platform, pick('body_override'), pick('media_asset_id'), pick('first_comment'), generated, generated && from ? from : null)
     .run();
   return c.json({ ok: true });
 });
