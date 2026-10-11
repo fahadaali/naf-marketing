@@ -34,6 +34,7 @@ import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
+import { uploadMedia } from '../mediaUpload';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
@@ -306,9 +307,7 @@ export default function Editor() {
   async function uploadFn(file: File) {
     setErr(''); setMsg('جارٍ رفع الوسيط…');
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const d = await api.upload('/media', form);
+      const d = await uploadMedia(file);
       setMsg('تم إدراج الوسيط');
       return d;
     } catch (e: any) {
@@ -840,9 +839,7 @@ function MediaGenModal({
     setErr('');
     try {
       setBusy('جارٍ رفع الوسيط…');
-      const form = new FormData();
-      form.append('file', file);
-      const up = await api.upload('/media', form);
+      const up = await uploadMedia(file);
       setBusy('جارٍ تحليل الوسيط وتوليد المحتوى…');
       const d = await api.post(`/media/${up.id}/generate`, { platform, tone, length });
       onResult(d.text);

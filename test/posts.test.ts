@@ -370,3 +370,33 @@ describe('منصات المحتوى المجدولة في القوائم', () =>
     expect(queue.map((p: any) => [p.id, p.scheduled_platforms])).toEqual([['p2', 'linkedin']]);
   });
 });
+
+describe('نسخة المنصة', () => {
+  const variant = (platform: string) =>
+    db.prepare('SELECT * FROM post_variants WHERE post_id = ? AND platform = ?').get('pst_v', platform);
+
+  beforeEach(() => {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES ('pst_v', 'ع', '<p>نص</p>', 'draft', 'usr_mgr')").run();
+  });
+
+  it('حفظ النص وحده لا يمحو وسيط المنصة ولا مصدره', async () => {
+    let r = await call('PUT', '/posts/pst_v/variants/snapchat', { media_asset_id: 'media_a', media_source_id: 'media_src' });
+    expect(r.status).toBe(200);
+    r = await call('PUT', '/posts/pst_v/variants/snapchat', { body_override: 'نص سناب', first_comment: null });
+    expect(r.status).toBe(200);
+    expect(variant('snapchat')).toMatchObject({
+      body_override: 'نص سناب',
+      media_asset_id: 'media_a',
+      media_source_id: 'media_src',
+      first_comment: null,
+    });
+  });
+
+  it('وسيطٌ يُختار باليد يُسقط مصدر المقطع المولّد، والفارغ يعيد الأصل', async () => {
+    await call('PUT', '/posts/pst_v/variants/tiktok', { media_asset_id: 'media_gen', media_source_id: 'media_img' });
+    await call('PUT', '/posts/pst_v/variants/tiktok', { media_asset_id: 'media_hand' });
+    expect(variant('tiktok')).toMatchObject({ media_asset_id: 'media_hand', media_source_id: null });
+    await call('PUT', '/posts/pst_v/variants/tiktok', { media_asset_id: null });
+    expect(variant('tiktok')).toMatchObject({ media_asset_id: null, media_source_id: null });
+  });
+});

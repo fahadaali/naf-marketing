@@ -59,10 +59,13 @@ mediaRoutes.post('/', requirePermission('media.upload'), async (c) => {
     httpMetadata: { contentType: file.type || 'application/octet-stream' },
   });
 
+  const dims = await uploadDimensions(c.env, file, form);
+
   await c.env.DB.prepare(
-    'INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename) VALUES (?, ?, ?, ?, ?, ?)',
+    `INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename, width, height, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, key, file.type || null, file.size, user.id, file.name || null)
+    .bind(id, key, file.type || null, file.size, user.id, file.name || null, dims.width, dims.height, dims.duration_ms)
     .run();
 
   return c.json({
@@ -73,7 +76,56 @@ mediaRoutes.post('/', requirePermission('media.upload'), async (c) => {
     filename: file.name,
     mime_type: file.type,
     size: file.size,
+    ...dims,
   });
+});
+
+/* ═══ أبعاد الوسيط ═══
+
+   الصورة يقرؤها الخادم بربط `IMAGES` — وبدونه تبقى فارغة وتُقرأ عند النشر.
+   والمقطع لا يملك العامل ما يقرؤه به، فيرسل المتصفح أبعاده ومدّته حقولاً
+   مع الملف (قرأها من `<video>` قبل الرفع). */
+type Dims = { width: number | null; height: number | null; duration_ms: number | null };
+
+function positiveInt(v: unknown): number | null {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 && n < 1e9 ? n : null;
+}
+
+async function uploadDimensions(env: Env, file: File, form: FormData): Promise<Dims> {
+  const none: Dims = { width: null, height: null, duration_ms: null };
+  const mime = (file.type || '').toLowerCase();
+  if (mime.startsWith('video/')) {
+    return {
+      width: positiveInt(form.get('width')),
+      height: positiveInt(form.get('height')),
+      duration_ms: positiveInt(form.get('duration_ms')),
+    };
+  }
+  if (mime.startsWith('image/') && env.IMAGES) {
+    try {
+      const info = (await env.IMAGES.info(file.stream())) as { width?: number; height?: number };
+      return { ...none, width: positiveInt(info.width), height: positiveInt(info.height) };
+    } catch { /* صورةٌ لا يقرؤها الربط تبقى بلا أبعاد — وتُنشر كما هي */ }
+  }
+  return none;
+}
+
+// إكمال أبعاد مقطعٍ رُفع قبل حفظها — يرسلها المحرر حين يفتح محتواه.
+// لا يكتب فوق قيمةٍ موجودة: ما قرأه الرفع أولى.
+mediaRoutes.patch('/:id/meta', requirePermission('media.upload'), async (c) => {
+  const b = await c.req.json<{ width?: number; height?: number; duration_ms?: number }>().catch(() => ({}) as any);
+  const width = positiveInt(b.width);
+  const height = positiveInt(b.height);
+  const duration = positiveInt(b.duration_ms);
+  if (!width && !height && !duration) return c.json({ error: 'لا أبعاد في الطلب' }, 400);
+  await c.env.DB.prepare(
+    `UPDATE media_assets SET width = COALESCE(width, ?), height = COALESCE(height, ?),
+       duration_ms = COALESCE(duration_ms, ?) WHERE id = ?`,
+  )
+    .bind(width, height, duration, c.req.param('id'))
+    .run();
+  return c.json({ ok: true });
 });
 
 mediaRoutes.get('/', async (c) => {
