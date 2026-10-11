@@ -139,6 +139,19 @@ mediaRoutes.get('/specs', (c) =>
   c.json({ image: IMAGE_SPECS, video: VIDEO_SPECS, facebook_reel_ms: FACEBOOK_REEL_MS, youtube_short_max_ms: YOUTUBE_SHORT_MAX_MS }),
 );
 
+// بيانات وسائط بعينها — نوعها وأبعادها ومدّتها — لمعاينة نسخة كل منصة.
+mediaRoutes.get('/info', async (c) => {
+  const ids = (c.req.query('ids') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  if (!ids.length) return c.json({ media: [] });
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, mime_type, filename, size, width, height, duration_ms FROM media_assets
+     WHERE id IN (${ids.map(() => '?').join(',')})`,
+  )
+    .bind(...ids)
+    .all();
+  return c.json({ media: results });
+});
+
 mediaRoutes.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT m.*, u.name AS uploader_name FROM media_assets m

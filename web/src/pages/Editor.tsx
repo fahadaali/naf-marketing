@@ -35,6 +35,7 @@ import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { uploadMedia } from '../mediaUpload';
+import PlatformVariants, { type VariantRow } from '../components/PlatformVariants';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
@@ -76,9 +77,8 @@ export default function Editor() {
   const [basecampSynced, setBasecampSynced] = useState(false);
   const [syncingNotes, setSyncingNotes] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
-  const [variants, setVariants] = useState<Record<string, string>>({}); // نص مخصّص لكل منصة (فارغ = النص الأساسي)
-  const [firstComments, setFirstComments] = useState<Record<string, string>>({}); // أول تعليق لكل منصة
-  const [savingVariant, setSavingVariant] = useState('');
+  // نسخة كل منصة كما في الخادم — النص المخصّص وأول تعليق ووسيطها (`PlatformVariants`)
+  const [variants, setVariants] = useState<VariantRow[]>([]);
   const [showVariants, setShowVariants] = useState(false);
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
@@ -136,14 +136,7 @@ export default function Editor() {
     setNotes(d.notes || []);
     setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
-    const vmap: Record<string, string> = {};
-    const fcmap: Record<string, string> = {};
-    for (const v of d.variants || []) {
-      if (v.body_override) vmap[v.platform] = v.body_override;
-      if (v.first_comment) fcmap[v.platform] = v.first_comment;
-    }
-    setVariants(vmap);
-    setFirstComments(fcmap);
+    setVariants(d.variants || []);
     /* الصمت قرار: النسخ زيادةٌ على المحتوى، وفشلُ جلبها يخفي زرّ
        «سجل النسخ» ولا يمنع التحرير ولا الحفظ. */
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
@@ -269,24 +262,6 @@ export default function Editor() {
       navigate('/posts');
     } catch (e: any) {
       setErr(e.message);
-    }
-  }
-
-  // يحفظ النص المخصّص لمنصة واحدة (يستخدمه النشر بدل النص الأساسي عند وجوده)
-  async function saveVariant(platform: string) {
-    if (!postId) return;
-    setSavingVariant(platform);
-    setErr('');
-    try {
-      await api.put(`/posts/${postId}/variants/${platform}`, {
-        body_override: variants[platform]?.trim() || null,
-        first_comment: firstComments[platform]?.trim() || null,
-      });
-      setMsg('تم الحفظ');
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSavingVariant('');
     }
   }
 
@@ -477,54 +452,19 @@ export default function Editor() {
             </div>
           </div>
 
-          {/* نصوص مخصّصة لكل منصة — النشر يستخدمها بدل النص الأساسي عند وجودها */}
+          {/* نسخة كل منصة — النص المخصّص وأول تعليق، ومعاينة ما سيصل كل منصة من الوسائط */}
           {postId && platforms.length > 0 && can('draft.edit') && (
-            <div className="card" style={{ marginBottom: 14 }}>
-              <button type="button" className="row row-link" aria-expanded={showVariants} onClick={() => setShowVariants((v) => !v)}>
-                <h4 style={{ margin: 0 }}>نصوص مخصّصة وأول تعليق لكل منصة</h4>
-                <div className="spacer" />
-                <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
-                  {Object.values(variants).filter((v) => v?.trim()).length || 'لا'} مخصّص · {showVariants ? 'إخفاء' : 'عرض'}
-                </span>
-              </button>
-              {showVariants && (
-                <div style={{ marginTop: 10 }}>
-                  <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
-                    اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
-                  </p>
-                  {platforms.map((p) => (
-                    <div key={p} style={{ marginBottom: 10 }}>
-                      <div className="row" style={{ marginBottom: 4 }}>
-                        <PlatformIcon platform={p} size={16} />
-                        <span style={{ fontSize: 'var(--text-xs)' }}>{platformLabel(p, platLabels)}</span>
-                        <div className="spacer" />
-                        <button
-                          className="btn sm ghost"
-                          disabled={savingVariant === p}
-                          onClick={() => saveVariant(p)}
-                        >
-                          {savingVariant === p ? 'جارٍ الحفظ…' : 'حفظ'}
-                        </button>
-                      </div>
-                      <textarea
-                        className="input"
-                        rows={3}
-                        placeholder="(يُستخدم النص الأساسي)"
-                        value={variants[p] || ''}
-                        onChange={(e) => setVariants((v) => ({ ...v, [p]: e.target.value }))}
-                      />
-                      <input
-                        className="input"
-                        style={{ marginTop: 6 }}
-                        placeholder="أول تعليق (اختياري) — للروابط والوسوم"
-                        value={firstComments[p] || ''}
-                        onChange={(e) => setFirstComments((v) => ({ ...v, [p]: e.target.value }))}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PlatformVariants
+              postId={postId}
+              platforms={platforms}
+              platLabels={platLabels}
+              body={body}
+              variants={variants}
+              open={showVariants}
+              onToggle={setShowVariants}
+              onError={setErr}
+              onMsg={setMsg}
+            />
           )}
 
           {/* الجداول */}

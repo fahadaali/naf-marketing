@@ -566,6 +566,28 @@ h3, h4 { letter-spacing: -0.01em; }
 .media-meta { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
 .media-sub { font-size: var(--text-xs); color: var(--muted-foreground); }
 
+/* ===== نسخة كل منصة (PlatformVariants) =====
+   المعاينة صورة الخادم نفسها بنسبتها: الارتفاع ثابتٌ من سلّم المسافات،
+   والعرض يتبعه — فيظهر الفرق بين ‎9:16‎ و‎1.91:1‎ كما سيُنشر. */
+.pv-card { margin-bottom: var(--space-4); }
+.pv-title { margin: 0; }
+.pv-count { font-size: var(--text-xs); }
+.pv-body { margin-top: var(--space-3); }
+.pv-hint { font-size: var(--text-xs); margin-top: 0; }
+.pv-platform { margin-bottom: var(--space-4); }
+.pv-head { margin-bottom: var(--space-2); gap: var(--space-2); }
+.pv-label { font-size: var(--text-xs); }
+.pv-media { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-2); }
+.pv-item { margin: 0; display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-start; }
+.pv-thumb {
+  display: block; height: calc(var(--spacing) * 28); width: auto; max-width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); object-fit: contain;
+}
+.pv-file { display: grid; place-items: center; padding: var(--space-2); font-size: var(--text-xs); color: var(--muted-foreground); }
+.pv-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.pv-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }
+.pv-comment { margin-top: var(--space-2); }
+
 /* ===== نافذة استعراض الوسائط ===== */
 .mv-overlay {
   position: fixed; inset: 0; background: color-mix(in oklab, var(--foreground) 70%, transparent); backdrop-filter: blur(4px);

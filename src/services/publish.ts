@@ -37,7 +37,10 @@ export function missingRequirement(platform: string, text: string, media: Publis
   /* تيك توك: منشور الصور صورتان فأكثر — «photo posts require at least 2
      images» كما ردّه تحقّق SocialAPI. والمقطع الواحد يكفي. */
   if (platform === 'tiktok' && media.length && media.every((m) => m.mimeType.startsWith('image/')) && media.length < 2) {
-    return 'تيك توك لا يقبل منشور صورٍ بأقلّ من صورتين. أضف صورة ثانية أو ضع مقطع فيديو مكان الصورة، ثم أعد النشر';
+    /* والصورة الواحدة يصنع منها المحرر مقطعاً حين يُضغط «جدولة النشر» أو
+       «نشر الآن» (`web/src/tiktokVideo.ts`) — فلا يصل هنا إلا ما جُدول من
+       غيره، أو تغيّرت صورته بعد التوليد. */
+    return 'تيك توك لا يقبل منشور صورٍ بأقلّ من صورتين. افتح المحتوى في المحرر واضغط «نشر الآن» ليُجهَّز من الصورة مقطع، أو أضف صورة ثانية';
   }
   if (!text && !media.length) return 'المنشور فارغ: لا نصّ فيه ولا وسيط. أضف محتوى ثم أعد النشر';
   return null;
@@ -54,17 +57,27 @@ export function mediaIssues(platform: string, media: PublishMedia[]): string[] {
     والفحص المسبق لا يكيّف الصور (`adapt: false`): يكفيه أن يعرف ما سيُرسل. */
 async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}): Promise<PublishInput> {
   const variant = await env.DB.prepare(
-    'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+     FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(job.post_id, job.platform)
-    .first<{ body_override: string | null; media_asset_id: string | null; first_comment: string | null }>();
+    .first<{
+      body_override: string | null; media_asset_id: string | null; first_comment: string | null;
+      generated_media_id: string | null; generated_from_id: string | null;
+    }>();
 
   // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
   const rawBody = variant?.body_override || job.body || '';
   const text = (htmlToText(rawBody) || job.title || '').trim();
 
   // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
-  const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  let assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  /* مقطعٌ وُلّد من صورة المنصة الواحدة (تيك توك) يحلّ محلّها — ما دامت هي
+     الصورة نفسها. فإن تغيّرت بعده أُرسلت الصورة، فيقول `missingRequirement`
+     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. */
+  if (variant?.generated_media_id && assetIds.length === 1 && assetIds[0] === variant.generated_from_id) {
+    assetIds = [variant.generated_media_id];
+  }
   let media = await loadMedia(env, assetIds);
 
   /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها

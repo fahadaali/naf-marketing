@@ -460,34 +460,37 @@ postRoutes.post('/:id/action', async (c) => {
 
 // نسخ المنصات (variants)
 //
-// الحقل الغائب من الطلب يبقى كما كان. وكان كل حفظٍ يكتب الحقول الأربعة،
+// الحقل الغائب من الطلب يبقى كما كان. وكان كل حفظٍ يكتب الحقول كلها،
 // فحفظُ النص المخصّص من المحرر — ولا يرسل الوسيط — يمحو وسيط المنصة.
+// والمقطع المولّد (`generated_*`) يُرسل معاً: مقطعٌ بلا صورته لا يُعرف أهو قديم.
 postRoutes.put('/:id/variants/:platform', requirePermission('draft.edit'), async (c) => {
   const id = c.req.param('id');
   const platform = c.req.param('platform');
   const b = await c.req.json<{
     body_override?: string | null;
     media_asset_id?: string | null;
-    media_source_id?: string | null;
     first_comment?: string | null;
+    generated_media_id?: string | null;
+    generated_from_id?: string | null;
   }>();
   const prev = await c.env.DB.prepare(
-    'SELECT body_override, media_asset_id, media_source_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+     FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(id, platform)
     .first<Record<string, string | null>>();
   const pick = (k: keyof typeof b) => (k in b ? b[k] || null : prev?.[k] ?? null);
-  const media = pick('media_asset_id');
-  // وسيطٌ يُختار باليد لم يُولَّد من صورة — فلا مصدر له ما لم يُرسَل
-  const source = 'media_source_id' in b || !('media_asset_id' in b) ? pick('media_source_id') : null;
+  const generated = pick('generated_media_id');
+  const from = generated ? pick('generated_from_id') : null;
   await c.env.DB.prepare(
-    `INSERT INTO post_variants (id, post_id, platform, body_override, media_asset_id, media_source_id, first_comment)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO post_variants
+       (id, post_id, platform, body_override, media_asset_id, first_comment, generated_media_id, generated_from_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override,
-       media_asset_id = excluded.media_asset_id, media_source_id = excluded.media_source_id,
-       first_comment = excluded.first_comment`,
+       media_asset_id = excluded.media_asset_id, first_comment = excluded.first_comment,
+       generated_media_id = excluded.generated_media_id, generated_from_id = excluded.generated_from_id`,
   )
-    .bind(newId('var'), id, platform, pick('body_override'), media, media ? source : null, pick('first_comment'))
+    .bind(newId('var'), id, platform, pick('body_override'), pick('media_asset_id'), pick('first_comment'), generated, generated && from ? from : null)
     .run();
   return c.json({ ok: true });
 });

@@ -509,3 +509,26 @@ describe('الفحص عند الجدولة', () => {
     expect(row(db, 'sch_pf3_linkedin')).toMatchObject({ status: 'published', error: null });
   });
 });
+
+describe('مقطع تيك توك المولّد من الصورة الواحدة', () => {
+  beforeEach(() => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_one', 'k/med_one', 'image/jpeg', 'one.jpg')").run();
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('med_two', 'k/med_two', 'image/jpeg', 'two.jpg')").run();
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename, width, height, duration_ms) VALUES ('med_vid', 'k/med_vid', 'video/mp4', 'one.mp4', 1080, 1920, 5000)").run();
+    for (const k of ['k/med_one', 'k/med_two', 'k/med_vid']) env.MEDIA._put(k);
+  });
+
+  it('يحلّ المقطع محلّ صورته فلا يُرفض المنشور', async () => {
+    post(db, 'tt1', '<p>نص</p><img src="/api/media/med_one">', ['tiktok']);
+    db.prepare("INSERT INTO post_variants (id, post_id, platform, generated_media_id, generated_from_id) VALUES ('vt1', 'tt1', 'tiktok', 'med_vid', 'med_one')").run();
+    const issues = await preflightSchedules(env, 'tt1', ['tiktok']);
+    expect(issues).toEqual([]);
+  });
+
+  it('صورةٌ تغيّرت بعد التوليد تُرسل هي، فيُقال ما ينقص ولا يُنشر مقطعٌ قديم', async () => {
+    post(db, 'tt2', '<p>نص</p><img src="/api/media/med_two">', ['tiktok']);
+    db.prepare("INSERT INTO post_variants (id, post_id, platform, generated_media_id, generated_from_id) VALUES ('vt2', 'tt2', 'tiktok', 'med_vid', 'med_one')").run();
+    const issues = await preflightSchedules(env, 'tt2', ['tiktok']);
+    expect(issues[0].error).toMatch(/بأقلّ من صورتين/);
+  });
+});
