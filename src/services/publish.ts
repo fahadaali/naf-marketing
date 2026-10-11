@@ -354,12 +354,20 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
     }
   }
 
+  // والنصّ كما أُرسل (نسخة المنصة أو المتن) — به يُطابَق في سجلّ المنصة حين يطول الانتظار
   const waiting = await env.DB.prepare(
-    `SELECT id, post_id, platform, provider_post_id, published_at FROM schedules
-     WHERE status = 'processing' AND provider_post_id IS NOT NULL AND provider_post_id != ''
-     ORDER BY published_at ASC
+    `SELECT s.id, s.post_id, s.platform, s.provider_post_id, s.published_at,
+            COALESCE(NULLIF(v.body_override, ''), p.body) AS body, p.title
+     FROM schedules s
+     JOIN content_posts p ON p.id = s.post_id
+     LEFT JOIN post_variants v ON v.post_id = s.post_id AND v.platform = s.platform
+     WHERE s.status = 'processing' AND s.provider_post_id IS NOT NULL AND s.provider_post_id != ''
+     ORDER BY s.published_at ASC
      LIMIT 10`,
-  ).all<{ id: string; post_id: string; platform: string; provider_post_id: string; published_at: string | null }>();
+  ).all<{
+    id: string; post_id: string; platform: string; provider_post_id: string; published_at: string | null;
+    body: string | null; title: string | null;
+  }>();
 
   if (waiting.results?.length) {
     let provider: PublishingProvider | null = null;
@@ -367,7 +375,10 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
     for (const row of provider ? waiting.results : []) {
       let check: Awaited<ReturnType<NonNullable<PublishingProvider['getPublishStatus']>>> = null;
       try {
-        check = provider!.getPublishStatus ? await provider!.getPublishStatus(row.provider_post_id) : null;
+        const text = (htmlToText(row.body || '') || row.title || '').trim();
+        check = provider!.getPublishStatus
+          ? await provider!.getPublishStatus(row.provider_post_id, { platform: row.platform, sentAt: row.published_at, text })
+          : null;
       } catch {
         continue; // عطلٌ عابر — يُسأل في الدورة التالية
       }

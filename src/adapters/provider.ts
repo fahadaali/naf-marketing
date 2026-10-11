@@ -55,6 +55,15 @@ export interface PublishResult {
   note?: string;
 }
 
+/** ما يُعرف عن موعدٍ ينتظر التأكيد — به يُسأل سجلّ المنصة حين يطول انتظاره. */
+export interface PublishStatusContext {
+  platform: string;
+  /** وقت الإرسال إلى المزوّد (ISO). */
+  sentAt: string | null;
+  /** نصّ المنشور كما أُرسل. */
+  text: string;
+}
+
 export interface PublishCheck {
   state: PublishState;
   error?: string;
@@ -88,7 +97,7 @@ export interface PublishingProvider {
    * حالُ منشورٍ قبله المزوّد ولم يؤكّد نشره — اختيارية. `null` = المزوّد لا
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
    */
-  getPublishStatus?(providerPostId: string): Promise<PublishCheck | null>;
+  getPublishStatus?(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null>;
   /**
    * فحصٌ مسبق بلا نشر: ما سترفضه المنصة من هذا المحتوى — بنصٍّ يُعرض كما هو.
    * اختيارية؛ ومن لا يُعلن حدود منصاته يردّ قائمةً فارغة.
