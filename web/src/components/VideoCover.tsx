@@ -98,7 +98,7 @@ export default function VideoCover({ postId, body, coverId, onChange, onError, o
         {coverId && <img className="vc-thumb" src={`/api/media/${coverId}`} alt="صورة الغلاف" />}
       </div>
       <div className="row vc-actions">
-        <button type="button" className="btn sm" disabled={busy} onClick={fromFrame}>
+        <button type="button" className="btn sm ghost" disabled={busy} onClick={fromFrame}>
           <Video size={16} /> اختيار من الفيديو
         </button>
         <button type="button" className="btn sm ghost" disabled={busy} onClick={() => fileRef.current?.click()}>
