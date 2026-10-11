@@ -1,7 +1,7 @@
 import type {
   PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult, ModerateAction,
 } from './provider';
-import { BudgetExhausted, CallBudget, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
+import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
 
 /* ═══ Ayrshare ═══
@@ -99,6 +99,33 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   }
   if (status === 'success' || status === 'scheduled') return { state: 'published' };
   return null;
+}
+
+/* ═══ حدُّ حجم الصورة لكل منصة ═══
+
+   Ayrshare لا يُعلن حدود المنصات في واجهته كما يُعلنها SocialAPI، فتُكتب هنا
+   من صفحات «Media Guidelines» في توثيقه (https://www.ayrshare.com/docs/media-guidelines).
+   وكانت الصورة الكبيرة تُرفع وتُرسل ثم تُرفض بعد الموعد: إنستغرام بـ «Media file
+   too large»، وإكس بـ «Error accessing the media» الذي لا يدلّ على السبب.
+   والمقاطع لا حدّ لها هنا: أصغر حدودها فوق حدّ الرفع عندنا (١٠٠ ميغابايت). */
+const MB = 1048576;
+const AYRSHARE_IMAGE_MAX: Record<string, number> = {
+  twitter: 5 * MB,
+  linkedin: 5 * MB,
+  instagram: 8 * MB,
+  threads: 8 * MB,
+  facebook: 10 * MB,
+  tiktok: 20 * MB,
+};
+
+/** ما سترفضه المنصة من حجم الصور — بنصّ الفحص المسبق نفسه في SocialAPI. */
+export function ayrshareMediaIssues(input: PublishInput): string[] {
+  const issues: string[] = [];
+  for (const p of new Set(input.platforms.map(ayrsharePlatform))) {
+    const max = AYRSHARE_IMAGE_MAX[p];
+    if (max) issues.push(...constraintIssues({ media: { max_image_size_bytes: max } }, { ...input, text: '' }));
+  }
+  return [...new Set(issues)];
 }
 
 /** امتداد الملف ونوعه كما يقبلهما `GET /media/uploadUrl`. */
@@ -310,6 +337,10 @@ export class AyrshareProvider implements PublishingProvider {
     return accessUrl;
   }
 
+  async preflight(input: PublishInput): Promise<string[]> {
+    return ayrshareMediaIssues(input);
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     const platforms = [...new Set(input.platforms.map(ayrsharePlatform))];
     if (platforms.includes('twitter') && !(this.x.key && this.x.secret)) {
@@ -317,6 +348,10 @@ export class AyrshareProvider implements PublishingProvider {
         `النشر على ${platformNames(['x'], this.labels)} عبر Ayrshare يشترط مفتاحَي تطبيق المطوّر. اضبط AYRSHARE_X_API_KEY وAYRSHARE_X_API_SECRET ثم أعد النشر`,
       );
     }
+
+    // قبل الرفع: صورةٌ أكبر من حدّ المنصة تُرفض بعده بنصٍّ إنجليزي
+    const tooLarge = ayrshareMediaIssues(input);
+    if (tooLarge.length) throw new Error(tooLarge.join(' · '));
 
     const body: Record<string, unknown> = { post: input.text || '', platforms };
     const media = input.media || [];

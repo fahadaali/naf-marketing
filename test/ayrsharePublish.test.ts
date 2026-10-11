@@ -16,7 +16,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () => {}) }));
 
 import { runDuePublishes, reconcilePublishing } from '../src/services/publish';
-import { ayrsharePlatform, ayrshareOutcome } from '../src/adapters/ayrshare';
+import { ayrsharePlatform, ayrshareOutcome, ayrshareMediaIssues } from '../src/adapters/ayrshare';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -193,6 +193,39 @@ describe('النشر عبر Ayrshare', () => {
     expect(r.failed).toBe(1);
     expect(row(db, 'sch_p3_x').error).toMatch(/AYRSHARE_X_API_KEY/);
     expect(calls).toEqual([]);
+  });
+
+  it('صورةٌ أكبر من حدّ المنصة تُرفض قبل رفعها بسببٍ عربيّ', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('img_1', 'k/img_1', 'image/png', 'cover.png')").run();
+    const bytes = new Uint8Array(9 * 1048576);
+    env.MEDIA.head = async () => ({ size: bytes.byteLength });
+    env.MEDIA.get = async () => ({ body: new Blob([bytes]).stream() });
+    post(db, 'p9', '<p>نص</p><img src="/api/media/img_1">', ['instagram', 'x', 'facebook']);
+    replies['POST /post'] = () => ({
+      body: { status: 'success', errors: [], postIds: [{ status: 'success', id: '1', platform: 'facebook' }], id: 'AYR_9' },
+    });
+    replies['GET /media/uploadUrl'] = () => ({
+      body: { accessUrl: 'https://media.ayrshare.com/x/cover.png', contentType: 'image/png', uploadUrl: STORAGE },
+    });
+    replies[`PUT ${STORAGE}`] = () => ({ body: {} });
+
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p9_instagram')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_p9_instagram').error).toMatch(/9\.0 ميغابايت.*8\.0 ميغابايت/);
+    expect(row(db, 'sch_p9_x').error).toMatch(/5\.0 ميغابايت/);
+    // حدّ فيسبوك ١٠ ميغابايت: تُرفع وتُنشر
+    expect(row(db, 'sch_p9_facebook')).toMatchObject({ status: 'published' });
+    expect(calls.filter((c) => c.key === 'GET /media/uploadUrl')).toHaveLength(1);
+    expect(calls.filter((c) => c.key === 'POST /post')).toHaveLength(1);
+  });
+
+  it('الفحص المسبق يقول حدّ كل منصة ولا يحكم بما لا يُعرف حدّه', () => {
+    const img = { filename: 'a.jpg', mimeType: 'image/jpeg', size: 6 * 1048576 };
+    expect(ayrshareMediaIssues({ platforms: ['x'], text: '', media: [img] } as any)).toHaveLength(1);
+    expect(ayrshareMediaIssues({ platforms: ['facebook'], text: '', media: [img] } as any)).toEqual([]);
+    expect(ayrshareMediaIssues({ platforms: ['google'], text: '', media: [img] } as any)).toEqual([]);
+    const clip = { filename: 'c.mp4', mimeType: 'video/mp4', size: 90 * 1048576 };
+    expect(ayrshareMediaIssues({ platforms: ['x'], text: '', media: [clip] } as any)).toEqual([]);
   });
 
   it('الرفض يُكتب بسبب المنصة من errors لا برمز الحالة', async () => {
