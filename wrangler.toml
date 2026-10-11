@@ -37,6 +37,10 @@ migrations_dir = "migrations"
 [browser]
 binding = "BROWSER"
 
+# ضغط الصورة الأكبر من حدّ المنصة عند النشر (src/adapters/ayrshare.ts — fitImage)
+[images]
+binding = "IMAGES"
+
 # تخزين الوسائط R2
 [[r2_buckets]]
 binding = "MEDIA"

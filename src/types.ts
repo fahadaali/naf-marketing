@@ -6,6 +6,9 @@ export type Env = {
      Workers مدفوعة، والمنصة تعمل بدونه وتعرض «نسخة للطباعة» بدلاً
      منه. الشيفرة تفحصه ولا تفترضه. */
   BROWSER?: Fetcher;
+  /* Cloudflare Images — لضغط الصورة الأكبر من حدّ المنصة عند النشر عبر
+     Ayrshare. اختياريّ: بدونه تُرفض الصورة الكبيرة بسببٍ عربيّ كما كانت. */
+  IMAGES?: ImagesBinding;
   // الدخول الموحّد (naf-auth): جلسات وكاش مفاتيح وحالة عابرة
   AUTH_KV?: KVNamespace;
   // vars
