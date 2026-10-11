@@ -36,6 +36,7 @@ import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
+import { splitProviderReason } from '../providerReason';
 import { PlanFields, usePlanOptions } from '../components/PlanItemModal';
 import { EMPTY_PLAN, planFromPost, planPayload, riyadhToday, type PlanDraft } from '../planning';
 
@@ -545,9 +546,16 @@ export default function Editor() {
                       )}
                     </div>
                     {/* سبب الفشل كما ردّه المزوّد أو المنصة، وما سترفضه المنصة إن فُحص عند الجدولة */}
-                    {['failed', 'pending'].includes(s.status) && s.error && (
-                      <p className="err" style={{ fontSize: 'var(--text-xs)', margin: 0 }}><bdi>{s.error}</bdi></p>
-                    )}
+                    {['failed', 'pending'].includes(s.status) && s.error && (() => {
+                      // رسالة المزوّد الإنجليزية في سطرها باتجاهها، لا ملفوفةً في الفقرة العربية
+                      const { ar, ltr } = splitProviderReason(s.error);
+                      return (
+                        <div className="err" style={{ fontSize: 'var(--text-xs)' }}>
+                          <bdi>{ltr ? `${ar}:` : ar}</bdi>
+                          {ltr && <div dir="ltr">{ltr}</div>}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
