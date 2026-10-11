@@ -5,6 +5,11 @@ import { newId } from '../util';
 import { generateFromMedia } from '../services/claude';
 import { generateImageAsset, startVideoJob, pollVideoJob } from '../services/mediaGen';
 import { MAX_MEDIA_BYTES } from '../util';
+import {
+  IMAGE_SPECS, VIDEO_SPECS, FACEBOOK_REEL_MS, YOUTUBE_SHORT_MAX_MS, ADAPTABLE,
+  adaptImage, frameImage, imageDims,
+} from '../services/mediaSpecs';
+import type { PublishMedia } from '../adapters/provider';
 
 export const mediaRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -128,12 +133,77 @@ mediaRoutes.patch('/:id/meta', requirePermission('media.upload'), async (c) => {
   return c.json({ ok: true });
 });
 
+// مواصفات المنصات — تقرؤها المعاينة في المحرر لتعرف ما سيُكيَّف قبل الحفظ.
+// المصدر واحد (`services/mediaSpecs.ts`)، والواجهة لا تحمل نسخةً منه.
+mediaRoutes.get('/specs', (c) =>
+  c.json({ image: IMAGE_SPECS, video: VIDEO_SPECS, facebook_reel_ms: FACEBOOK_REEL_MS, youtube_short_max_ms: YOUTUBE_SHORT_MAX_MS }),
+);
+
 mediaRoutes.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT m.*, u.name AS uploader_name FROM media_assets m
      LEFT JOIN users u ON u.id = m.uploaded_by ORDER BY m.created_at DESC LIMIT 200`,
   ).all();
   return c.json({ media: results });
+});
+
+/* ═══ الصورة كما ستصل المنصة ═══
+
+   `?platform=snapchat` يردّ الصورة بعد تكييفها لتلك المنصة — الدالة نفسها
+   التي تعمل عند النشر، فالمعاينة هي ما يُرسل حرفياً لا تقليدٌ له في CSS.
+   و`?frame=portrait` يردّ إطار ‎1080×1920‎ أيّاً كانت نسبتها: منه يصنع
+   المتصفح مقطع تيك توك من الصورة الواحدة.
+
+   والوسيط لا يتغيّر بعد رفعه (يُستبدل بغيره ولا يُعدَّل)، فتُخزَّن النتيجة
+   في ذاكرة الحافة بمعرّفه، ويُرفع رقم النسخة إن تغيّر التكييف نفسه. */
+const ADAPT_VERSION = 'v1';
+const PORTRAIT: [number, number] = [1080, 1920];
+
+mediaRoutes.get('/:id/adapted', async (c) => {
+  const id = c.req.param('id');
+  const platform = c.req.query('platform') || '';
+  const portrait = c.req.query('frame') === 'portrait';
+  if (!portrait && !IMAGE_SPECS[platform]) return c.json({ error: 'منصةٌ لا تُكيَّف لها الصور' }, 400);
+  if (!c.env.IMAGES) return c.json({ error: 'تكييف الصور غير متاح: ربط IMAGES غير مضبوط' }, 501);
+
+  const asset = await c.env.DB.prepare(
+    'SELECT r2_key, mime_type, filename, width, height FROM media_assets WHERE id = ?',
+  )
+    .bind(id)
+    .first<{ r2_key: string; mime_type: string | null; filename: string | null; width: number | null; height: number | null }>();
+  if (!asset) return c.json({ error: 'غير موجود' }, 404);
+  if (!ADAPTABLE.has((asset.mime_type || '').toLowerCase())) return c.json({ error: 'هذا الوسيط ليس صورةً تُكيَّف' }, 400);
+
+  const cache = typeof caches !== 'undefined' ? (caches as unknown as { default: Cache }).default : null;
+  const key = new Request(`https://media-adapted.invalid/${ADAPT_VERSION}/${id}/${portrait ? 'portrait' : platform}`);
+  const hit = await cache?.match(key);
+  const headers = { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' };
+  if (hit) return new Response(hit.body, { headers: { ...headers, 'content-type': hit.headers.get('content-type') || 'image/jpeg' } });
+
+  const m: PublishMedia = {
+    open: async () => (await c.env.MEDIA.get(asset.r2_key))?.body ?? null,
+    mimeType: asset.mime_type || 'image/jpeg',
+    filename: asset.filename || id,
+    width: asset.width,
+    height: asset.height,
+  };
+  try {
+    let out: PublishMedia;
+    if (portrait) {
+      const dims = await imageDims(c.env.IMAGES, m);
+      if (!dims) return c.json({ error: 'تعذّرت قراءة أبعاد الصورة' }, 422);
+      out = await frameImage(c.env.IMAGES, m, dims, PORTRAIT, 'portrait');
+    } else {
+      out = await adaptImage(c.env.IMAGES, platform, m);
+    }
+    // صورةٌ تقبلها المنصة كما هي تُردّ بأصلها
+    const bytes = out.data ?? (await new Response(await m.open!()).arrayBuffer());
+    const type = out.mimeType;
+    await cache?.put(key, new Response(bytes.slice(0), { headers: { 'content-type': type, 'cache-control': 'max-age=2592000' } }));
+    return new Response(bytes, { headers: { ...headers, 'content-type': type } });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
 });
 
 // تنزيل/عرض الوسيط من R2 — يدعم الاستعراض المباشر، التنزيل (?download=1)، وطلبات النطاق (تشغيل الفيديو/الصوت)

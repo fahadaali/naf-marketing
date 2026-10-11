@@ -3,6 +3,7 @@ import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds } from '../util';
 import { notifyPublishFailed } from './notify';
+import { adaptImage, videoIssues } from './mediaSpecs';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -42,8 +43,16 @@ export function missingRequirement(platform: string, text: string, media: Publis
   return null;
 }
 
-/** ما يُرسل للمزوّد لمنصةٍ واحدة — يُبنى هكذا عند النشر وعند الفحص المسبق. */
-async function prepareInput(env: Env, job: Job): Promise<PublishInput> {
+/** ما سترفضه المنصة من المقاطع — مدّةً أو حجماً (`mediaSpecs.ts`). */
+export function mediaIssues(platform: string, media: PublishMedia[]): string[] {
+  return media
+    .filter((m) => m.mimeType.startsWith('video/'))
+    .flatMap((m) => videoIssues(platform, m));
+}
+
+/** ما يُرسل للمزوّد لمنصةٍ واحدة — يُبنى هكذا عند النشر وعند الفحص المسبق.
+    والفحص المسبق لا يكيّف الصور (`adapt: false`): يكفيه أن يعرف ما سيُرسل. */
+async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}): Promise<PublishInput> {
   const variant = await env.DB.prepare(
     'SELECT body_override, media_asset_id, first_comment FROM post_variants WHERE post_id = ? AND platform = ?',
   )
@@ -56,7 +65,15 @@ async function prepareInput(env: Env, job: Job): Promise<PublishInput> {
 
   // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
   const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
-  const media = await loadMedia(env, assetIds);
+  let media = await loadMedia(env, assetIds);
+
+  /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها
+     (`adaptImage`). وبلا ربط `IMAGES` تُرسل كما هي، كما كانت. */
+  if (opts.adapt && env.IMAGES) {
+    const adapted: PublishMedia[] = [];
+    for (const m of media) adapted.push(await adaptImage(env.IMAGES, job.platform, m));
+    media = adapted;
+  }
 
   return {
     platforms: [job.platform],
@@ -109,9 +126,11 @@ async function publishJobs(
     try {
       if (!provider) throw new Error(providerError);
 
-      const input = await prepareInput(env, job);
+      const input = await prepareInput(env, job, { adapt: true });
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
+      const issues = mediaIssues(job.platform, input.media || []);
+      if (issues.length) throw new Error(issues.join(' · '));
 
       const result = await provider.publish(input);
 
@@ -152,10 +171,13 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
   const out: PublishMedia[] = [];
   for (const id of assetIds.slice(0, 4)) {
     const asset = await env.DB.prepare(
-      'SELECT r2_key, mime_type, filename FROM media_assets WHERE id = ?',
+      'SELECT r2_key, mime_type, filename, width, height, duration_ms FROM media_assets WHERE id = ?',
     )
       .bind(id)
-      .first<{ r2_key: string; mime_type: string | null; filename: string | null }>();
+      .first<{
+        r2_key: string; mime_type: string | null; filename: string | null;
+        width: number | null; height: number | null; duration_ms: number | null;
+      }>();
     const head = asset ? await env.MEDIA.head(asset.r2_key) : null;
     if (!asset || !head) {
       throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
@@ -166,6 +188,9 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
       size: head.size,
       mimeType: asset.mime_type || 'application/octet-stream',
       filename: asset.filename || asset.r2_key.split('/').pop() || 'media',
+      width: asset.width,
+      height: asset.height,
+      duration_ms: asset.duration_ms,
     });
   }
   return out;
@@ -366,6 +391,7 @@ export async function preflightSchedules(
       const input = await prepareInput(env, { id: '', post_id: postId, platform, body: post.body, title: post.title });
       const missing = missingRequirement(platform, input.text, input.media || []);
       if (missing) issues.push(missing);
+      issues.push(...mediaIssues(platform, input.media || []));
       if (provider.preflight) issues.push(...(await provider.preflight(input)));
     } catch (err: any) {
       issues.push(String(err?.message || err));

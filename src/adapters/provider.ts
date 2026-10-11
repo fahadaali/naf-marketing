@@ -17,6 +17,10 @@ export interface PublishMedia {
   mimeType: string;
   filename: string;
   url?: string; // رابط عام إن توفّر (لمزوّدين يقبلون الروابط مثل Buffer)
+  /** أبعاد الوسيط ومدّة المقطع كما حُفظت عند الرفع — الغائب لا يُعرف. */
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
 }
 
 export interface PublishInput {

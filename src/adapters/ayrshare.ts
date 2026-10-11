@@ -116,6 +116,7 @@ const AYRSHARE_IMAGE_MAX: Record<string, number> = {
   threads: 8 * MB,
   facebook: 10 * MB,
   tiktok: 20 * MB,
+  snapchat: 20 * MB,
 };
 
 /** أصغر حدٍّ لحجم الصورة بين منصات المنشور — `null` إن لم يُعرف لأيٍّ منها حدّ. */
