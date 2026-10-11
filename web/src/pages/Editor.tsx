@@ -36,6 +36,7 @@ import { MediaViewer } from '../components/MediaViewer';
 import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
 import { uploadMedia } from '../mediaUpload';
 import PlatformVariants, { type VariantRow } from '../components/PlatformVariants';
+import { ensureTikTokVideo } from '../tiktokVideo';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
@@ -233,6 +234,9 @@ export default function Editor() {
     if (!postId) return;
     setConfirming(null);
     setErr(''); setMsg('');
+    // تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل النشر (`tiktokVideo.ts`)
+    const tiktokDue = schedules.some((s) => s.platform === 'tiktok' && ['pending', 'failed'].includes(s.status));
+    const tiktokErr = tiktokDue ? await prepareTikTok(postId, setMsg) : '';
     try {
       const d = await api.post('/schedules/publish-now', { post_id: postId });
       // الحالة من الخادم لا من الضغط: منشورٌ رُفض على كل منصاته لم يُنشر
@@ -245,7 +249,8 @@ export default function Editor() {
       if (d.failed > 0) {
         setErr(
           (d.errors || [])
-            .map((e: { platform: string; error: string }) => `${platformLabel(e.platform, platLabels)}: ${e.error}`)
+            .map((e: { platform: string; error: string }) =>
+              `${platformLabel(e.platform, platLabels)}: ${e.platform === 'tiktok' && tiktokErr ? tiktokErr : e.error}`)
             .join(' · '),
         );
       }
@@ -1193,6 +1198,19 @@ function RejectModal({ onClose, onReject }: { onClose: () => void; onReject: (re
 
 type ScheduleIssue = { platform: string; error: string };
 
+/** يجهّز مقطع تيك توك إن احتاجه — ويردّ سبب التعذّر نصّاً، أو '' إن لم يتعذّر. */
+async function prepareTikTok(postId: string, progress: (m: string) => void): Promise<string> {
+  try {
+    progress('جارٍ تجهيز مقطع تيك توك…');
+    await ensureTikTokVideo(postId);
+    return '';
+  } catch (e: any) {
+    return String(e?.message || e);
+  } finally {
+    progress('');
+  }
+}
+
 /* تبدأ بمنصات الخطة ويومها المستهدف إن لم يمضِ — والوقت يُدخل يدوياً: اليوم
    المستهدف يومٌ لا ساعة، وساعةٌ مقترحة تُجدول ما لم يقصده أحد. */
 function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initialDay = '', onClose, onDone }: {
@@ -1207,6 +1225,7 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
   const [selected, setSelected] = useState<string[]>(initialPlatforms);
   const [when, setWhen] = useState(initialDay ? `${initialDay}T` : '');
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
 
   function toggle(p: string) {
     setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
@@ -1220,9 +1239,14 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
       // ووقتٌ مُسح من حقله يترك «2026-10-04T» فيرمي التحويل «Invalid time value».
       if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) return setErr('هذا الحقل مطلوب');
       const iso = new Date(`${when}:00+03:00`).toISOString();
+      /* تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل الجدولة، فيمرّ فحصُها. وإن
+         تعذّر قيل سببه مكان سبب الفحص — هو الأصل وما بعده نتيجته. */
+      const tiktokErr = selected.includes('tiktok') ? await prepareTikTok(postId, setBusy) : '';
+      setBusy('');
       const d = await api.post<{ issues?: ScheduleIssue[] }>('/schedules', { post_id: postId, platforms: selected, scheduled_at: iso });
-      onDone(d.issues || []);
+      onDone((d.issues || []).map((i) => (i.platform === 'tiktok' && tiktokErr ? { ...i, error: tiktokErr } : i)));
     } catch (e: any) {
+      setBusy('');
       setErr(e.message);
     }
   }
@@ -1244,7 +1268,8 @@ function ScheduleModal({ postId, platforms, labels, initialPlatforms = [], initi
         <DateTimePicker value={when} onChange={setWhen} inline />
       </div>
       {err && <p className="err">{err}</p>}
-      <button className="btn gold" disabled={!selected.length || !when} onClick={submit}>تأكيد الجدولة</button>
+      {busy && <p className="muted" role="status">{busy}</p>}
+      <button className="btn gold" disabled={!selected.length || !when || !!busy} onClick={submit}>تأكيد الجدولة</button>
     </Modal>
   );
 }
