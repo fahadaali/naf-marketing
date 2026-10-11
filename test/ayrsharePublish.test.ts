@@ -219,6 +219,47 @@ describe('النشر عبر Ayrshare', () => {
     expect(calls.filter((c) => c.key === 'POST /post')).toHaveLength(1);
   });
 
+  it('مع ربط Images تُضغط الصورة لمنصةٍ تجاوزت حدّها، والأصل يُرسل لمن يقبله', async () => {
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('img_2', 'k/img_2', 'image/png', 'cover.png')").run();
+    const bytes = new Uint8Array(9 * 1048576);
+    env.MEDIA.head = async () => ({ size: bytes.byteLength });
+    env.MEDIA.get = async () => ({ body: new Blob([bytes]).stream() });
+    env.IMAGES = {
+      info: async () => ({ format: 'image/png', fileSize: bytes.byteLength, width: 4000, height: 3000 }),
+      input: () => {
+        const t: any = {
+          transform: () => t,
+          // حجم JPEG يتبع الجودة: ٩٠ ألف بايت لكل درجة
+          output: async (o: { quality: number }) => ({ image: () => new Blob([new Uint8Array(o.quality * 90_000)]).stream() }),
+        };
+        return t;
+      },
+    };
+    post(db, 'p10', '<p>نص</p><img src="/api/media/img_2">', ['instagram', 'facebook']);
+    replies['GET /media/uploadUrl'] = (url) => ({
+      body: { accessUrl: `https://media.ayrshare.com/x/${url.searchParams.get('fileName')}`, uploadUrl: STORAGE },
+    });
+    replies[`PUT ${STORAGE}`] = () => ({ body: {} });
+    replies['POST /post'] = () => ({
+      body: { status: 'success', errors: [], postIds: [{ status: 'success', id: '1', platform: 'x' }], id: 'AYR_10' },
+    });
+
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p10_instagram')).toMatchObject({ status: 'published', error: null });
+    expect(row(db, 'sch_p10_facebook')).toMatchObject({ status: 'published' });
+
+    const asks = calls.filter((c) => c.key === 'GET /media/uploadUrl');
+    const puts = calls.filter((c) => c.key === `PUT ${STORAGE}`);
+    // إنستغرام (حدّه ٨): نسخة JPEG تحت الحدّ. فيسبوك (حدّه ١٠): الأصل كما هو
+    const igPut = puts.find((c) => c.headers['content-type'] === 'image/jpeg')!;
+    expect(igPut.body.length).toBeLessThanOrEqual(8 * 1048576);
+    expect(igPut.body.length).toBe(93 * 90_000);
+    expect(puts.find((c) => c.headers['content-type'] === 'image/png')!.body.length).toBe(bytes.byteLength);
+    expect(asks.map((c) => c.key)).toHaveLength(2);
+    const sent = calls.filter((c) => c.key === 'POST /post').map((c) => c.body.mediaUrls[0]);
+    expect(sent).toEqual(expect.arrayContaining(['https://media.ayrshare.com/x/cover.jpg', 'https://media.ayrshare.com/x/cover.png']));
+  });
+
   it('الفحص المسبق يقول حدّ كل منصة ولا يحكم بما لا يُعرف حدّه', () => {
     const img = { filename: 'a.jpg', mimeType: 'image/jpeg', size: 6 * 1048576 };
     expect(ayrshareMediaIssues({ platforms: ['x'], text: '', media: [img] } as any)).toHaveLength(1);

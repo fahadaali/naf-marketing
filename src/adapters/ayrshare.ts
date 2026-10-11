@@ -118,14 +118,85 @@ const AYRSHARE_IMAGE_MAX: Record<string, number> = {
   tiktok: 20 * MB,
 };
 
-/** ما سترفضه المنصة من حجم الصور — بنصّ الفحص المسبق نفسه في SocialAPI. */
-export function ayrshareMediaIssues(input: PublishInput): string[] {
-  const issues: string[] = [];
-  for (const p of new Set(input.platforms.map(ayrsharePlatform))) {
-    const max = AYRSHARE_IMAGE_MAX[p];
-    if (max) issues.push(...constraintIssues({ media: { max_image_size_bytes: max } }, { ...input, text: '' }));
+/** أصغر حدٍّ لحجم الصورة بين منصات المنشور — `null` إن لم يُعرف لأيٍّ منها حدّ. */
+export function ayrshareImageLimit(platforms: string[]): number | null {
+  const limits = platforms.map((p) => AYRSHARE_IMAGE_MAX[ayrsharePlatform(p)]).filter((n): n is number => !!n);
+  return limits.length ? Math.min(...limits) : null;
+}
+
+/** صيغٌ يضغطها `IMAGES` إلى JPEG. والمتحرّكة (GIF) تفقد حركتها، فلا تُضغط. */
+const COMPRESSIBLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+
+/** ما سترفضه المنصة من حجم الصور — بنصّ الفحص المسبق نفسه في SocialAPI.
+    ومع الضغط (`canCompress`) لا يُعدّ إلا ما لا يُضغط. */
+export function ayrshareMediaIssues(input: PublishInput, canCompress = false): string[] {
+  const max = ayrshareImageLimit(input.platforms);
+  if (!max) return [];
+  const media = (input.media || []).filter((m) => !(canCompress && COMPRESSIBLE.has(m.mimeType)));
+  return constraintIssues({ media: { max_image_size_bytes: max } }, { ...input, text: '', media });
+}
+
+/* ═══ ضغطُ الصورة إلى حدّ المنصة ═══
+
+   الصورة الأكبر من حدّ المنصة تُضغط عند النشر لا تُرفض — كما يفعل تطبيق إكس
+   على الجهاز قبل الرفع. والأصل في المكتبة لا يُمسّ؛ تُصنع نسخةٌ تُرسل وحدها.
+
+   والضغط لأجل التجاوز فقط، ولا ينزل عن الحدّ كثيراً: يُبحث عن أعلى جودة
+   JPEG يقع حجمها تحت الحدّ (بحثاً ثنائياً بين ٧٥ و٩٥). فإن لم تكفِ ٧٥ صُغّرت
+   الأبعاد بقدر ما يلزم ثم بُحث من جديد — والجودة أولى بالبقاء من البكسلات
+   الزائدة، فالمنصات تصغّر الأبعاد عند العرض على كل حال. */
+const QUALITY_MIN = 75;
+const QUALITY_MAX = 95;
+
+export async function fitImage(images: ImagesBinding, m: PublishMedia, max: number): Promise<PublishMedia> {
+  const read = async (): Promise<ReadableStream<Uint8Array>> => {
+    const s = m.data ? new Blob([m.data]).stream() : await m.open?.();
+    if (!s) throw new Error('وسيطٌ في المحتوى لم يعد موجوداً في المكتبة. احذفه من المحتوى أو أعد رفعه ثم أعد النشر');
+    return s;
+  };
+  const encode = async (quality: number, width?: number): Promise<ArrayBuffer> => {
+    try {
+      let t = images.input(await read());
+      if (width) t = t.transform({ width, fit: 'scale-down' });
+      // الشفافية في PNG تُسطَّح على أبيض — لونُ الصورة المُرسلة لا لونٌ في الواجهة
+      const out = await t.output({ format: 'image/jpeg', quality, background: 'white' });
+      return await new Response(out.image()).arrayBuffer();
+    } catch (err) {
+      throw new Error(`تعذّر ضغط الصورة «${m.filename}» إلى حدّ هذه المنصة: ${String((err as Error)?.message || err)}`);
+    }
+  };
+
+  let width: number | undefined;
+  for (let pass = 0; pass < 4; pass++) {
+    let lo = QUALITY_MIN;
+    let hi = QUALITY_MAX;
+    let best: ArrayBuffer | null = null;
+    let smallest = 0;
+    while (lo <= hi) {
+      const q = Math.ceil((lo + hi) / 2);
+      const buf = await encode(q, width);
+      if (buf.byteLength <= max) {
+        best = buf;
+        lo = q + 1;
+      } else {
+        smallest = smallest ? Math.min(smallest, buf.byteLength) : buf.byteLength;
+        hi = q - 1;
+      }
+    }
+    if (best) {
+      return {
+        data: best,
+        size: best.byteLength,
+        mimeType: 'image/jpeg',
+        filename: `${(m.filename || 'media').replace(/\.[a-z0-9]{2,5}$/i, '')}.jpg`,
+      };
+    }
+    // أدنى جودةٍ لم تكفِ: تُصغّر الأبعاد بنسبة الحجم الزائد (والمساحة تتبع مربّع العرض)
+    if (!width) width = (await images.info(await read()) as { width?: number }).width;
+    if (!width) break;
+    width = Math.floor(width * Math.sqrt(max / smallest) * 0.97);
   }
-  return [...new Set(issues)];
+  throw new Error(`تعذّر ضغط الصورة «${m.filename}» تحت حدّ هذه المنصة. صغّرها ثم ضعها مكان القديمة وأعد النشر`);
 }
 
 /** امتداد الملف ونوعه كما يقبلهما `GET /media/uploadUrl`. */
@@ -284,8 +355,14 @@ export async function listAyrshareWebhooks(auth: AyrshareAuth): Promise<{ event:
 export class AyrshareProvider implements PublishingProvider {
   private key: string;
 
-  // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها
-  constructor(apiKey: string, private x: AyrshareXKeys = {}, private labels: Record<string, string> = {}) {
+  // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها. و`images` ربط
+  // Cloudflare Images لضغط الصورة الكبيرة؛ وبدونه تُرفض كما كانت.
+  constructor(
+    apiKey: string,
+    private x: AyrshareXKeys = {},
+    private labels: Record<string, string> = {},
+    private images?: ImagesBinding,
+  ) {
     this.key = (apiKey || '').trim();
   }
 
@@ -338,7 +415,7 @@ export class AyrshareProvider implements PublishingProvider {
   }
 
   async preflight(input: PublishInput): Promise<string[]> {
-    return ayrshareMediaIssues(input);
+    return ayrshareMediaIssues(input, !!this.images);
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
@@ -349,12 +426,18 @@ export class AyrshareProvider implements PublishingProvider {
       );
     }
 
-    // قبل الرفع: صورةٌ أكبر من حدّ المنصة تُرفض بعده بنصٍّ إنجليزي
-    const tooLarge = ayrshareMediaIssues(input);
+    // قبل الرفع: ما لا يُضغط ويتجاوز حدّ المنصة يُرفض بعده بنصٍّ إنجليزي
+    const tooLarge = ayrshareMediaIssues(input, !!this.images);
     if (tooLarge.length) throw new Error(tooLarge.join(' · '));
 
     const body: Record<string, unknown> = { post: input.text || '', platforms };
-    const media = input.media || [];
+    const max = ayrshareImageLimit(input.platforms);
+    const media: PublishMedia[] = [];
+    for (const m of input.media || []) {
+      const size = m.data ? m.data.byteLength : m.size ?? 0;
+      const compress = this.images && max && COMPRESSIBLE.has(m.mimeType) && size > max;
+      media.push(compress ? await fitImage(this.images!, m, max!) : m);
+    }
     if (media.length) {
       const urls: string[] = [];
       for (const m of media) urls.push(await this.uploadMedia(m));
