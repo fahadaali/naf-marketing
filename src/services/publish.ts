@@ -3,7 +3,7 @@ import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds } from '../util';
 import { notifyPublishFailed } from './notify';
-import { adaptImage, videoIssues } from './mediaSpecs';
+import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -94,7 +94,37 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
     title: job.title || undefined,
     media,
     firstComment: variant?.first_comment || undefined,
+    cover: opts.adapt ? await loadCover(env, job.post_id, media) : undefined,
   };
+}
+
+/* ═══ غلاف المقطع ═══
+
+   صورةٌ يختارها الفريق للمقطع (`video_cover_id`)، تظهر قبل التشغيل حيث
+   تقبلها المنصة. وتُوضع في إطارٍ بأبعاد المقطع نفسه — لينكدإن يشترطها،
+   وفي غيره لا يُقصّ الغلاف عند العرض. ولا غلاف إلا لمقطعٍ واحد. */
+const COVER_MAX_SIDE = 1920;
+
+async function loadCover(env: Env, postId: string, media: PublishMedia[]): Promise<PublishMedia | undefined> {
+  const video = media.length === 1 && media[0].mimeType.startsWith('video/') ? media[0] : null;
+  if (!video) return undefined;
+  const row = await env.DB.prepare('SELECT video_cover_id FROM content_posts WHERE id = ?')
+    .bind(postId)
+    .first<{ video_cover_id: string | null }>();
+  if (!row?.video_cover_id) return undefined;
+  // غلافٌ حُذف من المكتبة لا يمنع نشر المقطع — يُنشر بلا غلاف
+  const [cover] = await loadMedia(env, [row.video_cover_id]).catch(() => [] as PublishMedia[]);
+  if (!cover || !cover.mimeType.startsWith('image/')) return undefined;
+  if (!env.IMAGES || !video.width || !video.height) return cover;
+  const scale = Math.min(1, COVER_MAX_SIDE / Math.max(video.width, video.height));
+  const frame: [number, number] = [Math.round(video.width * scale), Math.round(video.height * scale)];
+  const dims = await imageDims(env.IMAGES, cover);
+  if (!dims) return cover;
+  return frameImage(env.IMAGES, cover, dims, frame, 'cover');
+}
+
+function extraIds(ids?: string[]): string | null {
+  return ids?.length ? JSON.stringify(ids) : null;
 }
 
 async function failJob(env: Env, job: Job, errMsg: string): Promise<void> {
@@ -150,16 +180,17 @@ async function publishJobs(
       if (result.state === 'pending') {
         /* قبله المزوّد ولم يؤكّد نشره: يبقى «قيد النشر» ومعه معرّفه، ويُسأل
            عنه في الدورات التالية حتى يُنشر أو يُرفض. */
-        await env.DB.prepare('UPDATE schedules SET provider_post_id = ? WHERE id = ?')
-          .bind(result.providerPostId, job.id)
+        await env.DB.prepare('UPDATE schedules SET provider_post_id = ?, extra_provider_ids = ? WHERE id = ?')
+          .bind(result.providerPostId, extraIds(result.extraIds), job.id)
           .run();
         pending++;
         continue;
       }
+      // `note`: نشرةٌ من نشرات الموعد لم تُنشر وغيرها نُشر (سناب) — يُكتب تحته
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = NULL WHERE id = ?",
+        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?, extra_provider_ids = ? WHERE id = ?",
       )
-        .bind(result.providerPostId, nowIso(), job.id)
+        .bind(result.providerPostId, nowIso(), result.note || null, extraIds(result.extraIds), job.id)
         .run();
       published++;
     } catch (err: any) {

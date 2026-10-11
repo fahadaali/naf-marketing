@@ -37,6 +37,12 @@ export function mediaEmbedHtml(m: { id: string; url?: string; filename?: string;
   if (kind === 'image') {
     return `<div class="media-embed media-img" contenteditable="false" ${data}><img class="media-thumb" src="${url}" alt="${esc(name)}" loading="lazy"/><div class="media-cap">${esc(name)}</div></div>`;
   }
+  /* المقطع مشغّلٌ بعرض المحتوى، لا بطاقة ملفٍ صغيرة — يُشاهَد في مكانه.
+     والاسم تحته في `.media-cap` كما في الصورة: به يحذفه `htmlToText` من نصّ
+     المنشور، وبالسمات `data-media-*` يقرؤه الخادم وبيسكامب كما كانا. */
+  if (kind === 'video') {
+    return `<div class="media-embed media-video" contenteditable="false" ${data}><video class="media-player" src="${url}" controls preload="metadata" playsinline></video><div class="media-cap">${esc(name)}</div></div>`;
+  }
   return (
     `<div class="media-embed media-card k-${kind}" contenteditable="false" ${data}>` +
     `<span class="media-ic">${esc(badge(kind, name))}</span>` +
@@ -47,6 +53,8 @@ export function mediaEmbedHtml(m: { id: string; url?: string; filename?: string;
 
 // قراءة معلومات الوسيط من عنصر تم النقر عليه (أو أحد أجداده)
 export function mediaFromEl(target: EventTarget | null): MediaInfo | null {
+  // الضغط على المشغّل تشغيلٌ في مكانه، لا فتحٌ لنافذة الاستعراض
+  if (target instanceof Element && target.closest('video')) return null;
   const el = target instanceof Element ? target.closest('.media-embed') : null;
   if (!el) return null;
   const d = (el as HTMLElement).dataset;
@@ -58,4 +66,19 @@ export function mediaFromEl(target: EventTarget | null): MediaInfo | null {
     mime: d.mediaMime || '',
     kind: (d.mediaKind as MediaKind) || 'file',
   };
+}
+
+/* بطاقات المقاطع القديمة (`media-card k-video`) تصير مشغّلاً حين يُفتح
+   المحتوى في المحرر، ويُحفظ الشكل الجديد مع أوّل حفظ. وما سواها لا يُمسّ. */
+export function upgradeVideoEmbeds(html: string): string {
+  if (!html || !/\bk-video\b/.test(html) || typeof DOMParser === 'undefined') return html;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+  const cards = doc.querySelectorAll<HTMLElement>('.media-embed.media-card.k-video');
+  if (!cards.length) return html;
+  cards.forEach((el) => {
+    const d = el.dataset;
+    if (!d.mediaId) return;
+    el.outerHTML = mediaEmbedHtml({ id: d.mediaId, url: d.mediaUrl, filename: d.mediaName, mime_type: d.mediaMime || 'video/mp4' });
+  });
+  return doc.body.innerHTML;
 }

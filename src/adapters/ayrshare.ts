@@ -3,6 +3,7 @@ import type {
 } from './provider';
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
+import { facebookReel, youtubeShort } from '../services/mediaSpecs';
 
 /* ═══ Ayrshare ═══
 
@@ -446,17 +447,74 @@ export class AyrshareProvider implements PublishingProvider {
       if (media.some((m) => m.mimeType.startsWith('video/'))) body.isVideo = true;
     }
     if (input.firstComment?.trim()) body.firstComment = { comment: input.firstComment.trim() };
+
+    /* ═══ المقطع بارزاً ═══
+       المقطع الواحد يُنشر بصيغة المنصة الكبيرة: ريلز إنستغرام في الخلاصة
+       والريلز معاً، وريلز فيسبوك للطوليّ بين ٣ و٩٠ ثانية، وشورتس يوتيوب
+       للطوليّ حتى ثلاث دقائق. وما لا يُعرف من أبعاده ومدّته يُنشر كما كان.
+       والغلاف `thumbNail` حيث يُقبل — وشورتس لا يقبله. */
+    const video = media.length === 1 && media[0].mimeType.startsWith('video/') ? media[0] : null;
+    const short = !!video && platforms.includes('youtube') && youtubeShort(video);
+    const thumb = video && input.cover ? await this.coverUrl(input.cover, platforms.includes('youtube') ? 2 * MB : 8 * MB) : '';
+    const withThumb = (o: Record<string, unknown> = {}) => (thumb ? { ...o, thumbNail: thumb } : o);
     /* يوتيوب يشترط العنوان، ويرفع المقطع «خاصّاً» إن لم يُقل غيره. وتيك توك
        كذلك يُضبط عامّاً: منشورات حساب الشركة للجمهور، والتعليق الأول لا
        يُنشر على مقطعٍ غير عامّ. */
     if (platforms.includes('youtube')) {
-      body.youTubeOptions = { title: youtubeTitle(input.title, input.text), visibility: 'public' };
+      const yt = { title: youtubeTitle(input.title, input.text), visibility: 'public' };
+      body.youTubeOptions = short ? { ...yt, shorts: true } : withThumb(yt);
     }
-    if (platforms.includes('tiktok')) body.tikTokOptions = { visibility: 'public' };
+    if (platforms.includes('tiktok')) body.tikTokOptions = withThumb({ visibility: 'public' });
+    if (video && platforms.includes('instagram')) body.instagramOptions = withThumb({ shareReelsFeed: true });
+    if (video && platforms.includes('facebook') && facebookReel(video)) body.faceBookOptions = { reels: true };
+    if (thumb && platforms.includes('linkedin')) body.linkedInOptions = { thumbNail: thumb };
+    if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
-    /* الرفض يأتي ٤٠٠ ومعه `errors` بسبب كل منصة — فيُقرأ السبب منها لا من
-       رمز الحالة. */
+    if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video);
+    return this.send(body);
+  }
+
+  /* ═══ سناب: أكثر من نشرةٍ للموعد الواحد ═══
+
+     القصة تختفي بعد يوم، فيُنشر المقطع سبوتلايت وقصةً محفوظة وقصة، والصورة
+     قصةً محفوظة وقصة — كلٌّ في طلبٍ مستقل (`snapChatOptions`)، بالوسيط
+     المرفوع نفسه. والموعد منشورٌ إن نجح أحدها، وما فشل يُكتب تحته بنوعه. */
+  private async publishSnapchat(base: Record<string, unknown>, video: boolean): Promise<PublishResult> {
+    const kinds: { label: string; options?: Record<string, boolean> }[] = [
+      ...(video ? [{ label: 'سبوتلايت', options: { spotlight: true } }] : []),
+      { label: 'القصة المحفوظة', options: { savedStory: true } },
+      { label: 'القصة' },
+    ];
+    const done: PublishResult[] = [];
+    const failed: string[] = [];
+    for (const k of kinds) {
+      try {
+        done.push(await this.send(k.options ? { ...base, snapChatOptions: k.options } : base));
+      } catch (err) {
+        failed.push(`${k.label}: ${String((err as Error)?.message || err)}`);
+      }
+    }
+    if (!done.length) throw new Error(failed.join(' · '));
+    const [first, ...rest] = done;
+    return {
+      ...first,
+      state: done.some((d) => d.state === 'published') ? 'published' : first.state,
+      extraIds: rest.map((d) => d.providerPostId).filter(Boolean),
+      ...(failed.length ? { note: `لم يُنشر على سناب: ${failed.join(' · ')}` } : {}),
+    };
+  }
+
+  /** رابط الغلاف بعد رفعه — مضغوطاً إلى حدّ المنصة إن تجاوزه. */
+  private async coverUrl(cover: PublishMedia, max: number): Promise<string> {
+    const size = cover.data ? cover.data.byteLength : cover.size ?? 0;
+    const fitted = this.images && COMPRESSIBLE.has(cover.mimeType) && size > max ? await fitImage(this.images, cover, max) : cover;
+    return this.uploadMedia(fitted);
+  }
+
+  /* الرفض يأتي ٤٠٠ ومعه `errors` بسبب كل منصة — فيُقرأ السبب منها لا من
+     رمز الحالة. */
+  private async send(body: Record<string, unknown>): Promise<PublishResult> {
     let data: any;
     try {
       data = await this.call('POST', '/post', body);

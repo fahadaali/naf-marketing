@@ -33,10 +33,11 @@ import ConfirmModal from '../components/ConfirmModal';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { DateTimePicker } from '../components/DatePicker';
 import { MediaViewer } from '../components/MediaViewer';
-import { mediaFromEl, mediaEmbedHtml, type MediaInfo } from '../mediaEmbed';
+import { mediaFromEl, mediaEmbedHtml, upgradeVideoEmbeds, type MediaInfo } from '../mediaEmbed';
 import { uploadMedia } from '../mediaUpload';
 import PlatformVariants, { type VariantRow } from '../components/PlatformVariants';
 import { ensureTikTokVideo } from '../tiktokVideo';
+import VideoCover from '../components/VideoCover';
 import { tonesFrom, DEFAULT_TONES, type Tone } from '../tones';
 import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
@@ -81,6 +82,7 @@ export default function Editor() {
   // نسخة كل منصة كما في الخادم — النص المخصّص وأول تعليق ووسيطها (`PlatformVariants`)
   const [variants, setVariants] = useState<VariantRow[]>([]);
   const [showVariants, setShowVariants] = useState(false);
+  const [coverId, setCoverId] = useState<string | null>(null); // غلاف المقطع (`VideoCover`)
   const [versions, setVersions] = useState<any[]>([]);
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [platLabels, setPlatLabels] = useState<Record<string, string>>({});
@@ -119,7 +121,8 @@ export default function Editor() {
   async function loadPost(pid: string) {
     const d = await api.get(`/posts/${pid}`);
     setTitle(d.post.title);
-    setBody(d.post.body);
+    // بطاقات المقاطع القديمة تصير مشغّلاً (`upgradeVideoEmbeds`)
+    setBody(upgradeVideoEmbeds(d.post.body));
     setSavedBody(d.post.body);
     setPlan(planFromPost(d.post));
     setAssigneeName(d.post.assignee_name || '');
@@ -138,6 +141,7 @@ export default function Editor() {
     setBasecampSynced(!!d.basecamp_synced);
     setSchedules(d.schedules);
     setVariants(d.variants || []);
+    setCoverId(d.post.video_cover_id || null);
     /* الصمت قرار: النسخ زيادةٌ على المحتوى، وفشلُ جلبها يخفي زرّ
        «سجل النسخ» ولا يمنع التحرير ولا الحفظ. */
     api.get(`/posts/${pid}/versions`).then((v) => setVersions(v.versions)).catch(() => {});
@@ -457,6 +461,11 @@ export default function Editor() {
             </div>
           </div>
 
+          {/* غلاف المقطع — يظهر حين يكون وسيط المحتوى مقطعاً واحداً */}
+          {postId && can('draft.edit') && (
+            <VideoCover postId={postId} body={body} coverId={coverId} onChange={setCoverId} onError={setErr} onMsg={setMsg} />
+          )}
+
           {/* نسخة كل منصة — النص المخصّص وأول تعليق، ومعاينة ما سيصل كل منصة من الوسائط */}
           {postId && platforms.length > 0 && can('draft.edit') && (
             <PlatformVariants
@@ -505,11 +514,12 @@ export default function Editor() {
                       )}
                     </div>
                     {/* سبب الفشل كما ردّه المزوّد أو المنصة، وما سترفضه المنصة إن فُحص عند الجدولة */}
-                    {['failed', 'pending'].includes(s.status) && s.error && (() => {
+                    {/* والمنشور قد يحمل ملاحظة: نشرةٌ من نشرات موعده لم تُنشر (سناب) */}
+                    {['failed', 'pending', 'published'].includes(s.status) && s.error && (() => {
                       // رسالة المزوّد الإنجليزية في سطرها باتجاهها، لا ملفوفةً في الفقرة العربية
                       const { ar, ltr } = splitProviderReason(s.error);
                       return (
-                        <div className="err" style={{ fontSize: 'var(--text-xs)' }}>
+                        <div className={s.status === 'published' ? 'muted' : 'err'} style={{ fontSize: 'var(--text-xs)' }}>
                           <bdi>{ltr ? `${ar}:` : ar}</bdi>
                           {ltr && <div dir="ltr">{ltr}</div>}
                         </div>
