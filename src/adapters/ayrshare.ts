@@ -1,5 +1,6 @@
 import type {
   PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult, ModerateAction,
+  PublishStatusContext,
 } from './provider';
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
@@ -84,6 +85,15 @@ export function unwrapAyrsharePost(data: any): any {
  *   ينشره في موعده.
  * `null` = الردّ لا يُعلن حالاً يُقرأ.
  */
+/** وجهةٌ وصلت منصتها: لها رابط، أو معرّفٌ حقيقي لا «pending» ولا «failed». */
+function liveTarget(t: any): boolean {
+  const status = String(t?.status || 'success').toLowerCase();
+  if (status === 'error') return false;
+  if (typeof t?.postUrl === 'string' && /^https?:\/\//.test(t.postUrl)) return true;
+  const id = String(t?.id ?? '').trim();
+  return !!id && id !== 'pending' && id !== 'failed';
+}
+
 export function ayrshareOutcome(raw: any): PublishCheck | null {
   if (!raw || typeof raw !== 'object') return null;
   const data = unwrapAyrsharePost(raw);
@@ -95,6 +105,9 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   if (status === 'error' || status === 'deleted' || failedTarget || (Array.isArray(data?.errors) && data.errors.length)) {
     return { state: 'failed', error: errors || (status === 'deleted' ? 'حُذف المنشور' : undefined) };
   }
+  /* وجهاتٌ حيّةٌ كلها ← نُشر، ولو بقي أعلى الردّ «pending». وكان يُقرأ قبلها
+     فيبقى موعد لينكدإن «قيد النشر» ساعةً ثم «فاشلاً» وهو على الصفحة. */
+  if (targets.length && targets.every(liveTarget)) return { state: 'published' };
   if (status === 'pending' || status === 'awaiting approval' || targets.some((t) => t?.id === 'pending')) {
     return { state: 'pending' };
   }
@@ -354,6 +367,19 @@ export async function listAyrshareWebhooks(auth: AyrshareAuth): Promise<{ event:
     .map(([event, url]) => ({ event, url: url as string }));
 }
 
+/** مهلةٌ قبل سؤال سجلّ المنصة، وهامشُ فرق الساعة بيننا وبينها. */
+const SEEN_AFTER_MS = 5 * 60_000;
+const SEEN_CLOCK_SKEW_MS = 5 * 60_000;
+
+/** أوّل ستين حرفاً من النصّ للمطابقة — بلا محارف الاتجاه والوصل، والمسافاتُ واحدة. */
+export function normalizeHead(text: string | undefined | null): string {
+  return String(text || '')
+    .replace(/[\u200b-\u200f\u2066-\u2069\ufeff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+}
+
 export class AyrshareProvider implements PublishingProvider {
   private key: string;
 
@@ -536,14 +562,41 @@ export class AyrshareProvider implements PublishingProvider {
     return { providerPostId: id, status: String(post?.status || 'success'), state };
   }
 
-  async getPublishStatus(providerPostId: string): Promise<PublishCheck | null> {
+  async getPublishStatus(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null> {
+    let check: PublishCheck | null;
     try {
-      return ayrshareOutcome(await this.call('GET', `/post/${encodeURIComponent(providerPostId)}`));
+      check = ayrshareOutcome(await this.call('GET', `/post/${encodeURIComponent(providerPostId)}`));
     } catch (err) {
       // ٢٢١ «History not found» — المنشور لا يُعرف لدى Ayrshare
       if (err instanceof AyrshareError && errorCodes(err.body).includes(221)) return null;
       throw err;
     }
+    if (check?.state !== 'pending' || !ctx) return check;
+    return (await this.seenOnPlatform(ctx)) ? { state: 'published' } : check;
+  }
+
+  /* ═══ «pending» يطول: يُسأل سجلّ المنصة نفسها ═══
+
+     Ayrshare قد يُبقي حال المنشور «pending» بعد وصوله — رآه الفريق على
+     لينكدإن والموعد «قيد النشر». فبعد خمس دقائق من الإرسال يُقرأ سجلّ
+     المنصة (`/history/:platform`): منشورٌ بالنصّ نفسه بعد الإرسال هو هو.
+     وما لا يُطابَق يبقى ينتظر حتى مهلة التأكيد كما كان. */
+  private async seenOnPlatform(ctx: PublishStatusContext): Promise<boolean> {
+    const sent = Date.parse(ctx.sentAt || '');
+    const head = normalizeHead(ctx.text);
+    if (!Number.isFinite(sent) || Date.now() - sent < SEEN_AFTER_MS || head.length < 10) return false;
+    let page: PlatformHistoryPage;
+    try {
+      page = await ayrsharePlatformHistory(
+        { key: this.key, x: this.x }, ayrsharePlatform(ctx.platform), ctx.platform, { limit: 20 },
+      );
+    } catch {
+      return false; // يُسأل في الدورة التالية
+    }
+    return page.posts.some((p) => {
+      const at = Date.parse(p.sentAt || '');
+      return (!Number.isFinite(at) || at >= sent - SEEN_CLOCK_SKEW_MS) && normalizeHead(p.title) === head;
+    });
   }
 
   async deletePost(providerPostId: string): Promise<void> {

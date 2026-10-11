@@ -434,3 +434,56 @@ describe('المقطع بارزاً عبر Ayrshare', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('لينكدإن «قيد النشر» وهو منشور', () => {
+  const TEXT = 'تعلن شركة ناف للمحاماة عن إطلاق خدمة الاستشارات القانونية للشركات الناشئة';
+  const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  function waiting(id: string, sentMinAgo: number): void {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'ع', ?, 'scheduled', 'u1')").run(id, `<p>${TEXT}</p>`);
+    db.prepare("INSERT INTO schedules (id, post_id, platform, scheduled_at, status, provider_post_id, published_at) VALUES (?, ?, 'linkedin_page', ?, 'processing', ?, ?)")
+      .run(`sch_${id}`, id, PAST, `AYR_${id}`, ago(sentMinAgo));
+  }
+
+  it('وجهةٌ حيّة تُعدّ منشوراً ولو بقي أعلى الردّ pending — وتيك توك بمعرّف pending ينتظر', () => {
+    expect(ayrshareOutcome({ status: 'pending', id: 'A', postIds: [{ status: 'success', id: 'urn:li:share:7381', platform: 'linkedin' }] }))
+      .toEqual({ state: 'published' });
+    expect(ayrshareOutcome({ status: 'pending', id: 'A', postIds: [{ platform: 'linkedin', postUrl: 'https://www.linkedin.com/feed/update/urn:li:share:1' }] }))
+      .toEqual({ state: 'published' });
+    expect(ayrshareOutcome({ status: 'success', id: 'A', postIds: [{ status: 'success', id: 'pending', platform: 'tiktok' }] }))
+      .toEqual({ state: 'pending' });
+    expect(ayrshareOutcome({ status: 'pending', id: 'A' })).toEqual({ state: 'pending' });
+  });
+
+  it('pending بعد خمس دقائق: منشورٌ بالنصّ نفسه في سجلّ لينكدإن يحسمه منشوراً', async () => {
+    waiting('L1', 12);
+    replies['GET /post/AYR_L1'] = () => ({ body: { status: 'pending', id: 'AYR_L1' } });
+    replies['GET /history/linkedin'] = () => ({
+      body: { posts: [{ id: 'urn:li:share:99', post: `${TEXT}\n\n#ناف`, created: ago(10), postUrl: 'https://www.linkedin.com/feed/update/urn:li:share:99' }] },
+    });
+    const r = await reconcilePublishing(env);
+    expect(r.published).toBe(1);
+    expect(row(db, 'sch_L1')).toMatchObject({ status: 'published', error: null });
+  });
+
+  it('نصٌّ لا يطابق، أو منشورٌ أقدم من الإرسال، يُبقيه قيد النشر', async () => {
+    waiting('L2', 12);
+    replies['GET /post/AYR_L2'] = () => ({ body: { status: 'pending', id: 'AYR_L2' } });
+    replies['GET /history/linkedin'] = () => ({
+      body: { posts: [
+        { id: 'urn:li:share:1', post: 'منشورٌ آخر لا علاقة له بهذا الموعد إطلاقاً', created: ago(5) },
+        { id: 'urn:li:share:2', post: TEXT, created: ago(120) },
+      ] },
+    });
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_L2').status).toBe('processing');
+  });
+
+  it('قبل خمس دقائق لا يُسأل سجلّ المنصة', async () => {
+    waiting('L3', 2);
+    replies['GET /post/AYR_L3'] = () => ({ body: { status: 'pending', id: 'AYR_L3' } });
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_L3').status).toBe('processing');
+    expect(calls.some((c) => c.key.startsWith('GET /history'))).toBe(false);
+  });
+});
