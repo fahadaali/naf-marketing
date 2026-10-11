@@ -225,7 +225,8 @@ describe('النشر عبر Ayrshare', () => {
     env.MEDIA.head = async () => ({ size: bytes.byteLength });
     env.MEDIA.get = async () => ({ body: new Blob([bytes]).stream() });
     env.IMAGES = {
-      info: async () => ({ format: 'image/png', fileSize: bytes.byteLength, width: 4000, height: 3000 }),
+      // أبعادٌ تحت أطول ضلعٍ للمنصتين، فلا يُصغَّر شيء — الحجم وحده يُضغط
+      info: async () => ({ format: 'image/png', fileSize: bytes.byteLength, width: 1400, height: 1050 }),
       input: () => {
         const t: any = {
           transform: () => t,
