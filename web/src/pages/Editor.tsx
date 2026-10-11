@@ -288,16 +288,27 @@ export default function Editor() {
   }
 
   // يرفع الملف ويُعيد بياناته؛ المحرر يتولّى إدراجه عند موضع المؤشر.
-  async function uploadFn(file: File) {
-    setErr(''); setMsg('جارٍ رفع الوسيط…');
-    try {
-      const d = await uploadMedia(file);
-      setMsg('تم إدراج الوسيط');
-      return d;
-    } catch (e: any) {
-      setErr(e.message);
-      return null;
+  // وعند اختيار عدّة ملفات يُستدعى لكلٍّ منها بترتيبه (`RichEditor`)، والخطأ يُجمع لا يُمحى،
+  // والرسالة الأخيرة تعدّ ما أُدرج فعلاً لا ما اختير.
+  const uploadedInBatch = useRef(0);
+  async function uploadFn(file: File, index = 0, total = 1) {
+    if (index === 0) {
+      setErr('');
+      uploadedInBatch.current = 0;
     }
+    setMsg(total > 1 ? `جارٍ رفع الوسيط ${isolate(index + 1)} من ${isolate(total)}…` : 'جارٍ رفع الوسيط…');
+    let d = null;
+    try {
+      d = await uploadMedia(file);
+      uploadedInBatch.current++;
+    } catch (e: any) {
+      setErr((prev) => [prev, total > 1 ? `«${file.name}»: ${e.message}` : e.message].filter(Boolean).join(' · '));
+    }
+    if (index === total - 1) {
+      const n = uploadedInBatch.current;
+      setMsg(!n ? '' : total > 1 ? `تم إدراج الوسائط (${isolate(n)})` : 'تم إدراج الوسيط');
+    }
+    return d;
   }
 
   const overdue =
@@ -376,7 +387,7 @@ export default function Editor() {
                 </button>
               </div>
               <p className="muted" style={{ fontSize: 'var(--text-xs)', margin: '6px 0 0' }}>
-                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، واضغط عليه لاحقاً لاستعراضه.
+                لإرفاق وسيط: ضع المؤشر في المكان المطلوب واضغط زر المشبك <Paperclip size={16} style={{ verticalAlign: -2 }} /> في شريط أدوات المحرر — يُدرَج الوسيط في موضعه (صورة/صوت/فيديو/PDF/وورد/إكسل)، ويمكن اختيار عدّة ملفات معاً فتُدرج بترتيبها. واضغط على الوسيط لاحقاً لاستعراضه.
               </p>
             </div>
           )}

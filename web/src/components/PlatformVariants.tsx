@@ -39,7 +39,7 @@ export function useAssetInfo(ids: string[]): Record<string, AssetInfo> {
     const t = window.setTimeout(() => {
       api
         .get<{ media: AssetInfo[] }>(`/media/info?ids=${encodeURIComponent(missing.join(','))}`)
-        .then((d) => setAssets((prev) => ({ ...prev, ...Object.fromEntries(d.media.map((m) => [m.id, m])) })))
+        .then((d) => setAssets((prev) => ({ ...prev, ...Object.fromEntries((d.media || []).map((m) => [m.id, m])) })))
         .catch(() => { /* بلا بيانات تُعرض الوسائط بلا شارات */ });
     }, 300);
     return () => window.clearTimeout(t);
