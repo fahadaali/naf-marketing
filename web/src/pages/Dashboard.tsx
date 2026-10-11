@@ -29,10 +29,10 @@ const HOME_METRICS = ['reach', 'impressions', 'engagement', 'engagement_rate_rea
 
 const STATUS_ORDER = ['idea', 'draft', 'pending_marketing', 'pending_gm', 'scheduled', 'published', 'rejected'];
 
-/** مرحلة المنشور في خطّ الإنتاج: حالته المعروضة، و«متأخر» داخل «مجدول» كما كان. */
+/** مرحلة المنشور في خطّ الإنتاج: حالته المعروضة، و«متأخر» و«منشور جزئياً» داخل «مجدول». */
 const stageOf = (p: any) => {
   const s = displayStatus(p);
-  return s === 'late' ? 'scheduled' : s;
+  return s === 'late' || s === 'partial' ? 'scheduled' : s;
 };
 
 export default function Dashboard() {

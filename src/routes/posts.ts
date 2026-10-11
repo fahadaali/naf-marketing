@@ -12,7 +12,7 @@ import { logAudit } from '../services/audit';
 import { customPlatformLabels, noteForDisplay } from '../platformLabels';
 import {
   resolveFormat, isYmd, cleanDay, cleanPlatforms, cleanText, isIdeaRow,
-  PILLAR_MAX, BRIEF_MAX, PLANNED_CAP, SCHEDULED_PLATFORMS_SQL,
+  PILLAR_MAX, BRIEF_MAX, PLANNED_CAP, SCHEDULED_PLATFORMS_SQL, PUBLISHED_COUNT_SQL,
 } from '../services/planning';
 
 export const postRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -96,7 +96,8 @@ postRoutes.get('/', async (c) => {
     `SELECT p.*, u.name AS author_name, ua.name AS assignee_name, cm.name AS campaign_name,
             (SELECT MIN(s.scheduled_at) FROM schedules s
                WHERE s.post_id = p.id AND s.status IN ('pending','failed')) AS pending_at,
-            ${SCHEDULED_PLATFORMS_SQL}
+            ${SCHEDULED_PLATFORMS_SQL},
+            ${PUBLISHED_COUNT_SQL}
      FROM content_posts p
      LEFT JOIN users u ON u.id = p.author_id
      LEFT JOIN users ua ON ua.id = p.assignee_id

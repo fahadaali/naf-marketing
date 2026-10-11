@@ -320,7 +320,22 @@ export default function Editor() {
   const overdue =
     status === 'scheduled' &&
     schedules.some((s) => ['pending', 'failed'].includes(s.status) && new Date(s.scheduled_at).getTime() < Date.now());
-  const effStatus = overdue ? 'late' : postId && status === 'draft' && savedBody === '' ? 'idea' : status;
+  // ما نُشر عليه من المنصات: لا يُجدوَل ثانيةً، ويجعل المجدولَ «منشوراً جزئياً»
+  const publishedOn = schedules.filter((s) => s.status === 'published').map((s) => s.platform);
+  const effStatus = overdue
+    ? 'late'
+    : postId && status === 'draft' && savedBody === ''
+      ? 'idea'
+      : status === 'scheduled' && publishedOn.length
+        ? 'partial'
+        : status;
+  /* منصةٌ في «منصات التواصل» بلا موعد: الخطة لا تنشر، والجدولة وحدها تُنشئ الموعد.
+     وكانت تُنسى صامتةً — لا موعد ولا حالة ولا خطأ — فيُظنّ أن النشر عليها تعطّل. */
+  const unscheduled = ['approved', 'scheduled', 'published'].includes(status)
+    ? plan.planned_platforms.filter((p) => !schedules.some((s) => s.platform === p))
+    : [];
+  // المنشور يُجدوَل على ما لم يُنشر عليه بعد من المنصات المفعّلة
+  const canScheduleMore = platforms.some((p) => !publishedOn.includes(p));
   // لا إرسال لما لا نصّ فيه بعد — فكرةٌ تُكتب أولاً، والخادم يردّها إن وصلت
   const hasText = !isBlankHtml(body);
 
@@ -448,7 +463,7 @@ export default function Editor() {
                   لا يعتمد المحتوى كاتبُه. يعتمده غيرك ممّن يملك الصلاحية.
                 </p>
               )}
-              {['approved', 'scheduled'].includes(status) && can('content.schedule') && (
+              {(['approved', 'scheduled'].includes(status) || (status === 'published' && canScheduleMore)) && can('content.schedule') && (
                 <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={20} /> جدولة النشر</button>
               )}
               {status === 'scheduled' && can('content.approve_final') && schedules.some((s) => ['pending', 'failed'].includes(s.status)) && (
@@ -514,7 +529,7 @@ export default function Editor() {
           )}
 
           {/* الجداول */}
-          {schedules.length > 0 && (
+          {(schedules.length > 0 || unscheduled.length > 0) && (
             <div className="card" style={{ marginBottom: 14 }}>
               <h4 style={{ marginTop: 0 }}>مواعيد النشر</h4>
               {schedules.map((s) => {
@@ -559,6 +574,13 @@ export default function Editor() {
                   </div>
                 );
               })}
+              {unscheduled.map((p) => (
+                <div key={p} className="row" style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-2)' }}>
+                  <PlatformIcon platform={p} size={16} />
+                  <span>{platformLabel(p, platLabels)}</span>
+                  <span className="muted">— بلا موعد نشر</span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -681,9 +703,9 @@ export default function Editor() {
       {showSchedule && postId && (
         <ScheduleModal
           postId={postId}
-          platforms={platforms}
+          platforms={platforms.filter((p) => !publishedOn.includes(p))}
           labels={platLabels}
-          initialPlatforms={plan.planned_platforms.filter((p) => platforms.includes(p))}
+          initialPlatforms={plan.planned_platforms.filter((p) => platforms.includes(p) && !publishedOn.includes(p))}
           initialDay={plan.planned_on && plan.planned_on >= riyadhToday() ? plan.planned_on : ''}
           onClose={() => setShowSchedule(false)}
           onDone={async (issues) => {

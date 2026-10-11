@@ -99,10 +99,11 @@ export default function ContentManagement() {
   const filtered = useMemo(() => {
     let r = posts.filter((p) => {
       /* بالحالة المعروضة: «مسودة» لا تضمّ الأفكار وإن كانت مسوداتٍ في القاعدة،
-         و«مجدول» يضمّ ما فات موعده («متأخر») كما يضمّه عمودُه في اللوحة. */
+         و«مجدول» يضمّ ما فات موعده («متأخر») وما نُشر على بعض منصاته
+         («منشور جزئياً») كما يضمّهما عمودُه في اللوحة. */
       if (fStatus) {
         const ds = displayStatus(p);
-        if (ds !== fStatus && !(fStatus === 'scheduled' && ds === 'late')) return false;
+        if (ds !== fStatus && !(fStatus === 'scheduled' && ['late', 'partial'].includes(ds))) return false;
       }
       if (fSource && p.source !== fSource) return false;
       if (fFormat && (p.format || p.content_type) !== fFormat) return false;
