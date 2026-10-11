@@ -14,12 +14,15 @@ import type { PublishMedia } from '../adapters/provider';
    والنسبة هنا العرض على الارتفاع: ‎9:16‎ = 0.5625. */
 
 export type ImageSpec = {
-  /** أدنى نسبةٍ تقبلها المنصة (الأطول) وأعلاها (الأعرض). */
-  min: number;
-  max: number;
+  /** أدنى نسبةٍ تقبلها المنصة (الأطول) وأعلاها (الأعرض) — وغيابهما: كل نسبة. */
+  min?: number;
+  max?: number;
   /** مقاس الإطار لصورةٍ أطول من المدى، ولأعرض منه. */
-  tall: [number, number];
-  wide: [number, number];
+  tall?: [number, number];
+  wide?: [number, number];
+  /** أطول ضلعٍ يُرسل — وما فوقه يُصغَّر بنسبته دون إطار. إنستغرام يرفض
+      عرضاً فوق ٦٠٠٠، وكانت صورةٌ بعرض ٧١٩٤ تُرفض بعد موعدها. */
+  maxSide?: number;
   /** PNG مرفوض — يُحوَّل إلى JPEG وإن قُبلت نسبته (تيك توك). */
   noPng?: boolean;
 };
@@ -27,20 +30,25 @@ export type ImageSpec = {
 const PORTRAIT_9_16: [number, number] = [1080, 1920];
 
 export const IMAGE_SPECS: Record<string, ImageSpec> = {
-  // ‎4:5‎ إلى ‎1.91:1‎ — وما خرج عنه يرفضه إنستغرام
-  instagram: { min: 0.8, max: 1.91, tall: [1080, 1350], wide: [1080, 566] },
+  // ‎4:5‎ إلى ‎1.91:1‎ — وما خرج عنه يرفضه إنستغرام. وعرضه ٣٢٠–١٤٤٠ في التوثيق
+  instagram: { min: 0.8, max: 1.91, tall: [1080, 1350], wide: [1080, 566], maxSide: 1440 },
   // القصة وسبوتلايت ‎9:16‎ وحدها
-  snapchat: { min: 0.5625, max: 0.5625, tall: PORTRAIT_9_16, wide: PORTRAIT_9_16 },
-  // ‎9:16‎ إلى ‎16:9‎، ولا يقبل PNG
-  tiktok: { min: 0.5625, max: 16 / 9, tall: PORTRAIT_9_16, wide: [1920, 1080], noPng: true },
+  snapchat: { min: 0.5625, max: 0.5625, tall: PORTRAIT_9_16, wide: PORTRAIT_9_16, maxSide: 1920 },
+  /* ‎9:16‎ وحدها، ولا يقبل PNG. والتوثيق يقول «‎9:16‎ أو ‎16:9‎ أو مربّعة»، وردّ
+     تيك توك نفسه رفض المربّعة: «TikTok does not allow square images». فكل
+     صورةٍ غير طوليّة تُوضع في إطار ‎1080×1920‎ — مقاس الشاشة في تيك توك. */
+  tiktok: { min: 0.5625, max: 0.5625, tall: PORTRAIT_9_16, wide: PORTRAIT_9_16, maxSide: 1920, noPng: true },
   // ‎1:2.4‎ إلى ‎2.4:1‎
-  linkedin: { min: 1 / 2.4, max: 2.4, tall: [1080, 1350], wide: [1200, 627] },
-  linkedin_page: { min: 1 / 2.4, max: 2.4, tall: [1080, 1350], wide: [1200, 627] },
-  // حتى ‎10:1‎ في الاتجاهين
-  threads: { min: 0.1, max: 10, tall: PORTRAIT_9_16, wide: [1920, 1080] },
+  linkedin: { min: 1 / 2.4, max: 2.4, tall: [1080, 1350], wide: [1200, 627], maxSide: 4096 },
+  linkedin_page: { min: 1 / 2.4, max: 2.4, tall: [1080, 1350], wide: [1200, 627], maxSide: 4096 },
+  // حتى ‎10:1‎ في الاتجاهين، وعرضه حتى ١٤٤٠
+  threads: { min: 0.1, max: 10, tall: PORTRAIT_9_16, wide: [1920, 1080], maxSide: 1440 },
   /* «الطولي قد يُرفض فاستعمل الأفقي» — كذا في التوثيق بلا حدٍّ معلن، فالثقة
      منخفضة. والإطار الأفقي لا يضرّ صورةً كانت ستُقبل. */
-  google: { min: 1, max: 2, tall: [1200, 900], wide: [1600, 900] },
+  google: { min: 1, max: 2, tall: [1200, 900], wide: [1600, 900], maxSide: 2048 },
+  // كل نسبة — والضلع: فيسبوك حتى ٢٠٤٨، وإكس يصغّر ما فوق ٤٠٩٦ بنفسه
+  facebook: { maxSide: 2048 },
+  x: { maxSide: 4096 },
 };
 
 /** هامش المقارنة: صورةٌ بنسبة ‎0.5620‎ هي ‎9:16‎ في الحقيقة، لا تُكيَّف لفرق بكسل. */
@@ -51,9 +59,17 @@ export function imageTarget(platform: string, width: number, height: number): [n
   const spec = IMAGE_SPECS[platform];
   if (!spec || !(width > 0) || !(height > 0)) return null;
   const r = width / height;
-  if (r < spec.min * (1 - TOLERANCE)) return spec.tall;
-  if (r > spec.max * (1 + TOLERANCE)) return spec.wide;
+  if (spec.min && spec.tall && r < spec.min * (1 - TOLERANCE)) return spec.tall;
+  if (spec.max && spec.wide && r > spec.max * (1 + TOLERANCE)) return spec.wide;
   return null;
+}
+
+/** مقاسٌ مصغَّر بنسبة الصورة إن تجاوز أطول أضلاعها حدّ المنصة — وإلا `null`. */
+export function imageDownscale(platform: string, width: number, height: number): [number, number] | null {
+  const max = IMAGE_SPECS[platform]?.maxSide;
+  if (!max || !(width > 0) || !(height > 0) || Math.max(width, height) <= max) return null;
+  const k = max / Math.max(width, height);
+  return [Math.max(1, Math.round(width * k)), Math.max(1, Math.round(height * k))];
 }
 
 /* ═══ المقطع ═══
@@ -191,14 +207,17 @@ export async function frameImage(
   }
 }
 
-/** PNG إلى JPEG بأبعاده — للمنصة التي ترفض PNG. والشفافية تُسطَّح على أبيض. */
-async function toJpeg(images: ImagesBinding, m: PublishMedia): Promise<PublishMedia> {
+/** الصورة JPEG — بأبعادها، أو مصغّرةً إلى `size`. للمنصة التي ترفض PNG أو
+    تضيق بالأبعاد الكبيرة. والشفافية تُسطَّح على أبيض. */
+async function toJpeg(images: ImagesBinding, m: PublishMedia, size?: [number, number]): Promise<PublishMedia> {
   try {
-    const out = await images.input(await reader(m)()).output({ format: 'image/jpeg', quality: QUALITY, background: 'white' });
+    let t = images.input(await reader(m)());
+    if (size) t = t.transform({ width: size[0], height: size[1], fit: 'scale-down' });
+    const out = await t.output({ format: 'image/jpeg', quality: QUALITY, background: 'white' });
     const data = await toBuffer(out);
     return { data, size: data.byteLength, mimeType: 'image/jpeg', filename: `${baseName(m.filename)}.jpg` };
   } catch (err) {
-    throw new Error(`تعذّر تحويل الصورة «${m.filename}» إلى JPEG لهذه المنصة: ${String((err as Error)?.message || err)}`);
+    throw new Error(`تعذّر تجهيز الصورة «${m.filename}» لهذه المنصة: ${String((err as Error)?.message || err)}`);
   }
 }
 
@@ -233,8 +252,10 @@ export async function adaptImage(
     const out = await frameImage(images, m, dims, frame, platform);
     return { ...out, width: frame[0], height: frame[1] };
   }
-  if (IMAGE_SPECS[platform].noPng && mime === 'image/png') {
-    return { ...(await toJpeg(images, m)), width: dims?.width, height: dims?.height };
+  const smaller = dims ? imageDownscale(platform, dims.width, dims.height) : null;
+  if (smaller || (IMAGE_SPECS[platform].noPng && mime === 'image/png')) {
+    const [width, height] = smaller ?? [dims?.width, dims?.height];
+    return { ...(await toJpeg(images, m, smaller ?? undefined)), width, height };
   }
   return m;
 }

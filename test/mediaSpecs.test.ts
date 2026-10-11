@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  imageTarget, containSize, adaptImage, videoIssues, facebookReel, youtubeShort, IMAGE_SPECS,
+  imageTarget, imageDownscale, containSize, adaptImage, videoIssues, facebookReel, youtubeShort, IMAGE_SPECS,
 } from '../src/services/mediaSpecs';
 import { mediaIssues } from '../src/services/publish';
 
@@ -54,7 +54,20 @@ describe('هل تُكيَّف الصورة لهذه المنصة', () => {
     expect(imageTarget('x', 4000, 500)).toBeNull();
     expect(imageTarget('facebook', 500, 4000)).toBeNull();
     expect(imageTarget('mystery', 500, 4000)).toBeNull();
-    expect(IMAGE_SPECS.x).toBeUndefined();
+    expect(IMAGE_SPECS.x.min).toBeUndefined();
+  });
+
+  it('تيك توك ‎9:16‎ وحدها: المربّعة والأفقية تُوضعان في إطارٍ طوليّ — رفض المربّعة بنصّه', () => {
+    expect(imageTarget('tiktok', 7194, 7194)).toEqual([1080, 1920]);
+    expect(imageTarget('tiktok', 1920, 1080)).toEqual([1080, 1920]);
+    expect(imageTarget('tiktok', 1080, 1920)).toBeNull();
+  });
+
+  it('أطول ضلعٍ فوق حدّ المنصة يُصغَّر بنسبته — إنستغرام رفض عرض ٧١٩٤', () => {
+    expect(imageDownscale('instagram', 7194, 7194)).toEqual([1440, 1440]);
+    expect(imageDownscale('facebook', 3000, 2000)).toEqual([2048, 1365]);
+    expect(imageDownscale('instagram', 1080, 1350)).toBeNull();
+    expect(imageDownscale('mystery', 9000, 9000)).toBeNull();
   });
 
   it('جوجل للأعمال: الطولية إلى إطارٍ أفقي', () => {
@@ -105,6 +118,14 @@ describe('تكييف الصورة', () => {
     expect(out).toMatchObject({ mimeType: 'image/jpeg', filename: 'a.jpg', width: 1080, height: 1920 });
     expect(log[0].ops).toEqual([]);
     expect(log[0].out).toMatchObject({ format: 'image/jpeg', background: 'white' });
+  });
+
+  it('الكبيرة المقبولة نسبتُها تُصغَّر JPEG بلا إطار', async () => {
+    const { binding, log } = fakeImages();
+    const out = await adaptImage(binding, 'instagram', img({ width: 7194, height: 7194 }));
+    expect(out).toMatchObject({ mimeType: 'image/jpeg', width: 1440, height: 1440 });
+    expect(log[0].ops).toEqual([{ width: 1440, height: 1440, fit: 'scale-down' }]);
+    expect(log[0].ops.some((o: any) => o.draw)).toBe(false);
   });
 
   it('المتحرّكة والمقطع لا يُمسّان', async () => {

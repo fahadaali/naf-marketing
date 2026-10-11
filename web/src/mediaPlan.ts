@@ -4,7 +4,14 @@
 // ولا تُحمل هنا نسخةٌ منها. وما هنا قراءتها وحدها: `imageTarget` بالقاعدة
 // نفسها في الخادم، واختبارٌ يقارن الاثنين (`test/mediaPlan.test.ts`).
 
-export type ImageSpec = { min: number; max: number; tall: [number, number]; wide: [number, number]; noPng?: boolean };
+export type ImageSpec = {
+  min?: number;
+  max?: number;
+  tall?: [number, number];
+  wide?: [number, number];
+  maxSide?: number;
+  noPng?: boolean;
+};
 export type VideoSpec = { minMs?: number; maxMs?: number; maxBytes?: number };
 export type MediaSpecs = {
   image: Record<string, ImageSpec>;
@@ -42,8 +49,8 @@ export function imageTarget(
   const spec = specs.image[platform];
   if (!spec || !(width > 0) || !(height > 0)) return null;
   const r = width / height;
-  if (r < spec.min * (1 - TOLERANCE)) return spec.tall;
-  if (r > spec.max * (1 + TOLERANCE)) return spec.wide;
+  if (spec.min && spec.tall && r < spec.min * (1 - TOLERANCE)) return spec.tall;
+  if (spec.max && spec.wide && r > spec.max * (1 + TOLERANCE)) return spec.wide;
   return null;
 }
 
