@@ -71,17 +71,31 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
     .bind(post_id)
     .first<{ status: string }>();
   if (!post) return c.json({ error: 'المنشور غير موجود' }, 404);
-  if (!['approved', 'scheduled'].includes(post.status)) {
+  /* والمنشور يُجدوَل على منصةٍ لم يُنشر عليها بعد: كان المحتوى المنشور لا
+     يُجدوَل أبداً، فمنصةٌ نُسيت في الجدولة الأولى لا سبيل إليها إلا بنسخه. */
+  if (!['approved', 'scheduled', 'published'].includes(post.status)) {
     return c.json({ error: 'لا يمكن الجدولة إلا بعد الاعتماد النهائي من المدير العام' }, 400);
   }
 
   const when = new Date(scheduled_at);
   if (isNaN(when.getTime())) return c.json({ error: 'موعد غير صالح' }, 400);
 
+  // ما نُشر عليه لا يُجدوَل ثانيةً — وإلا نُشر المحتوى عليه مرّتين
+  const { results: done } = await c.env.DB.prepare(
+    "SELECT DISTINCT platform FROM schedules WHERE post_id = ? AND status = 'published'",
+  )
+    .bind(post_id)
+    .all<{ platform: string }>();
+  const published = new Set((done || []).map((r) => r.platform));
+  const targets = [...new Set(platforms)].filter((p) => !published.has(p));
+  if (!targets.length) {
+    return c.json({ error: 'نُشر المحتوى على هذه المنصات من قبل. اختر منصةً لم يُنشر عليها' }, 400);
+  }
+
   /* إعادة الجدولة تنقل الموعد القائم ولا تضيف موعداً بجانبه. وكانت كل جدولةٍ
      تُدرج صفّاً جديداً، فمن غيّر الموعد بقي له موعدان على المنصة نفسها،
      فيُنشر المحتوى مرّتين — وترفض إكس الثانية لأنها مكرّرة فتظهر «فاشل». */
-  for (const platform of new Set(platforms)) {
+  for (const platform of targets) {
     const moved = await c.env.DB.prepare(
       `UPDATE schedules SET scheduled_at = ?, status = 'pending', error = NULL
        WHERE post_id = ? AND platform = ? AND status IN ('pending','failed')`,
@@ -105,14 +119,14 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
     `INSERT INTO approvals (id, post_id, from_status, to_status, actor_id, note)
      VALUES (?, ?, ?, 'scheduled', ?, ?)`,
   )
-    .bind(newId('appr'), post_id, post.status, user.id, scheduleNote([...new Set(platforms)], await customPlatformLabels(c.env)))
+    .bind(newId('appr'), post_id, post.status, user.id, scheduleNote(targets, await customPlatformLabels(c.env)))
     .run();
 
   // تحديث بطاقة بيسكامب: النقل إلى «مجدول» وضبط تاريخ الاستحقاق = تاريخ النشر
   c.executionCtx.waitUntil(syncPostSafe(c.env, post_id));
 
   // ما سترفضه المنصات يُعرف الآن لا في الموعد — ويُكتب على كل موعدٍ تحته
-  const issues = await preflightSchedules(c.env, post_id, [...new Set(platforms)]).catch(() => []);
+  const issues = await preflightSchedules(c.env, post_id, targets).catch(() => []);
   return c.json({ ok: true, issues });
 });
 

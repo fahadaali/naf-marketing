@@ -10,7 +10,7 @@ export const KANBAN_COLS: { key: string; statuses: string[] }[] = [
   { key: 'pending_marketing', statuses: ['pending_marketing'] },
   { key: 'pending_gm', statuses: ['pending_gm'] },
   { key: 'approved', statuses: ['approved'] },
-  { key: 'scheduled', statuses: ['scheduled', 'late'] },
+  { key: 'scheduled', statuses: ['scheduled', 'late', 'partial'] },
   { key: 'published', statuses: ['published'] },
   { key: 'archived', statuses: ['archived'] },
 ];

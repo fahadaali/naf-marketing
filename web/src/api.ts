@@ -90,6 +90,7 @@ export const STATUS_LABELS: Record<string, string> = {
   approved: 'معتمد',
   scheduled: 'مجدول',
   late: 'متأخر',
+  partial: 'منشور جزئياً',
   published: 'منشور',
   archived: 'مؤرشف',
   rejected: 'مرفوض',
@@ -126,6 +127,7 @@ export const STATUS_BADGE: Record<string, string> = {
   approved: 'green',
   scheduled: 'blue',
   late: 'red',
+  partial: 'blue',
   published: 'green',
   archived: 'gray',
   rejected: 'red',
@@ -144,11 +146,18 @@ export function isIdea(post: { status: string; body?: string | null }): boolean 
 export const IDEA_NO_TEXT = 'لا نصّ لهذه الفكرة بعد. اكتب المحتوى ثم أرسله للمراجعة.';
 
 // الحالة المعروضة: المسودة بلا نصّ «فكرة»، والمجدول الذي فات موعده دون نشر يدوي «متأخر».
-export function displayStatus(post: { status: string; pending_at?: string | null; body?: string | null }): string {
+export function displayStatus(post: {
+  status: string;
+  pending_at?: string | null;
+  body?: string | null;
+  published_count?: number | null;
+}): string {
   if (isIdea(post)) return 'idea';
   if (post.status === 'scheduled' && post.pending_at && new Date(post.pending_at).getTime() < Date.now()) {
     return 'late';
   }
+  // مجدولٌ نُشر على بعض منصاته: جُدوِل على منصةٍ أخرى بعد نشره
+  if (post.status === 'scheduled' && Number(post.published_count) > 0) return 'partial';
   return post.status;
 }
 
