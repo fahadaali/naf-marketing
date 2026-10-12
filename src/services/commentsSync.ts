@@ -2,7 +2,8 @@ import type { Env } from '../types';
 import type { ModerateAction } from '../adapters/provider';
 import { ayrshareAuth, getProvider, providerKey } from '../adapters';
 import {
-  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReplies, ayrshareMessages,
+  attachmentLabel, AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReplies,
+  ayrshareMessages,
   ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, encodeAyrshareComment, errorCodes, mapAyrshareComments,
   postSpecificRejection,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
@@ -15,6 +16,7 @@ import {
   type InboxItem, type InboxPost, type MentionsPath, type RepliesPath, type SocialApiOwnedAccount,
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
+import { loadMedia } from './publish';
 import { notifyUsers, usersWithPermission } from './notify';
 import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
@@ -1778,7 +1780,7 @@ async function syncPerPost(env: Env, report: InboxSyncReport): Promise<void> {
 async function threadAfterReply(
   env: Env,
   row: { provider_comment_id: string; kind: string; thread_json: string | null },
-  change: { add?: { id: string; body: string; userId: string }; replace?: string | null },
+  change: { add?: { id: string; body: string; userId: string; attachments?: { type: string; url: string }[] }; replace?: string | null },
 ): Promise<string | null> {
   // سلسلة التعليق وسجلّ المحادثة الخاصة كلاهما من Ayrshare — وما سواهما بلا سلسلة
   const ayrComment = row.kind === 'comment' && row.provider_comment_id.startsWith('ayc|');
@@ -1790,7 +1792,10 @@ async function threadAfterReply(
     const user = await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(change.add.userId).first<{ name: string }>();
     thread = sortThread([
       ...thread,
-      { id: change.add.id, author: user?.name || '', own: true, here: true, body: change.add.body, at: nowIso() },
+      {
+        id: change.add.id, author: user?.name || '', own: true, here: true, body: change.add.body, at: nowIso(),
+        ...(change.add.attachments ? { attachments: change.add.attachments } : {}),
+      },
     ]);
   }
   return JSON.stringify(thread);
@@ -1809,7 +1814,15 @@ function replyTarget(row: { provider_comment_id: string; thread_json: string | n
   return last ? encodeAyrshareComment('twitter', d.postId, last.id) : row.provider_comment_id;
 }
 
-export async function replyToComment(env: Env, commentId: string, text: string, userId: string): Promise<void> {
+/** نوع المرفق في سجلّ المحادثة من نوع الملف — كما تردّه المنصات (`attachmentLabel`). */
+function attachmentType(mime: string): string {
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+export async function replyToComment(env: Env, commentId: string, text: string, userId: string, mediaId?: string): Promise<void> {
   // LEFT JOIN كي يعمل الرد حتى لتعليقات الصندوق غير المرتبطة بجدول نشر (schedule_id = NULL)
   const comment = await env.DB.prepare(
     `SELECT pc.provider_comment_id, pc.kind, pc.thread_json, s.provider_post_id
@@ -1822,16 +1835,20 @@ export async function replyToComment(env: Env, commentId: string, text: string, 
 
   const provider = await getProvider(env);
   if (!provider.replyComment) throw new Error('المزوّد الحالي لا يدعم الرد على التعليقات');
-  const replyId = await provider.replyComment(comment.provider_post_id || '', replyTarget(comment), text);
+  // المرفق من مكتبة الوسائط — وفي السجلّ رابطُه عندنا لا عند المنصة
+  const [media] = mediaId ? await loadMedia(env, [mediaId]) : [];
+  const replyId = await provider.replyComment(comment.provider_post_id || '', replyTarget(comment), text, media ? { media } : undefined);
+  const attachments = media ? [{ type: attachmentType(media.mimeType), url: `/api/media/${mediaId}` }] : undefined;
+  const body = text || (attachments ? attachmentLabel(attachments[0].type) : '');
 
-  const thread = await threadAfterReply(env, comment, { add: { id: replyId || '', body: text, userId } });
+  const thread = await threadAfterReply(env, comment, { add: { id: replyId || '', body, userId, attachments } });
   await env.DB.prepare(
     `UPDATE platform_comments
      SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ?, reply_source = 'platform',
          thread_json = ?
      WHERE id = ?`,
   )
-    .bind(text, replyId || null, userId, thread, commentId)
+    .bind(body, replyId || null, userId, thread, commentId)
     .run();
 }
 

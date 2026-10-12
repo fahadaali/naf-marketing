@@ -243,7 +243,7 @@ async function publishJobs(
 //
 // ووسيطٌ في المحتوى لا يوجد سجلُّه أو ملفُّه كان يُتخطّى صامتاً، فيُنشر
 // المنشور بلا صورته — أو يُرفض في منصةٍ لا تقبله بلا وسيط بسببٍ لا يدلّ عليه.
-async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> {
+export async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> {
   const out: PublishMedia[] = [];
   for (const id of assetIds.slice(0, 4)) {
     const asset = await env.DB.prepare(

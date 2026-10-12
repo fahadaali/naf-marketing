@@ -415,3 +415,51 @@ describe('ضمّ سجلّ المحادثة', () => {
       .toEqual(['صورة مرفقة', 'مقطع مرفق', 'تسجيل صوتي', 'ملف مرفق', 'مرفق']);
   });
 });
+
+/* ═══ مرفق الردّ على الرسالة الخاصة ═══
+   «Send Message»: `mediaUrls` مع `recipientId` و`message`، وإكس يشترط نصّاً معه. */
+describe('مرفق الردّ على الرسالة الخاصة', () => {
+  const STORAGE = 'https://storage.googleapis.com/ayr/upload-dm';
+  beforeEach(() => {
+    const stored = new Map<string, ArrayBuffer>([['k/f1', new TextEncoder().encode('PDF').buffer]]);
+    env.MEDIA = {
+      head: async (k: string) => (stored.has(k) ? { size: stored.get(k)!.byteLength } : null),
+      get: async (k: string) => (stored.has(k) ? { body: new Blob([stored.get(k)!]).stream() } : null),
+    };
+    db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename, size) VALUES ('f1', 'k/f1', 'application/pdf', 'عرض-الأتعاب.pdf', 3)").run();
+    routes['GET /media/uploadUrl'] = (url) => ({ body: { uploadUrl: STORAGE, accessUrl: `https://media.ayrshare.com/${url.searchParams.get('fileName')}` } });
+    vi.stubGlobal('fetch', ((orig) => async (input: string, init?: RequestInit) => {
+      if (String(input).startsWith(STORAGE)) {
+        if (init?.body instanceof ReadableStream) await new Response(init.body).text();
+        return new Response('{}');
+      }
+      return orig(input, init);
+    })(globalThis.fetch as any));
+  });
+  const insert = (id: string, providerId: string, platform: string, kind = 'dm') =>
+    db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at) VALUES (?, ?, ?, ?, 'عميل', 'نص', ?)")
+      .run(id, platform, providerId, kind, RECENT);
+
+  it('يُرفع المرفق ويُرسل رابطه، ويدخل السجلّ برابطه عندنا — والردّ بمرفقٍ وحده يُسمّى به', async () => {
+    insert('d1', 'ayd|facebook|conv1|psid_1', 'facebook');
+    routes['POST /messages/facebook'] = () => ({ body: { status: 'success', messageId: 'm_att' } });
+    await replyToComment(env, 'd1', '', 'u1', 'f1');
+    const sent = calls.find((c) => c.key === 'POST /messages/facebook')!.body;
+    expect(sent.recipientId).toBe('psid_1');
+    expect(sent.mediaUrls).toHaveLength(1);
+    expect(sent.mediaUrls[0]).toMatch(/^https:\/\/media\.ayrshare\.com\/.+\.pdf$/);
+    const row = db.prepare("SELECT reply_body, reply_provider_id, thread_json FROM platform_comments WHERE id = 'd1'").get();
+    expect(row.reply_body).toBe('ملف مرفق');
+    expect(JSON.parse(row.thread_json).at(-1)).toMatchObject({
+      id: 'm_att', here: true, author: 'فهد', body: 'ملف مرفق', attachments: [{ type: 'file', url: '/api/media/f1' }],
+    });
+  });
+
+  it('إكس يشترط نصّاً مع المرفق، وتعليق المنشور لا مرفق معه — قبل أيّ إرسال', async () => {
+    insert('d2', 'ayd|twitter|conv2|x_1', 'x');
+    insert('c9', encodeAyrshareComment('facebook', 'P1', 'P1_9'), 'facebook', 'comment');
+    await expect(replyToComment(env, 'd2', '', 'u1', 'f1')).rejects.toThrow('إكس يشترط نصّاً مع المرفق. اكتب سطراً ثم أرسل');
+    await expect(replyToComment(env, 'c9', 'شكراً', 'u1', 'f1')).rejects.toThrow('المرفق يُرسل مع الرسالة الخاصة وحدها');
+    expect(calls.some((c) => c.key.startsWith('POST'))).toBe(false);
+  });
+});

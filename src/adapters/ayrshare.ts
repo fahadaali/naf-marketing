@@ -923,9 +923,10 @@ export class AyrshareProvider implements PublishingProvider {
     throw new Error(`${what} على ${platformNames([ayrshareAccountPlatform({ platform })], this.labels)} غير متاح عبر Ayrshare. افعله من تطبيق المنصة`);
   }
 
-  async replyComment(_providerPostId: string, commentId: string, text: string): Promise<string> {
+  async replyComment(_providerPostId: string, commentId: string, text: string, opts: { media?: PublishMedia } = {}): Promise<string> {
     const d = decodeAyrshareId(commentId);
     if (!d) throw new Error('عنصرٌ لا يُعرف مصدره في Ayrshare — حدّث الصندوق ثم أعد المحاولة');
+    if (opts.media && d.type !== 'dm') throw new Error('المرفق يُرسل مع الرسالة الخاصة وحدها');
 
     if (d.type === 'review') {
       const res = await this.call<any>('POST', '/reviews', { platform: d.platform, reviewId: d.reviewId, reply: text });
@@ -933,7 +934,15 @@ export class AyrshareProvider implements PublishingProvider {
     }
     if (d.type === 'dm') {
       if (!d.participantId) throw new Error('لا يُعرف المُراسِل في هذه المحادثة — حدّث الصندوق ثم أعد المحاولة');
-      const res = await this.call<any>('POST', `/messages/${d.platform}`, { recipientId: d.participantId, message: text });
+      /* المرفق يُرفع كوسيط النشر ويُرسل رابطه (`mediaUrls` في «Send Message»):
+         رابطٌ ينتهي بامتداد الملف بلا استعلام، كما تشترط فيسبوك وإنستغرام. وإكس
+         يشترط نصّاً مع المرفق. */
+      if (opts.media && d.platform === 'twitter' && !text.trim()) {
+        throw new Error(`${platformNames(['x'], this.labels)} يشترط نصّاً مع المرفق. اكتب سطراً ثم أرسل`);
+      }
+      const body: Record<string, unknown> = { recipientId: d.participantId, message: text };
+      if (opts.media) body.mediaUrls = [await this.uploadMedia(opts.media)];
+      const res = await this.call<any>('POST', `/messages/${d.platform}`, body);
       return String(res?.messageId ?? '');
     }
     if (!REPLY_BY_SOCIAL_ID.has(d.platform)) this.unsupported('الردّ على التعليقات', d.platform);

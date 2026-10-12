@@ -1,6 +1,7 @@
 import { isolate } from '../lib/format';
-import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight, BellOff, ExternalLink } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight, BellOff, ExternalLink, Paperclip } from 'lucide-react';
+import { uploadMedia } from '../mediaUpload';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -109,6 +110,11 @@ export default function Comments() {
   const [confirming, setConfirming] = useState<{ kind: 'comment' | 'reply'; id: string } | null>(null);
   // المحادثات الخاصة التي فُتح سجلّها كاملاً
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // مرفق الردّ على رسالةٍ خاصة — يُرفع إلى المكتبة ثم يُرسل معه. وحقل ملفٍّ واحد
+  // للصندوق كلّه: الزرّ يُركَّز بلوحة المفاتيح، والحقل مخفيّ
+  const [attached, setAttached] = useState<Record<string, { id: string; filename: string }>>({});
+  const fileRef = useRef<HTMLInputElement>(null);
+  const pickFor = useRef('');
 
   function load() {
     const q = new URLSearchParams();
@@ -140,15 +146,27 @@ export default function Comments() {
   }
 
   async function reply(id: string) {
-    const text = replyDrafts[id];
-    if (!text?.trim()) return;
+    const text = replyDrafts[id] || '';
+    const file = attached[id];
+    if (!text.trim() && !file) return;
     setBusy(id);
     try {
       const path = privateMode[id] ? `/comments/${id}/private-reply` : `/comments/${id}/reply`;
-      await api.post(path, { text: text.trim() });
+      await api.post(path, file ? { text: text.trim(), media_id: file.id } : { text: text.trim() });
       setReplyDrafts((d) => ({ ...d, [id]: '' }));
+      setAttached((d) => { const n = { ...d }; delete n[id]; return n; });
       setSuggestions((s) => ({ ...s, [id]: [] }));
       load();
+    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
+  }
+
+  async function attach(id: string, file: File | undefined) {
+    if (!file) return;
+    setBusy(`at:${id}`);
+    setMsg('');
+    try {
+      const d = await uploadMedia<{ id: string; filename?: string }>(file);
+      setAttached((a) => ({ ...a, [id]: { id: d.id, filename: d.filename || file.name } }));
     } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
   }
 
@@ -424,13 +442,30 @@ export default function Comments() {
                     <button className="btn sm ghost" disabled={busy === `sg:${c.id}`} onClick={() => suggest(c.id)} title="اقتراحات ذكية للرد">
                       <Sparkles size={20} /> {busy === `sg:${c.id}` ? '…' : 'اقتراح'}
                     </button>
-                    <button className="btn sm" disabled={busy === c.id || !replyDrafts[c.id]?.trim()} onClick={() => reply(c.id)}>
+                    {/* المرفق للرسالة الخاصة من Ayrshare وحدها — «Send Message» يقبله وتعليق المنشور لا */}
+                    {c.kind === 'dm' && String(c.provider_comment_id || '').startsWith('ayd|') && !attached[c.id] && (
+                      <button type="button" className="btn sm ghost" disabled={busy === `at:${c.id}`}
+                        onClick={() => { pickFor.current = c.id; fileRef.current?.click(); }}>
+                        <Paperclip size={20} /> {busy === `at:${c.id}` ? 'جارٍ الرفع…' : 'إرفاق ملف'}
+                      </button>
+                    )}
+                    <button className="btn sm" disabled={busy === c.id || (!replyDrafts[c.id]?.trim() && !attached[c.id])} onClick={() => reply(c.id)}>
                       <Send size={20} /> إرسال
                     </button>
                     <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setIgnored(c.id, true)}>
                       <BellOff size={20} /> تجاهل
                     </button>
                   </div>
+                  {attached[c.id] && (
+                    <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
+                      <Paperclip size={16} aria-hidden="true" />
+                      <bdi>{attached[c.id].filename}</bdi>
+                      <button className="btn sm ghost" title="حذف المرفق" aria-label="حذف المرفق"
+                        onClick={() => setAttached((d) => { const n = { ...d }; delete n[c.id]; return n; })}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
                   {isComment && canPrivate && (
                     <label className="muted" style={{ fontSize: 'var(--text-xs)', display: 'inline-flex', gap: 6, marginTop: 6, cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!privateMode[c.id]} onChange={(e) => setPrivateMode((d) => ({ ...d, [c.id]: e.target.checked }))} />
@@ -442,6 +477,8 @@ export default function Comments() {
             </div>
           );
         })}
+        <input ref={fileRef} type="file" hidden
+          onChange={(e) => { attach(pickFor.current, e.target.files?.[0]); e.target.value = ''; }} />
         {comments.length === 0 && (
           <p className="muted" style={{ textAlign: 'center' }}>
             {from || to ? 'لا عنصر في هذه الفترة. وسّع النطاق الزمني.' : 'لا تعليقات بعد. اضغط «جلب الآن» لسحب أحدث التعليقات.'}

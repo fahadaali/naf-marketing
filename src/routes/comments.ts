@@ -192,10 +192,11 @@ commentRoutes.post('/:id/suggest', async (c) => {
 
 // الرد على تعليق/رسالة
 commentRoutes.post('/:id/reply', async (c) => {
-  const { text } = await c.req.json<{ text: string }>();
-  if (!text?.trim()) return c.json({ error: 'اكتب نص الرد' }, 400);
+  // والرسالة الخاصة تُرسل بمرفقٍ وحده — من مكتبة الوسائط (`media_id`)
+  const { text, media_id } = await c.req.json<{ text?: string; media_id?: string }>();
+  if (!text?.trim() && !media_id) return c.json({ error: 'اكتب نص الرد' }, 400);
   try {
-    await replyToComment(c.env, c.req.param('id'), text.trim(), c.get('user').id);
+    await replyToComment(c.env, c.req.param('id'), (text || '').trim(), c.get('user').id, media_id || undefined);
     return c.json({ ok: true });
   } catch (e: any) {
     return c.json({ error: String(e?.message || e) }, 502);
