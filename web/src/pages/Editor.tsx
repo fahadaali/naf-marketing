@@ -110,6 +110,7 @@ export default function Editor() {
     | { kind: 'publish'; early: boolean; when: string }
     | { kind: 'delete' }
     | { kind: 'cancelSchedule'; id: string }
+    | { kind: 'deletePublished'; id: string; platform: string }
     | null
   >(null);
 
@@ -281,6 +282,21 @@ export default function Editor() {
     try {
       await api.del(`/schedules/${sid}`);
       setMsg('أُلغي موعد النشر');
+      loadPost(postId);
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
+  /* حذفُ المنشور من منصته نفسها — والموعد يبقى بوقت حذفه، فيُجدوَل المحتوى
+     عليها من جديد إن شاء الفريق. */
+  async function deletePublished(sid: string, platform: string) {
+    if (!postId) return;
+    setConfirming(null);
+    setErr(''); setMsg('');
+    try {
+      await api.post(`/schedules/${sid}/delete-post`, {});
+      setMsg(`تم حذف المنشور من ${platformLabel(platform, platLabels)}`);
       loadPost(postId);
     } catch (e: any) {
       setErr(e.message);
@@ -501,18 +517,30 @@ export default function Editor() {
                 const late = s.status === 'pending' && new Date(s.scheduled_at).getTime() < Date.now();
                 return (
                   <div key={s.id} style={{ marginBottom: 8 }}>
-                    <div className="row" style={{ fontSize: 'var(--text-xs)' }}>
+                    {/* المنصة والشارة والإجراء في سطر، والموعد تحته: البطاقة ضيّقة، وكان
+                        السطر الواحد يلتفّ في موضعٍ يختلف من منصةٍ إلى منصة */}
+                    <div className="row" style={{ fontSize: 'var(--text-xs)', flexWrap: 'nowrap' }}>
                       <PlatformIcon platform={s.platform} size={16} />
                       <span>{platformLabel(s.platform, platLabels)}</span>
-                      <span className="muted">{formatRiyadh(s.scheduled_at)}</span>
                       <div className="spacer" />
                       <span
                         className={`badge ${
-                          s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : late ? 'red' : 'gray'
+                          s.deleted_at ? 'gray' : s.status === 'published' ? 'green' : s.status === 'failed' ? 'red' : late ? 'red' : 'gray'
                         }`}
                       >
-                        {late ? 'متأخر' : SCHED_STATUS[s.status]}
+                        {s.deleted_at ? 'محذوف' : late ? 'متأخر' : SCHED_STATUS[s.status]}
                       </span>
+                      {/* المنشور يُحذف من منصته لمن ينشر الآن — وما حُذف يبقى سطره بشارته */}
+                      {s.status === 'published' && !s.deleted_at && s.provider_post_id && can('content.approve_final') && (
+                        <button
+                          className="btn sm ghost"
+                          title={`حذف من ${platformLabel(s.platform, platLabels)}`}
+                          aria-label={`حذف من ${platformLabel(s.platform, platLabels)}`}
+                          onClick={() => setConfirming({ kind: 'deletePublished', id: s.id, platform: s.platform })}
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
                       {/* الإلغاء متاح للمعلّق والفاشل فقط — المنشور فعلاً لا يُلغى من هنا */}
                       {['pending', 'failed'].includes(s.status) && can('content.schedule') && (
                         <button
@@ -524,6 +552,7 @@ export default function Editor() {
                         </button>
                       )}
                     </div>
+                    <div className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{formatRiyadh(s.scheduled_at)}</bdi></div>
                     {/* سبب الفشل كما ردّه المزوّد أو المنصة، وما سترفضه المنصة إن فُحص عند الجدولة */}
                     {/* والمنشور قد يحمل ملاحظة: نشرةٌ من نشرات موعده لم تُنشر (سناب) */}
                     {['failed', 'pending', 'published'].includes(s.status) && s.error && (() => {
@@ -709,6 +738,22 @@ export default function Editor() {
         />
       )}
 
+      {confirming?.kind === 'deletePublished' && (() => {
+        const name = platformLabel(confirming.platform, platLabels);
+        return (
+          <ConfirmModal
+            title={`حذف المنشور من ${name}`}
+            message={DELETE_IN_APP.has(confirming.platform)
+              ? `${name} لا تتيح حذف المنشور إلا من تطبيقها: احذفه منه أولاً، ثم احذفه هنا ليُسجَّل محذوفاً ويتوقّف سحب أرقامه. ويبقى المحتوى ويمكن جدولته من جديد.`
+              : `يُحذف المنشور من ${name} نفسها ومعه تفاعلاته وتعليقاته هناك. ويبقى المحتوى هنا ويمكن جدولته من جديد. لا يمكن التراجع عن هذا.`}
+            actionLabel="حذف"
+            danger
+            onConfirm={() => deletePublished(confirming.id, confirming.platform)}
+            onClose={() => setConfirming(null)}
+          />
+        );
+      })()}
+
       {confirming?.kind === 'cancelSchedule' && (
         <ConfirmModal
           title="إلغاء موعد النشر"
@@ -724,6 +769,10 @@ export default function Editor() {
 }
 
 const SCHED_STATUS: Record<string, string> = { pending: 'معلّق', processing: 'قيد النشر', published: 'منشور', failed: 'فاشل' };
+
+/** منصاتٌ لا يُحذف منشورها عبر الواجهة: يُحذف من تطبيقها ثم يُسجَّل هنا محذوفاً
+    بعد أن يتحقّق المزوّد أنه زال (`deleteFromPlatform` في `adapters/ayrshare.ts`). */
+const DELETE_IN_APP = new Set(['instagram', 'tiktok']);
 
 function AIModal({ platforms, tones, onClose, onResult }: { platforms: string[]; tones: Tone[]; onClose: () => void; onResult: (t: string) => void }) {
   const [topic, setTopic] = useState('');

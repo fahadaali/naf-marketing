@@ -1,9 +1,13 @@
+import type { PublishOptions } from '../services/publishOptions';
+
 // طبقة النشر المجرّدة — واجهة محايدة للمزوّد.
 // أي مزوّد (Zernio / Late / Ayrshare ...) ينفّذ هذه الواجهة، ويبقى بقية الكود محايداً.
 
 // وسيط مرفق بالنشر — نُمرّر البايتات لأن مسار /api/media محمي بالمصادقة،
 // فلا يستطيع المزوّد جلبه برابط. المزوّدون الذين يقبلون روابط عامة يستخدمون url.
 export interface PublishMedia {
+  /** معرّف الوسيط في المكتبة — لما حُمّل منها. */
+  id?: string;
   data?: ArrayBuffer;
   /**
    * يفتح الملف تدفّقاً من التخزين — بلا تحميله كلّه في الذاكرة. ذاكرة العامل
@@ -21,6 +25,18 @@ export interface PublishMedia {
   width?: number | null;
   height?: number | null;
   duration_ms?: number | null;
+  /** النص البديل للصورة — لقارئ الشاشة على المنصات التي تقبله. */
+  alt?: string | null;
+  /** مولَّدٌ بالذكاء الاصطناعي — يُعلَم به حيث تعلن المنصة وسمه. */
+  aiGenerated?: boolean;
+}
+
+/**
+ * وصفُ الوسيط (نصّه البديل ووسمه) يبقى معه حين يُكيَّف أو يُضغط: التحويل يصنع
+ * وسيطاً جديداً بالبايتات، والوصف للصورة نفسها لا لبايتاتها.
+ */
+export function keepDescription(from: PublishMedia, to: PublishMedia): PublishMedia {
+  return to === from ? to : { ...to, alt: from.alt, aiGenerated: from.aiGenerated };
 }
 
 export interface PublishInput {
@@ -33,6 +49,28 @@ export interface PublishInput {
   scheduleAt?: string; // ISO 8601, UTC
   /** غلاف المقطع — مكيّفاً إلى أبعاده — للمنصات التي تقبله. */
   cover?: PublishMedia;
+  /**
+   * مفتاحُ محاولة النشر لدى المزوّد — طلبٌ ثانٍ بالمفتاح نفسه يُرفض ولا يُنشر.
+   * يبقى للموعد ما دامت نتيجة محاولته لا تُعرف (`PublishUncertain`)، ويُجدَّد
+   * بعد كل نتيجةٍ معروفة. ومن لا يقبله من المزوّدين يتجاهله.
+   */
+  idempotencyKey?: string;
+  /** خيارات النشر لهذه المنصة (`services/publishOptions.ts`) — ومن لا يعرفها من المزوّدين يتجاهلها. */
+  options?: PublishOptions;
+  /** ملف ترجمة المقطع (يوتيوب) إن اختير في خياراتها. */
+  subtitle?: PublishMedia;
+}
+
+/**
+ * نشرٌ لا تُعرف نتيجته: انقطع الاتصال أو انتهت المهلة قبل ردّ المزوّد، فقد
+ * يكون المنشور وصله. فيبقى للموعد مفتاحُ محاولته — وإعادةُ النشر بالمفتاح
+ * نفسه يرفضها المزوّد إن كان المنشور وصله، فلا يُنشر مرّتين.
+ */
+export class PublishUncertain extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublishUncertain';
+  }
 }
 
 /**
@@ -92,7 +130,15 @@ export interface CommentItem {
 export interface PublishingProvider {
   publish(input: PublishInput): Promise<PublishResult>;
   getAnalytics(providerPostId: string): Promise<AnalyticsResult>;
+  /** تنظيفٌ لا يُعطّل: يبتلع خطأه. وللحذف الذي يراه الفريق `deleteFromPlatform`. */
   deletePost(providerPostId: string): Promise<void>;
+  /**
+   * يحذف منشوراً نُشر من منصته نفسها — ويرمي بسببٍ يُقرأ إن تعذّر. اختيارية:
+   * من لا يُعلنها يُقال عنه إن مزوّد النشر لا يحذف. و`extraIds` منشوراتٌ أخرى
+   * للموعد نفسه (سناب). والمنصة التي لا تحذف عبر الواجهة (إنستغرام وتيك توك)
+   * يُحذف منشورها من تطبيقها، ثم يُسجَّل هنا محذوفاً بعد أن يتحقّق المزوّد.
+   */
+  deleteFromPlatform?(providerPostId: string, opts: { platform: string; extraIds?: string[] }): Promise<void>;
   /**
    * حالُ منشورٍ قبله المزوّد ولم يؤكّد نشره — اختيارية. `null` = المزوّد لا
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
@@ -106,7 +152,8 @@ export interface PublishingProvider {
   // إدارة التعليقات/الرسائل — اختيارية؛ المزوّدون غير الداعمين يتجاوزونها بأمان.
   // يعيد replyComment معرّف الرد على المنصة (إن توفّر) لتمكين تعديله/حذفه لاحقاً.
   getComments?(providerPostId: string): Promise<CommentItem[]>;
-  replyComment?(providerPostId: string, commentId: string, text: string): Promise<string | void>;
+  // `media` مرفقٌ يُرسل مع الردّ — للرسالة الخاصة وحدها، ومن لا يقبله من المزوّدين يرفضه بسببه.
+  replyComment?(providerPostId: string, commentId: string, text: string, opts?: { media?: PublishMedia }): Promise<string | void>;
   // إشراف على التعليقات ورد خاص — اختيارية
   moderateComment?(commentId: string, action: ModerateAction): Promise<void>;
   privateReply?(commentId: string, text: string): Promise<void>;

@@ -2,9 +2,13 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth,
+  AyrshareError, ayrshareAutoResponse, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, isOwnAyrshareComment,
+  ownerKey, setAyrshareAutoResponse, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth, type PostWeight,
 } from '../adapters/ayrshare';
+import { logAudit } from '../services/audit';
 import { ayrshareAuth, providerKey } from '../adapters';
+import { htmlToText } from '../util';
+import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
 import { localSyncHealth } from './socialapi';
 
 export const ayrshareRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -25,12 +29,19 @@ ayrshareRoutes.get('/health', requirePermission('settings.manage'), async (c) =>
   const out: Record<string, unknown> = { configured: true };
   const mapping: Record<string, string> = {};
 
+  /* حسابُ النشر المعطّل يردّ كل طلبٍ ٤٠٣ — فيُقال التعطيل وسببه بدل «رفض
+     المفتاح» الذي يُبحث بعده في سرٍّ سليم. وطلبٌ نجح يعني أن الحساب فُعّل:
+     فإن فات حدثُ التفعيل لم يبقَ التعطيل المحفوظ قائماً بلا نهاية. */
+  const suspended = await suspensionNotice(c.env);
   try {
     const { accounts, messagingEnabled } = await ayrshareUser(auth);
     out.accounts = accounts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
     out.messaging_enabled = messagingEnabled;
     for (const a of accounts) mapping[a.platform] = a.id;
-  } catch (e: any) { out.accounts_error = String(e?.message || e); }
+    if (suspended) await clearSuspension(c.env);
+  } catch (e: any) {
+    out.accounts_error = suspended && e instanceof AyrshareError && e.status === 403 ? suspended : String(e?.message || e);
+  }
 
   try {
     out.webhooks = (await listAyrshareWebhooks(auth)).map((h) => ({ id: h.event, url: h.url, is_active: true }));
@@ -81,6 +92,78 @@ function identity(c: any, owners: Set<string>) {
     keys: c && typeof c === 'object' ? Object.keys(c).sort() : [],
   };
 }
+
+/* ═══ طول النص لكل منصة — لعدّاد «نسخة كل منصة» ═══
+
+   النصّ لكل منصةٍ كما يُرسل عند النشر (`prepareInput`): نسختها إن كُتبت وإلا
+   المتن، مجرّداً من الوسوم بالدالة نفسها. ويُسأل Ayrshare مرّةً لكل نصٍّ مختلف
+   لا لكل منصة. ولا عدّاد بلا Ayrshare: يُردّ فارغاً فلا يظهر شيء. */
+ayrshareRoutes.post('/post-length', requirePermission('draft.edit'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  type Ask = { body?: string; title?: string; overrides?: Record<string, string>; platforms?: string[] };
+  const { body = '', title = '', overrides = {}, platforms = [] } = await c.req.json<Ask>().catch((): Ask => ({}));
+  const name = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>())?.value;
+  if (!auth || (name || c.env.PROVIDER_NAME || '').toLowerCase() !== 'ayrshare' || !Array.isArray(platforms)) {
+    return c.json({ lengths: {} });
+  }
+
+  const textOf = (p: string) => (htmlToText(String(overrides?.[p] || '').trim() || String(body || '')) || String(title || '')).trim();
+  const byText = new Map<string, string[]>();
+  for (const p of platforms.slice(0, 20)) {
+    const t = textOf(String(p));
+    if (t) byText.set(t, [...(byText.get(t) ?? []), String(p)]);
+  }
+  const lengths: Record<string, PostWeight> = {};
+  try {
+    for (const [text, list] of [...byText].slice(0, 5)) {
+      const weight = await ayrsharePostWeight(auth, text);
+      for (const p of list) {
+        const w = weight[ayrsharePlatform(p)];
+        if (w) lengths[p] = w;
+      }
+    }
+  } catch { /* العدّاد زينة: تعذّره يُخفيه ولا يمنع الكتابة */ }
+  return c.json({ lengths });
+});
+
+/* ═══ الرد التلقائي على الرسائل الخاصة ═══
+
+   للمدير العام كبقية إعدادات المزوّد: كل محادثةٍ يُرسل فيها الردّ تُحتسب محادثةً
+   نشطة في فاتورة Ayrshare. والنصّ مطلوبٌ حين يُفعَّل — فارغُه يُرسل نصَّ Ayrshare
+   الإنجليزي الافتراضي لعملاء عرب. والمدد المعروضة وحدها تُقبل. */
+const AUTO_WAITS = [3600, 21_600, 86_400, 259_200];
+const AUTO_MESSAGE_MAX = 1000;
+
+ayrshareRoutes.get('/autoresponse', requirePermission('settings.manage'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  try {
+    return c.json(await ayrshareAutoResponse(auth));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+ayrshareRoutes.post('/autoresponse', requirePermission('settings.manage'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  const b = await c.req.json<{ active?: boolean; message?: string; waitSeconds?: number }>().catch(() => ({}) as any);
+  const message = String(b.message ?? '').trim();
+  const waitSeconds = Number(b.waitSeconds);
+  if (b.active && !message) return c.json({ error: 'اكتب نص الرد التلقائي قبل تفعيله' }, 400);
+  if (message.length > AUTO_MESSAGE_MAX) return c.json({ error: 'نص الرد التلقائي أطول من ألف حرف. اختصره ثم احفظ' }, 400);
+  if (!AUTO_WAITS.includes(waitSeconds)) return c.json({ error: 'اختر مدّةً من القائمة' }, 400);
+  try {
+    await setAyrshareAutoResponse(auth, { active: !!b.active, message, waitSeconds });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+  const user = c.get('user');
+  c.executionCtx.waitUntil(
+    logAudit(c.env, { id: user.id, name: user.name }, 'settings_update', 'settings', undefined, 'الرد التلقائي على الرسائل الخاصة'),
+  );
+  return c.json({ ok: true });
+});
 
 ayrshareRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {
   const auth: AyrshareAuth | null = ayrshareAuth(c.env);

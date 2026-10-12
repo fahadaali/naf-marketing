@@ -97,9 +97,10 @@ export const SCHEDULED_PLATFORMS_SQL =
   '(SELECT group_concat(DISTINCT sp.platform) FROM schedules sp WHERE sp.post_id = p.id) AS scheduled_platforms';
 
 /** ما نُشر من مواعيد المنشور — تشتقّ منه الواجهة «منشور جزئياً»: مجدولٌ نُشر
-    على بعض منصاته وينتظر غيرها. حالةُ عرضٍ كـ«متأخر» لا عمودٌ في القاعدة. */
+    على بعض منصاته وينتظر غيرها. حالةُ عرضٍ كـ«متأخر» لا عمودٌ في القاعدة.
+    وما حُذف منشوره من منصته لا يُعدّ: لم يعد منشوراً عليها (0041). */
 export const PUBLISHED_COUNT_SQL =
-  "(SELECT COUNT(*) FROM schedules pc WHERE pc.post_id = p.id AND pc.status = 'published') AS published_count";
+  "(SELECT COUNT(*) FROM schedules pc WHERE pc.post_id = p.id AND pc.status = 'published' AND pc.deleted_at IS NULL) AS published_count";
 
 /** «فكرة»: مسودةٌ لم يُكتب نصّها. والنصّ الفارغ مطبَّعٌ إلى '' عند كل كتابة. */
 export function isIdeaRow(p: { status: string; body: string | null }): boolean {

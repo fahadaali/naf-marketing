@@ -1,14 +1,16 @@
 import type { Env } from '../types';
-import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters/provider';
+import { PublishUncertain, keepDescription, type PublishInput, type PublishMedia, type PublishingProvider } from '../adapters/provider';
 import { getProvider } from '../adapters';
-import { nowIso, htmlToText, extractMediaIds } from '../util';
+import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
-import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
+import { adaptImage, frameImage, imageDims, platformMediaFilter, videoIssues } from './mediaSpecs';
+import { optionIssues, parseOptions } from './publishOptions';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
 // 2) بعد النشر يخزّن provider_post_id ويضع الحالة 'published'.
 // إعادة المحاولة لا تنشر نفس المنشور مرتين لأن الالتقاط يعتمد على انتقال pending -> processing.
+// 3) ومحاولةٌ لا تُعرف نتيجتها تُعاد بمفتاحها نفسه (`publish_key`)، فيرفضها المزوّد إن كانت الأولى وصلته.
 
 type Job = { id: string; post_id: string; platform: string; body: string; title: string };
 
@@ -57,36 +59,45 @@ export function mediaIssues(platform: string, media: PublishMedia[]): string[] {
     والفحص المسبق لا يكيّف الصور (`adapt: false`): يكفيه أن يعرف ما سيُرسل. */
 async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}): Promise<PublishInput> {
   const variant = await env.DB.prepare(
-    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id, options_json
      FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(job.post_id, job.platform)
     .first<{
       body_override: string | null; media_asset_id: string | null; first_comment: string | null;
-      generated_media_id: string | null; generated_from_id: string | null;
+      generated_media_id: string | null; generated_from_id: string | null; options_json: string | null;
     }>();
+  const options = parseOptions(variant?.options_json);
 
   // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
   const rawBody = variant?.body_override || job.body || '';
   const text = (htmlToText(rawBody) || job.title || '').trim();
 
-  // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
-  let assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور — بما تقبله المنصة منها
+  const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  let media = platformMediaFilter(job.platform, await loadMedia(env, assetIds));
   /* مقطعٌ وُلّد من صورة المنصة الواحدة (تيك توك) يحلّ محلّها — ما دامت هي
      الصورة نفسها. فإن تغيّرت بعده أُرسلت الصورة، فيقول `missingRequirement`
-     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. */
-  if (variant?.generated_media_id && assetIds.length === 1 && assetIds[0] === variant.generated_from_id) {
-    assetIds = [variant.generated_media_id];
+     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. والمقطع مولَّدٌ إن كانت صورته
+     مولَّدة: الوسم للمحتوى لا للملف. */
+  if (variant?.generated_media_id && media.length === 1 && media[0].id === variant.generated_from_id) {
+    const [image] = media;
+    const [clip] = await loadMedia(env, [variant.generated_media_id]);
+    media = [image.aiGenerated && !clip.aiGenerated ? { ...clip, aiGenerated: true } : clip];
   }
-  let media = await loadMedia(env, assetIds);
 
   /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها
      (`adaptImage`). وبلا ربط `IMAGES` تُرسل كما هي، كما كانت. */
   if (opts.adapt && env.IMAGES) {
     const adapted: PublishMedia[] = [];
-    for (const m of media) adapted.push(await adaptImage(env.IMAGES, job.platform, m));
+    for (const m of media) adapted.push(keepDescription(m, await adaptImage(env.IMAGES, job.platform, m)));
     media = adapted;
   }
+
+  // ملف الترجمة من مكتبة الوسائط — وما حُذف منها يُنشر المقطع بلا ترجمة كما يُنشر بلا غلاف
+  const subtitle = options.subtitle
+    ? (await loadMedia(env, [options.subtitle.mediaId]).catch(() => [] as PublishMedia[]))[0]
+    : undefined;
 
   return {
     platforms: [job.platform],
@@ -95,6 +106,8 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
     media,
     firstComment: variant?.first_comment || undefined,
     cover: opts.adapt ? await loadCover(env, job.post_id, media) : undefined,
+    ...(Object.keys(options).length ? { options } : {}),
+    ...(subtitle ? { subtitle } : {}),
   };
 }
 
@@ -127,9 +140,18 @@ function extraIds(ids?: string[]): string | null {
   return ids?.length ? JSON.stringify(ids) : null;
 }
 
-async function failJob(env: Env, job: Job, errMsg: string): Promise<void> {
-  await env.DB.prepare("UPDATE schedules SET status = 'failed', error = ?, published_at = NULL WHERE id = ?")
-    .bind(errMsg, job.id)
+/**
+ * يكتب الفشل على الموعد ويُشعر به. ومفتاحُ المحاولة يُمحى — الرفض نتيجةٌ
+ * معروفة، والإعادة محاولةٌ جديدة — إلا ما لا تُعرف نتيجته (`keepKey`): يبقى
+ * مفتاحه فتُرفض إعادته لدى المزوّد إن كان المنشور وصله.
+ */
+async function failJob(env: Env, job: Job, errMsg: string, opts: { keepKey?: boolean } = {}): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE schedules SET status = 'failed', error = ?, published_at = NULL,
+            publish_key = CASE WHEN ? = 1 THEN publish_key ELSE NULL END
+     WHERE id = ?`,
+  )
+    .bind(errMsg, opts.keepKey ? 1 : 0, job.id)
     .run();
   try { await notifyPublishFailed(env, job.post_id, job.platform, errMsg); } catch { /* لا تعطّل النشر */ }
 }
@@ -158,21 +180,29 @@ async function publishJobs(
   for (const job of jobs) {
     /* قفل ذرّي: لا ينجح إلا لأول عامل يلتقط الوظيفة. ووقتُ الالتقاط في
        `published_at` ما دام الجدول «قيد النشر» — به يُعرف جدولٌ انقطع عامله
-       قبل أن يكتب النتيجة (`reconcilePublishing`). */
+       قبل أن يكتب النتيجة (`reconcilePublishing`).
+
+       ومفتاحُ المحاولة يُولد هنا إن لم يبقَ للموعد مفتاحٌ من محاولةٍ لا تُعرف
+       نتيجتها — فإن بقي أُرسل هو نفسه (`publish_key` في 0040). */
     const lock = await env.DB.prepare(
-      "UPDATE schedules SET status = 'processing', published_at = ?, error = NULL WHERE id = ? AND status IN ('pending','failed')",
+      `UPDATE schedules SET status = 'processing', published_at = ?, error = NULL,
+              publish_key = COALESCE(publish_key, ?)
+       WHERE id = ? AND status IN ('pending','failed')`,
     )
-      .bind(nowIso(), job.id)
+      .bind(nowIso(), newId('pub'), job.id)
       .run();
     if (lock.meta.changes === 0) continue; // التقطها عامل آخر أو نُشرت مسبقاً
 
     try {
       if (!provider) throw new Error(providerError);
 
-      const input = await prepareInput(env, job, { adapt: true });
+      const key = await env.DB.prepare('SELECT publish_key FROM schedules WHERE id = ?')
+        .bind(job.id)
+        .first<{ publish_key: string | null }>();
+      const input = { ...(await prepareInput(env, job, { adapt: true })), idempotencyKey: key?.publish_key || undefined };
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
-      const issues = mediaIssues(job.platform, input.media || []);
+      const issues = [...mediaIssues(job.platform, input.media || []), ...optionIssues(job.platform, input.options || {}, input.media || [])];
       if (issues.length) throw new Error(issues.join(' · '));
 
       const result = await provider.publish(input);
@@ -188,13 +218,15 @@ async function publishJobs(
       }
       // `note`: نشرةٌ من نشرات الموعد لم تُنشر وغيرها نُشر (سناب) — يُكتب تحته
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?, extra_provider_ids = ? WHERE id = ?",
+        `UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?,
+                extra_provider_ids = ?, publish_key = NULL
+         WHERE id = ?`,
       )
         .bind(result.providerPostId, nowIso(), result.note || null, extraIds(result.extraIds), job.id)
         .run();
       published++;
     } catch (err: any) {
-      await failJob(env, job, String(err?.message || err));
+      await failJob(env, job, String(err?.message || err), { keepKey: err instanceof PublishUncertain });
       failed++;
     }
   }
@@ -211,16 +243,17 @@ async function publishJobs(
 //
 // ووسيطٌ في المحتوى لا يوجد سجلُّه أو ملفُّه كان يُتخطّى صامتاً، فيُنشر
 // المنشور بلا صورته — أو يُرفض في منصةٍ لا تقبله بلا وسيط بسببٍ لا يدلّ عليه.
-async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> {
+export async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> {
   const out: PublishMedia[] = [];
   for (const id of assetIds.slice(0, 4)) {
     const asset = await env.DB.prepare(
-      'SELECT r2_key, mime_type, filename, width, height, duration_ms FROM media_assets WHERE id = ?',
+      'SELECT r2_key, mime_type, filename, width, height, duration_ms, alt_text, ai_generated FROM media_assets WHERE id = ?',
     )
       .bind(id)
       .first<{
         r2_key: string; mime_type: string | null; filename: string | null;
         width: number | null; height: number | null; duration_ms: number | null;
+        alt_text: string | null; ai_generated: number | null;
       }>();
     const head = asset ? await env.MEDIA.head(asset.r2_key) : null;
     if (!asset || !head) {
@@ -228,6 +261,7 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
     }
     const key = asset.r2_key;
     out.push({
+      id,
       open: async () => (await env.MEDIA.get(key))?.body ?? null,
       size: head.size,
       mimeType: asset.mime_type || 'application/octet-stream',
@@ -235,6 +269,8 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
       width: asset.width,
       height: asset.height,
       duration_ms: asset.duration_ms,
+      alt: asset.alt_text?.trim() || null,
+      aiGenerated: !!asset.ai_generated,
     });
   }
   return out;
@@ -343,6 +379,7 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
     .bind(interruptedBefore)
     .all<{ id: string; post_id: string; platform: string }>();
   for (const row of stuck.results || []) {
+    // ومفتاح محاولته يبقى: إن كان المنشور وصل المزوّد رُفضت إعادته ولم يتكرّر
     const r = await env.DB.prepare(
       "UPDATE schedules SET status = 'failed', error = ?, published_at = NULL WHERE id = ? AND status = 'processing'",
     )
@@ -390,14 +427,17 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
         const msg = check.state === 'failed'
           ? `فشل النشر عبر المزوّد: ${check.error || 'رفضت المنصة المنشور'}`
           : UNCONFIRMED_ERROR;
-        await failJob(env, { id: row.id, post_id: row.post_id, platform: row.platform, body: '', title: '' }, msg);
+        // ما لم يُؤكَّد قد يُنشر بعد: يبقى مفتاحه فلا تُكرّره إعادة النشر
+        await failJob(env, { id: row.id, post_id: row.post_id, platform: row.platform, body: '', title: '' }, msg, {
+          keepKey: check.state === 'pending',
+        });
         failed++;
         continue;
       }
       // نُشر — أو لا يُعلن المزوّد حالاً يُقرأ فيُعدّ منشوراً كما كان. ووقتُ
       // النشر وقتُ الإرسال المحفوظ لا وقتُ هذا السؤال.
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', error = NULL WHERE id = ? AND status = 'processing'",
+        "UPDATE schedules SET status = 'published', error = NULL, publish_key = NULL WHERE id = ? AND status = 'processing'",
       )
         .bind(row.id)
         .run();
@@ -447,6 +487,7 @@ export async function preflightSchedules(
       const missing = missingRequirement(platform, input.text, input.media || []);
       if (missing) issues.push(missing);
       issues.push(...mediaIssues(platform, input.media || []));
+      issues.push(...optionIssues(platform, input.options || {}, input.media || []));
       if (provider.preflight) issues.push(...(await provider.preflight(input)));
     } catch (err: any) {
       issues.push(String(err?.message || err));

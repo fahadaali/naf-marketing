@@ -18,8 +18,9 @@ export async function generateImageAsset(
   await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: mimeType } });
 
   const filename = `صورة-${prompt.slice(0, 24).trim() || 'مولّدة'}.${ext}`;
+  // مولَّدٌ هنا فيُوسم وحده — المنصات التي تعلن الوسم تُعلَم به عند النشر (0042)
   await env.DB.prepare(
-    'INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename, ai_generated) VALUES (?, ?, ?, ?, ?, ?, 1)',
   )
     .bind(id, key, mimeType, bytes.length, userId, filename)
     .run();
@@ -82,7 +83,7 @@ export async function pollVideoJob(env: Env, jobId: string): Promise<any> {
     await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: 'video/mp4' } });
     const filename = `فيديو-${(job.prompt || '').slice(0, 24).trim() || 'مولّد'}.mp4`;
     await env.DB.prepare(
-      'INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename, ai_generated) VALUES (?, ?, ?, ?, ?, ?, 1)',
     )
       .bind(mediaId, key, 'video/mp4', bytes.length, job.requested_by, filename)
       .run();

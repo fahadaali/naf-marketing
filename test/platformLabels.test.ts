@@ -14,7 +14,7 @@ import {
   customPlatformLabels,
 } from '../src/platformLabels';
 import { normalizePlatform, PLATFORM_KEYS } from '../web/src/platformKeys';
-import { DIMENSION_LABELS, MEASUREMENT_CHANNEL_LABELS, SPEND_CHANNEL_LABELS, spendChannelOptions } from '../web/src/metrics';
+import { DIMENSION_LABELS, GENDER_LABELS, MEASUREMENT_CHANNEL_LABELS, SPEND_CHANNEL_LABELS, dimensionLabel, spendChannelOptions } from '../web/src/metrics';
 import { scheduleRoutes } from '../src/routes/schedules';
 import { postRoutes } from '../src/routes/posts';
 import { notifyPublishFailed } from '../src/services/notify';
@@ -230,6 +230,14 @@ describe('مفردات المؤشّرات في الواجهة', () => {
     const dims = db.prepare("SELECT DISTINCT dim_key FROM metric_definitions WHERE dim_key <> ''").all().map((r: any) => r.dim_key);
     expect(dims.length).toBeGreaterThan(0);
     expect(dims.filter((k: string) => !DIMENSION_LABELS[k])).toEqual([]);
+  });
+
+  it('قيم الجنس نسخة السجلّ، والبلد باسمه العربي، والفئة العمرية معزولة الاتجاه', () => {
+    expect(GENDER_LABELS).toEqual(termsTable('قيم بُعد الجنس'));
+    expect(dimensionLabel('gender', 'unknown')).toBe('غير معلن');
+    // الاسم من بيانات اللغة في المتصفح — «المملكة العربية السعودية» في أكثرها
+    expect(dimensionLabel('country', 'SA')).toContain('السعودية');
+    expect(dimensionLabel('age_range', '18-24')).toBe('\u206818-24\u2069');
   });
 
   it('قنوات الإنفاق نسخة السجلّ — و`google` فيها إعلاناتٌ لا الملف التجاري', () => {

@@ -44,10 +44,13 @@ export async function checkStaleContent(env: Env): Promise<void> {
     if (!permissionKey) continue;
     const link = `/editor/${item.id}`;
 
+    /* الحدّ بصيغة `created_at` نفسها (`…T…Z`). وكان `datetime()` الذي يكتب
+       مسافةً مكان `T`، فيُقارَن نصّاً كلُّ تنبيهٍ في يوم الحدّ «أحدثَ» أيّاً كانت
+       ساعته — فيُسقط تنبيهَ يومٍ كامل عن منشورٍ ما زال عالقاً. */
     const recent = await env.DB.prepare(
       `SELECT id FROM notifications
        WHERE type = 'stale_alert' AND link = ?
-         AND created_at >= datetime('now', '-20 hours')
+         AND created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-20 hours')
        LIMIT 1`,
     )
       .bind(link)

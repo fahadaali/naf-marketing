@@ -3,6 +3,7 @@ import type {
   ModerateAction,
 } from './provider';
 import { platformNames } from '../platformLabels';
+import type { ThreadEntry } from '../services/inboxThread';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
@@ -573,19 +574,23 @@ export function mapMetrics(metricsObj: any): {
   const nested = new Map<string, number>();
   // الاسم كما أرسله المزوّد — يُحفظ مع الموحَّد فلا يضيع أصلُه
   const original = new Map<string, string>();
+  /* ووحدةُ ما جاء مصفوفةً بوحداته — المدّة بالدقائق — تبقى كما هي. وكانت تُعاد
+     «count» لكل ما ليس نسبة، فتُكتب مدّة المشاهدة عدداً. */
+  const units = new Map<string, string>();
   let syncedAt: unknown;
 
-  const put = (into: Map<string, number>, key: string, value: unknown) => {
+  const put = (into: Map<string, number>, key: string, value: unknown, name?: unknown, unit?: unknown) => {
     const n = typeof value === 'number' ? value : Number(value);
     // معرّفٌ أو ترتيبٌ رقميّ ليس مقياساً — ولا يجعل منشوراً بلا أرقام «مقيساً»
     if (!key || !Number.isFinite(n) || key === 'id' || /_id$|^index$|position|version/.test(key)) return;
     const k = METRIC_ALIASES[key] ?? key;
     if (!into.has(k)) into.set(k, n);
-    if (!original.has(k)) original.set(k, key);
+    if (!original.has(k)) original.set(k, typeof name === 'string' && name ? name : key);
+    if (typeof unit === 'string' && unit && !units.has(k)) units.set(k, unit);
   };
 
   if (Array.isArray(metricsObj)) {
-    for (const m of metricsObj) put(top, String(m?.type || m?.name || '').toLowerCase(), m?.value);
+    for (const m of metricsObj) put(top, String(m?.type || m?.name || '').toLowerCase(), m?.value, m?.name, m?.unit);
   } else if (metricsObj && typeof metricsObj === 'object') {
     if ('metrics_synced_at' in metricsObj) syncedAt = metricsObj.metrics_synced_at;
     // نتعمّق في الكائنات المتداخلة (مثل extra:{view_count}) لتسطيح كل المقاييس الرقمية
@@ -606,7 +611,7 @@ export function mapMetrics(metricsObj: any): {
 
   const raw: any[] = [];
   for (const [key, value] of entries) {
-    raw.push({ type: key, name: original.get(key) ?? key, value, unit: key.includes('rate') ? 'percentage' : 'count' });
+    raw.push({ type: key, name: original.get(key) ?? key, value, unit: units.get(key) ?? (key.includes('rate') ? 'percentage' : 'count') });
   }
 
   /* الوصول والظهور والمشاهدات: الاسم الصريح أوّلاً، وإلا أكبرُ ما حمل الكلمة.
@@ -661,6 +666,8 @@ export type InboxItem = {
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
   /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
   interactionId?: string | null;
+  /** السلسلة تحت التعليق كلُّها — من Ayrshare. غيابُها: لا سلسلة تُكتب ولا تُمسّ. */
+  thread?: ThreadEntry[];
 };
 
 /** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */

@@ -35,8 +35,9 @@ describe('حسابات Ayrshare', () => {
       { id: '1194881472', platform: 'x', name: 'naf', messaging: true },
       { id: '1068', platform: 'youtube', name: 'قناة ناف', messaging: false },
     ]);
-    // معرّفات الحساب وأسماؤه — بها يُعرف ردُّنا
-    expect(mapAyrshareAccounts(USER)[4].ownerKeys).toEqual(['1068', 'fahad', 'قناة ناف', 'ucx']);
+    // معرّفات الحساب وأسماؤه — بها يُعرف ردُّنا. ويوتيوب بلا اسم صاحب حساب جوجل:
+    // التعليق تكتبه القناة، ومعلّقٌ يوافق اسمُه ذلك الاسم كان يُعدّ منّا فيُسقط
+    expect(mapAyrshareAccounts(USER)[4].ownerKeys).toEqual(['1068', 'قناة ناف', 'ucx']);
     // ومعرّف القناة بحروفه — به تُقرأ قائمة مقاطعها
     expect(mapAyrshareAccounts(USER)[4].channelId).toBe('UCx');
     // بلا حسابات لا يردّ Ayrshare `displayNames` أصلاً

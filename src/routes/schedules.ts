@@ -4,7 +4,9 @@ import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
 import { publishPostNow, preflightSchedules } from '../services/publish';
 import { syncPostSafe } from '../services/basecampSync';
-import { customPlatformLabels, scheduleNote } from '../platformLabels';
+import { logAudit } from '../services/audit';
+import { getProvider } from '../adapters';
+import { customPlatformLabels, platformName, scheduleNote } from '../platformLabels';
 
 export const scheduleRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -80,9 +82,10 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
   const when = new Date(scheduled_at);
   if (isNaN(when.getTime())) return c.json({ error: 'موعد غير صالح' }, 400);
 
-  // ما نُشر عليه لا يُجدوَل ثانيةً — وإلا نُشر المحتوى عليه مرّتين
+  // ما نُشر عليه لا يُجدوَل ثانيةً — وإلا نُشر المحتوى عليه مرّتين. وما حُذف منشوره
+  // من منصته لم يعد منشوراً عليها، فيُجدوَل من جديد (0041)
   const { results: done } = await c.env.DB.prepare(
-    "SELECT DISTINCT platform FROM schedules WHERE post_id = ? AND status = 'published'",
+    "SELECT DISTINCT platform FROM schedules WHERE post_id = ? AND status = 'published' AND deleted_at IS NULL",
   )
     .bind(post_id)
     .all<{ platform: string }>();
@@ -128,6 +131,48 @@ scheduleRoutes.post('/', requirePermission('content.schedule'), async (c) => {
   // ما سترفضه المنصات يُعرف الآن لا في الموعد — ويُكتب على كل موعدٍ تحته
   const issues = await preflightSchedules(c.env, post_id, targets).catch(() => []);
   return c.json({ ok: true, issues });
+});
+
+/* ═══ حذفُ المنشور من منصته ═══
+
+   فعلٌ علنيٌّ فوري كالنشر الآن، فلمن ينشر الآن: المدير العام. والموعد يبقى
+   بوقت حذفه (`deleted_at` في 0041) — فيه وقت النشر وما سُحب من أرقامه — ويُجدوَل
+   المحتوى على المنصة من جديد إن شاء الفريق. ويُسجَّل في سجلّ التدقيق. */
+scheduleRoutes.post('/:id/delete-post', requirePermission('content.approve_final'), async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare(
+    'SELECT post_id, platform, status, provider_post_id, extra_provider_ids, deleted_at FROM schedules WHERE id = ?',
+  )
+    .bind(id)
+    .first<{
+      post_id: string; platform: string; status: string; provider_post_id: string | null;
+      extra_provider_ids: string | null; deleted_at: string | null;
+    }>();
+  if (!row) return c.json({ error: 'الموعد غير موجود' }, 404);
+  if (row.deleted_at) return c.json({ error: 'حُذف هذا المنشور من منصته من قبل' }, 400);
+  if (row.status !== 'published' || !row.provider_post_id) {
+    return c.json({ error: 'لا يُحذف من المنصة إلا منشورٌ نُشر عليها. والموعد الذي لم يُنشر يُلغى' }, 400);
+  }
+
+  const provider = await getProvider(c.env);
+  if (!provider.deleteFromPlatform) {
+    return c.json({ error: 'مزوّد النشر الحالي لا يحذف المنشور من منصته. احذفه من تطبيق المنصة' }, 400);
+  }
+  let extraIds: string[] = [];
+  try { extraIds = row.extra_provider_ids ? JSON.parse(row.extra_provider_ids) : []; } catch { /* بلا منشوراتٍ أخرى */ }
+  try {
+    await provider.deleteFromPlatform(row.provider_post_id, { platform: row.platform, extraIds });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+
+  await c.env.DB.prepare('UPDATE schedules SET deleted_at = ? WHERE id = ?').bind(nowIso(), id).run();
+  const user = c.get('user');
+  c.executionCtx.waitUntil(
+    logAudit(c.env, { id: user.id, name: user.name }, 'post_unpublish', 'schedule', id,
+      platformName(row.platform, await customPlatformLabels(c.env))),
+  );
+  return c.json({ ok: true });
 });
 
 // إلغاء جدولة معلّقة

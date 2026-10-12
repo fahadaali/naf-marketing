@@ -11,13 +11,14 @@ import { Upload } from 'lucide-react';
 import { api } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { uploadMedia } from '../mediaUpload';
-import { isolate } from '../lib/format';
+import PlatformOptions, { HAS_OPTIONS, type PlatformOptionsValue } from './PlatformOptions';
+import { formatNumber, isolate } from '../lib/format';
 import {
-  bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode,
+  bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode, isDocumentAsset,
   type AssetInfo, type MediaSpecs, type Variant,
 } from '../mediaPlan';
 
-export type VariantRow = Variant & { body_override?: string | null; first_comment?: string | null };
+export type VariantRow = Variant & { body_override?: string | null; first_comment?: string | null; options_json?: string | null };
 
 let specsPromise: Promise<MediaSpecs | null> | null = null;
 /** المواصفات لا تتغيّر في الجلسة — تُطلب مرّةً. وتعذّرها يُخفي الشارات ولا يمنع شيئاً. */
@@ -65,9 +66,11 @@ export default function PlatformVariants({
 }: Props) {
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
+  const [options, setOptions] = useState<Record<string, PlatformOptionsValue>>({});
   const [rows, setRows] = useState<Record<string, VariantRow>>({});
   const [saving, setSaving] = useState('');
   const [specs, setSpecs] = useState<MediaSpecs | null>(null);
+  const [lengths, setLengths] = useState<Record<string, { length: number; max: number; valid: boolean }>>({});
   const autoOpened = useRef(false);
   // حقل ملفٍ واحد للمنصات كلها — الزرّ يُركَّز بلوحة المفاتيح، والحقل مخفيّ
   const fileRef = useRef<HTMLInputElement>(null);
@@ -80,16 +83,38 @@ export default function PlatformVariants({
   useEffect(() => {
     const t: Record<string, string> = {};
     const c: Record<string, string> = {};
+    const o: Record<string, PlatformOptionsValue> = {};
     const r: Record<string, VariantRow> = {};
     for (const v of variants) {
       if (v.body_override) t[v.platform] = v.body_override;
       if (v.first_comment) c[v.platform] = v.first_comment;
+      if (v.options_json) {
+        try { o[v.platform] = JSON.parse(v.options_json); } catch { /* بلا خيارات */ }
+      }
       r[v.platform] = v;
     }
     setTexts(t);
     setComments(c);
+    setOptions(o);
     setRows(r);
   }, [variants]);
+
+  /* طول النص لكل منصة كما تعدّه هي (Ayrshare: الرابط في إكس ٢٣ حرفاً، والرمز
+     التعبيري حرفان). يُسأل والبطاقة مفتوحة وحدها، بعد أن يهدأ الكتابة —
+     فطلبات المزوّد حصّةٌ يشترك فيها السحب والنشر. وتعذّره يُخفي العدّاد. */
+  const lengthKey = JSON.stringify([open, body, texts, platforms]);
+  useEffect(() => {
+    if (!open || !platforms.length) return;
+    const t = window.setTimeout(() => {
+      api
+        .post<{ lengths: Record<string, { length: number; max: number; valid: boolean }> }>(
+          '/ayrshare/post-length', { body, overrides: texts, platforms },
+        )
+        .then((d) => setLengths(d.lengths || {}))
+        .catch(() => setLengths({}));
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [lengthKey]);
 
   const bodyIds = useMemo(() => bodyMediaIds(body), [body]);
   const allIds = useMemo(() => {
@@ -103,6 +128,35 @@ export default function PlatformVariants({
   const fetched = useAssetInfo(allIds);
   const [uploaded, setUploaded] = useState<Record<string, AssetInfo>>({});
   const assets = useMemo(() => ({ ...fetched, ...uploaded }), [fetched, uploaded]);
+
+  /* ═══ وصف الوسائط ═══
+     النص البديل ووسم الذكاء الاصطناعي صفةٌ للوسيط لا للمنصة: يُكتب مرّةً هنا
+     ويُرسل مع الصورة إلى كل منصةٍ تقبله. والمقطع المصنوع من صورةٍ لتيك توك
+     لا يُوصف وحده — يتبع صورته. */
+  const describable = useMemo(() => {
+    const ids = new Set(bodyIds);
+    for (const v of Object.values(rows)) if (v.media_asset_id) ids.add(v.media_asset_id);
+    return [...ids].filter((id) => /^(image|video)\//.test(assets[id]?.mime_type || ''));
+  }, [bodyIds, rows, assets]);
+  const [alts, setAlts] = useState<Record<string, string>>({});
+
+  async function describe(id: string, patch: { alt_text?: string; ai_generated?: boolean }) {
+    onError('');
+    try {
+      await api.patch(`/media/${id}/describe`, patch);
+      setUploaded((prev) => ({
+        ...prev,
+        [id]: {
+          ...assets[id],
+          ...('alt_text' in patch ? { alt_text: patch.alt_text?.trim() || null } : {}),
+          ...('ai_generated' in patch ? { ai_generated: patch.ai_generated ? 1 : 0 } : {}),
+        },
+      }));
+      onMsg('تم الحفظ');
+    } catch (e: any) {
+      onError(e.message);
+    }
+  }
 
   const plans = useMemo(
     () => Object.fromEntries(platforms.map((p) => [p, platformMedia(specs, p, bodyIds, rows[p], assets)])),
@@ -130,6 +184,7 @@ export default function PlatformVariants({
       await put(platform, {
         body_override: texts[platform]?.trim() || null,
         first_comment: comments[platform]?.trim() || null,
+        ...(HAS_OPTIONS.has(platform) ? { options: options[platform] || null } : {}),
       });
       onMsg('تم الحفظ');
     } catch (e: any) {
@@ -168,7 +223,9 @@ export default function PlatformVariants({
     }
   }
 
-  const custom = Object.values(texts).filter((v) => v?.trim()).length + Object.values(rows).filter((v) => v.media_asset_id).length;
+  const custom = Object.values(texts).filter((v) => v?.trim()).length
+    + Object.values(rows).filter((v) => v.media_asset_id).length
+    + Object.values(rows).filter((v) => v.options_json).length;
 
   return (
     <div className="card pv-card">
@@ -196,6 +253,50 @@ export default function PlatformVariants({
             اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
             والصورة التي لا تقبل المنصة أبعادها تُوضع في إطارٍ بمقاسها، كما في المعاينة.
           </p>
+          {describable.length > 0 && (
+            <div className="pv-desc">
+              <h5 className="pv-desc-title">وصف الوسائط</h5>
+              <p className="muted pv-hint">
+                النص البديل يقرؤه قارئ الشاشة لمن لا يرى الصورة، ويُرسل إلى لينكدإن وفيسبوك وإنستغرام وإكس.
+                والوسيط المولّد بالذكاء الاصطناعي يُعلَن عنه في المنصات التي تتيح ذلك.
+              </p>
+              {describable.map((id) => {
+                const a = assets[id];
+                const image = (a?.mime_type || '').startsWith('image/');
+                const saved = a?.alt_text || '';
+                const value = alts[id] ?? saved;
+                return (
+                  <div key={id} className="pv-desc-row">
+                    {image
+                      ? <img className="pv-desc-thumb" src={`/api/media/${id}`} alt={saved} loading="lazy" />
+                      : <video className="pv-desc-thumb" src={`/api/media/${id}`} preload="metadata" muted playsInline />}
+                    <div className="pv-desc-fields">
+                      {image && (
+                        <input
+                          className="input"
+                          maxLength={1000}
+                          placeholder="النص البديل — صف ما في الصورة"
+                          aria-label={`النص البديل لـ ${a?.filename || 'الصورة'}`}
+                          value={value}
+                          onChange={(e) => setAlts((v) => ({ ...v, [id]: e.target.value }))}
+                          onBlur={() => { if (value.trim() !== saved) describe(id, { alt_text: value }); }}
+                        />
+                      )}
+                      <label className="pv-desc-ai">
+                        <input
+                          type="checkbox"
+                          className="chk"
+                          checked={!!a?.ai_generated}
+                          onChange={(e) => describe(id, { ai_generated: e.target.checked })}
+                        />
+                        مولّد بالذكاء الاصطناعي
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {platforms.map((p) => {
             const plan = plans[p];
             const busy = saving === p;
@@ -251,6 +352,7 @@ export default function PlatformVariants({
                               <span className="badge gray">كما هي</span>
                             ) : null}
                             {mode && <span className="badge blue">{mode}</span>}
+                            {isDocumentAsset(it.asset) && <span className="badge blue">منشور مستند</span>}
                           </figcaption>
                         </figure>
                       );
@@ -273,11 +375,30 @@ export default function PlatformVariants({
                   value={texts[p] || ''}
                   onChange={(e) => setTexts((v) => ({ ...v, [p]: e.target.value }))}
                 />
+                {/* القصة بلا نصّ فلا طول لها، وسلسلة إكس تقسم ما طال */}
+                {lengths[p] && !options[p]?.story && (() => {
+                  const split = p === 'x' && !!options[p]?.thread;
+                  const over = !lengths[p].valid && !split;
+                  return (
+                    <p className={`pv-length ${over ? 'err' : 'muted'}`}>
+                      الطول <bdi>{formatNumber(lengths[p].length)} / {formatNumber(lengths[p].max)}</bdi>
+                      {over && ` — أطول من حدّ ${platformLabel(p, platLabels)}`}
+                      {split && !lengths[p].valid && ' — يُنشر سلسلة'}
+                    </p>
+                  );
+                })()}
                 <input
                   className="input pv-comment"
                   placeholder="أول تعليق (اختياري) — للروابط والوسوم"
                   value={comments[p] || ''}
                   onChange={(e) => setComments((v) => ({ ...v, [p]: e.target.value }))}
+                />
+                <PlatformOptions
+                  key={`${p}:${rows[p]?.options_json || ''}`}
+                  platform={p}
+                  value={options[p] || {}}
+                  onChange={(v) => setOptions((prev) => ({ ...prev, [p]: v }))}
+                  onError={onError}
                 />
               </div>
             );

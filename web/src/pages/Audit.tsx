@@ -11,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   permission_change: 'تعديل صلاحية',
   settings_update: 'تعديل إعدادات',
   post_delete: 'حذف محتوى',
+  post_unpublish: 'حذف منشور من منصته',
   basecamp_resync: 'إعادة مزامنة بيسكامب',
   report_run: 'توليد تقرير',
   campaign_create: 'إنشاء حملة',

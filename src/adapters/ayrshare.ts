@@ -1,10 +1,12 @@
-import type {
-  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult, ModerateAction,
-  PublishStatusContext,
+import {
+  PublishUncertain, keepDescription,
+  type PublishingProvider, type PublishInput, type PublishResult, type PublishCheck, type PublishMedia,
+  type AnalyticsResult, type ModerateAction, type PublishStatusContext,
 } from './provider';
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
-import { facebookReel, youtubeShort } from '../services/mediaSpecs';
+import { facebookReel, isDocument, youtubeShort } from '../services/mediaSpecs';
+import { sortThread, threadAnswer, type ThreadEntry } from '../services/inboxThread';
 
 /* ═══ Ayrshare ═══
 
@@ -67,6 +69,33 @@ export function errorCodes(data: any): number[] {
 }
 
 /**
+ * رفضٌ يخصّ ما طُلب بعينه — منشورٌ حُذف أو لا أرقام له — لا الحسابَ كلَّه.
+ * فهو ٤xx سوى المفتاح (٤٠١ و٤٠٣)، ورصيد إكس (٤٠٢ برمز 416)، وتمهّل المنصة
+ * (٤٢٩)، ومفتاحَي إكس (419)، وإعادة ربط لينكدإن (475). وما يخصّ الحساب لا
+ * يُختم مقروءاً: يُعاد حين يزول سببه.
+ */
+export function postSpecificRejection(err: AyrshareError): boolean {
+  if (err.status < 400 || err.status >= 500 || [401, 402, 403, 429].includes(err.status)) return false;
+  return !errorCodes(err.body).some((c) => c === 416 || c === 419 || c === 475);
+}
+
+/** رمزا تمهّل المنصة نفسها لا Ayrshare — انظر `ayrshareCall`. */
+const PLATFORM_THROTTLE = new Set([364, 444]);
+
+/**
+ * المنصة التي طلبت التمهّل باسمها لدى Ayrshare — أو فارغ. فيسبوك يحمل رمزه
+ * داخل كتلته (`facebook.code: 444`)، وإكس في أعلى الردّ مع `platform`.
+ */
+export function platformThrottle(data: any): string {
+  if (!data || typeof data !== 'object') return '';
+  if (errorCodes(data).some((c) => PLATFORM_THROTTLE.has(c))) return String(data.platform || 'twitter');
+  for (const [key, v] of Object.entries(data)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && PLATFORM_THROTTLE.has(Number((v as any).code))) return key;
+  }
+  return '';
+}
+
+/**
  * الردّ مع ملفّ مستخدم يُغلَّف في `posts: [...]` — والملف الرئيسي يردّه مكشوفاً.
  * يُقرأ الشكلان فلا يتوقّف النشر لو ربطت الحسابات بملفّ مستخدم لاحقاً.
  */
@@ -113,6 +142,116 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   }
   if (status === 'success' || status === 'scheduled') return { state: 'published' };
   return null;
+}
+
+/* ═══ طول النص كما تعدّه المنصات ═══
+
+   `POST /post/checkPostWeight` يردّ الطول الموزون لكل منصة وحدّها وصحّته
+   («Check Post Length» في توثيقه): إكس يعدّ الرابط ٢٣ حرفاً والرمز التعبيري
+   حرفين، فالعدّ بالحروف وحده يخطئ. والحقول بأسماء Ayrshare وبحالة أحرفها كما
+   في المثال الموثّق — وما لم يرد فيه (ثريدز وسناب)، أو ورد طولُه بلا حكمٍ
+   بصحّته (بلوسكاي)، لا يُقرأ له طول ولا يُحكم عليه بحدٍّ من عندنا. */
+const WEIGHT_FIELD: Record<string, string> = {
+  twitter: 'twitter', linkedin: 'linkedIn', facebook: 'facebook', instagram: 'instagram', tiktok: 'tikTok',
+  youtube: 'youtube', gmb: 'gmb', pinterest: 'pinterest', bluesky: 'bluesky',
+};
+
+export type PostWeight = { length: number; max: number; valid: boolean };
+
+/** طول النص وحدّه لكل منصةٍ لدى Ayrshare — باسمها عنده (`twitter`، `gmb`…). */
+export function mapPostWeight(data: any): Record<string, PostWeight> {
+  const out: Record<string, PostWeight> = {};
+  for (const [ayr, field] of Object.entries(WEIGHT_FIELD)) {
+    const length = Number(data?.[`${field}WeightedLength`]);
+    const max = Number(data?.maxCharLimits?.[ayr]);
+    const valid = data?.[`${field}Valid`];
+    if (!Number.isFinite(length) || !Number.isFinite(max) || typeof valid !== 'boolean') continue;
+    out[ayr] = { length, max, valid };
+  }
+  return out;
+}
+
+export async function ayrsharePostWeight(auth: AyrshareAuth, text: string): Promise<Record<string, PostWeight>> {
+  return mapPostWeight(await ayrshareCall<any>(auth, 'POST', '/post/checkPostWeight', { post: text }));
+}
+
+/* ═══ وصفُ الوسائط لكل منصة: النص البديل ووسم الذكاء الاصطناعي ═══
+
+   من صفحات المنصات في توثيقه:
+   - النص البديل `altText` مصفوفةٌ تقابل الوسائط بترتيبها. لينكدإن وإنستغرام
+     للصور وحدها (لا للمقطع ولا للريلز)، وإكس كذلك — ومقطعٌ معه نصٌّ بديل لا
+     يُنشر أصلاً — وفيسبوك للصورة والمقطع. ويُرسل للوسائط بترتيبها حتى أوّل
+     وسيطٍ بلا وصف: مدخلٌ فارغ في المصفوفة لا يُعرف كيف تقرؤه كل منصة.
+   - الوسم `isAIGenerated` لإكس وإنستغرام وتيك توك (للمقطع وحده)، و
+     `containsSyntheticMedia` ليوتيوب. ولينكدإن وفيسبوك لا يعلنانه. */
+const OPTIONS_KEY: Record<string, string> = {
+  twitter: 'twitterOptions', instagram: 'instagramOptions', facebook: 'faceBookOptions',
+  linkedin: 'linkedInOptions', tiktok: 'tikTokOptions', youtube: 'youTubeOptions', gmb: 'gmbOptions',
+};
+const ALT_MAX = 1000;
+
+export function describeMedia(ayrPlatform: string, media: PublishMedia[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const video = media.some((m) => m.mimeType.startsWith('video/'));
+  const altFor = ayrPlatform === 'facebook' || (['linkedin', 'instagram', 'twitter'].includes(ayrPlatform) && !video);
+  if (altFor) {
+    const alts: string[] = [];
+    for (const m of media) {
+      const alt = (m.alt || '').trim();
+      if (!alt) break;
+      alts.push(alt.slice(0, ALT_MAX));
+    }
+    if (alts.length) out.altText = alts;
+  }
+  if (media.some((m) => m.aiGenerated)) {
+    if (ayrPlatform === 'twitter' || ayrPlatform === 'instagram') out.isAIGenerated = true;
+    if (ayrPlatform === 'tiktok' && video) out.isAIGenerated = true;
+    if (ayrPlatform === 'youtube') out.containsSyntheticMedia = true;
+  }
+  return out;
+}
+
+/** يضمّ خياراتٍ إلى كائن المنصة في الطلب (`twitterOptions`…) فوق ما فيه. */
+export function mergeOptions(body: Record<string, unknown>, ayrPlatform: string, extra: Record<string, unknown>): void {
+  const key = OPTIONS_KEY[ayrPlatform];
+  if (!key || !Object.keys(extra).length) return;
+  body[key] = { ...((body[key] as Record<string, unknown>) || {}), ...extra };
+}
+
+/** منصاتٌ لا تحذف المنشور المنشور عبر الواجهة — يُحذف من تطبيقها («Delete Post»). */
+export const MANUAL_DELETE = new Set(['instagram', 'tiktok']);
+
+/* ═══ نشرٌ لا تُعرف نتيجته، ومفتاحٌ رُفض لأنه أُرسل ═══
+
+   انقطاعُ الاتصال قبل الردّ، أو بوّابةٌ ترد ٥٠٢–٥٠٤ بلا رمز خطأ من Ayrshare:
+   قد يكون المنشور وصله ونُشر. فيُرمى `PublishUncertain` ويبقى للموعد مفتاحُ
+   محاولته (`idempotencyKey`)، فإن أُعيد النشر رفضه Ayrshare بدل أن يكرّره.
+
+   ورفضُ المفتاح المكرّر لا رمز له في التوثيق — «an error will be returned,
+   indicating that a duplicate key was found» — فيُعرف من نصّه. */
+const GATEWAY_STATUS = new Set([502, 503, 504]);
+
+export const UNCERTAIN_ERROR =
+  'انقطع الاتصال بـ Ayrshare قبل أن يردّ، فقد يكون المنشور وصله. أعد النشر حين تشاء: إن كان وصله فلن يتكرّر';
+export const DUPLICATE_KEY_ERROR =
+  'وصل هذا المنشور إلى Ayrshare في محاولةٍ سابقة، فلم يُرسل ثانيةً. تحقّق منه على المنصة، وإن لم تجده فأعد النشر';
+
+/** نتيجةٌ لا تُعرف من خطأ النداء: لا ردّ أصلاً، أو بوّابةٌ بلا رمزٍ من Ayrshare. */
+export function uncertainOutcome(err: unknown): boolean {
+  if (!(err instanceof AyrshareError)) return true;
+  return GATEWAY_STATUS.has(err.status) && !errorCodes(err.body).length;
+}
+
+/** رفضُ Ayrshare مفتاحاً أُرسل من قبل — من نصّ الخطأ إذ لا رمز له. */
+export function duplicateKeyRejection(data: any): boolean {
+  const list: any[] = Array.isArray(data?.errors) ? data.errors : [];
+  return [data?.message, ...list.map((e) => e?.message)].some((m) => /idempoten/i.test(String(m || '')));
+}
+
+/** أخطاءٌ كلها يقول Ayrshare إنها تُعاد (`retryAvailable`) — تعثّرٌ مؤقت لدى المنصة. */
+export function retryableFailure(data: any): boolean {
+  const list: any[] = Array.isArray(unwrapAyrsharePost(data)?.errors) ? unwrapAyrsharePost(data).errors : [];
+  return list.length > 0 && list.every((e) => e?.retryAvailable === true);
 }
 
 /* ═══ حدُّ حجم الصورة لكل منصة ═══
@@ -219,7 +358,14 @@ function uploadType(m: PublishMedia): { fileName: string; contentType?: string }
   const KNOWN: Record<string, string> = {
     'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'video/mp4': 'mp4', 'video/quicktime': 'mov',
   };
-  const OTHER: Record<string, string> = { 'image/gif': 'gif', 'image/webp': 'webp', 'video/webm': 'webm' };
+  /* والمستند يُعرف عند لينكدإن بامتداد رابطه وحده («LinkedIn Documents»): اسمٌ
+     بلا امتداد — والأسماء العربية تُستبدل حروفها — يُنشر رابطاً لا مستنداً. */
+  const OTHER: Record<string, string> = {
+    'image/gif': 'gif', 'image/webp': 'webp', 'video/webm': 'webm',
+    'application/pdf': 'pdf', 'application/msword': 'doc', 'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  };
   const mime = (m.mimeType || '').toLowerCase();
   const ext = KNOWN[mime] || OTHER[mime] || '';
   let fileName = (m.filename || 'media').replace(/[^\w.\-]+/g, '_');
@@ -278,9 +424,42 @@ export async function ayrshareCall<T = any>(
       res.status, data,
     );
   }
+  /* ٤٧٥ يأتي ٤٠٣ وليس رفضاً للمفتاح: حسابُ لينكدإن الشخصي رُبط قبل صلاحيات
+     الأرقام. وكان يُقرأ «رفض Ayrshare المفتاح» فيُبحث في السرّ وهو سليم. */
+  if (codes.includes(475)) {
+    throw new AyrshareError(
+      'لينكدإن يحتاج إعادة ربط الحساب في Ayrshare لتُقرأ أرقامه: Social Accounts ثم أعد ربط لينكدإن. والنشر لا يتأثّر',
+      res.status, data,
+    );
+  }
+  /* الرسائل الخاصة: ٣٦١ يأتي ٤٠٣ — الإضافة غير مفعّلة في الحساب — فيُقرأ رفضاً
+     للمفتاح وهو سليم. و٣٦٢ تفعّلت ولم يُعَد ربط فيسبوك أو إنستغرام بعدها
+     (Messages API Overview). */
+  if (codes.includes(361)) {
+    throw new AyrshareError(
+      'الرسائل الخاصة غير مفعّلة في حساب Ayrshare. فعّلها من صفحة Account في Ayrshare، ثم أعد ربط فيسبوك وإنستغرام',
+      res.status, data,
+    );
+  }
+  if (codes.includes(362)) {
+    throw new AyrshareError(
+      'أعد ربط فيسبوك وإنستغرام في Ayrshare لتعمل الرسائل الخاصة: Social Accounts ثم أعد الربط',
+      res.status, data,
+    );
+  }
   if (res.status === 401 || res.status === 403) {
     throw new AyrshareError(
       `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
+      res.status, data,
+    );
+  }
+  /* تمهّلُ منصةٍ بعينها ليس تمهّلَ Ayrshare: فيسبوك ٤٤٤ لكل صفحة، وإكس ٣٦٤ لكل
+     تطبيق. وكان كلاهما يوقف السحب كلَّه فلا تُقرأ منصةٌ أخرى في تلك الدورة —
+     فيُقال لمنصّته وحدها، وتمضي البقية، ويُعاد هو في السحب التالي. */
+  const throttled = platformThrottle(data);
+  if (res.status === 429 && throttled) {
+    throw new AyrshareError(
+      `${platformNames([ayrshareAccountPlatform({ platform: throttled })])}: طلبت المنصة التمهّل. يُستأنف في السحب التالي`,
       res.status, data,
     );
   }
@@ -341,7 +520,13 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
       platform: ayrshareAccountPlatform(e),
       name: String(e.channelTitle || e.pageName || e.displayName || e.username || ''),
       messaging: e.messagingActive === true,
-      ownerKeys: [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle]
+      /* يوتيوب: `displayName` و`username` اسمُ صاحب حساب جوجل لا القناة (كما في
+         توثيق «Get User»)، والتعليق تكتبه القناة. فمعلّقٌ يوافق اسمُه اسمَ صاحب
+         الحساب كان يُعدّ منّا فيُسقط تعليقه — فالقناة تُعرف بعنوانها ومعرّفها
+         ومعرّفها المختصر وحدها. */
+      ownerKeys: (String(e.platform).toLowerCase() === 'youtube'
+        ? [e.id, e.channelTitle, e.channelId, e.handle]
+        : [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle])
         .map(ownerKey)
         .filter(Boolean),
       ...(typeof e.channelId === 'string' && e.channelId ? { channelId: e.channelId } : {}),
@@ -384,12 +569,15 @@ export class AyrshareProvider implements PublishingProvider {
   private key: string;
 
   // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها. و`images` ربط
-  // Cloudflare Images لضغط الصورة الكبيرة؛ وبدونه تُرفض كما كانت.
+  // Cloudflare Images لضغط الصورة الكبيرة؛ وبدونه تُرفض كما كانت. و`suspended`
+  // نصُّ تعطيل حساب النشر إن كان قائماً (`services/ayrshareAlerts.ts`): به يُقال
+  // رفضُ ٤٠٣ — وإلا قيل «رفض المفتاح» والمفتاح سليم.
   constructor(
     apiKey: string,
     private x: AyrshareXKeys = {},
     private labels: Record<string, string> = {},
     private images?: ImagesBinding,
+    private suspended = '',
   ) {
     this.key = (apiKey || '').trim();
   }
@@ -442,8 +630,43 @@ export class AyrshareProvider implements PublishingProvider {
     return accessUrl;
   }
 
+  /* ═══ الفحص عند الجدولة ═══
+
+     حدّ الصور هنا، ثم ما يقوله Ayrshare نفسه بلا وسيط: طولُ النص كما تعدّه
+     المنصة (`checkPostWeight`)، وأمربوطةٌ المنصة في الحساب أصلاً. و`/validate/post`
+     لا يُسأل: يشترط روابط الوسائط كما في النشر، ووسائطنا خلف المصادقة فلا تصله
+     إلا برفعها — وبلا وسيطٍ يردّ رفضاً لا أصل له لإنستغرام وتيك توك ويوتيوب.
+     وتعذّرُ السؤال لا يُعدّ عيباً في المنشور: يُسكت عنه، والنشر يقول ما بقي. */
   async preflight(input: PublishInput): Promise<string[]> {
-    return ayrshareMediaIssues(input, !!this.images);
+    const issues = ayrshareMediaIssues(input, !!this.images);
+    const auth = { key: this.key, x: this.x };
+    const targets = [...new Set(input.platforms)];
+    if (input.text) {
+      try {
+        const weight = await ayrsharePostWeight(auth, input.text);
+        // سلسلة إكس تقسم نصّها، والقصة لا نصّ لها — فلا يُعدّ طولها عيباً
+        const exempt = (p: string) =>
+          (p === 'x' && input.options?.thread) || ((p === 'instagram' || p === 'facebook') && input.options?.story);
+        for (const p of targets) {
+          const w = weight[ayrsharePlatform(p)];
+          if (w && !w.valid && !exempt(p)) {
+            issues.push(
+              `النص أطول من حدّ ${platformNames([p], this.labels)} (⁨${w.length}⁩ من ⁨${w.max}⁩). اكتب له نصّاً أقصر في «نسخة كل منصة»`,
+            );
+          }
+        }
+      } catch { /* يُسكت عنه */ }
+    }
+    try {
+      const { accounts } = await ayrshareUser(auth);
+      const linked = new Set(accounts.map((a) => ayrsharePlatform(a.platform)));
+      for (const p of targets) {
+        if (!linked.has(ayrsharePlatform(p))) {
+          issues.push(`${platformNames([p], this.labels)} غير مربوط في Ayrshare: اربطه من Social Accounts قبل الموعد، وإلا لم يُنشر`);
+        }
+      }
+    } catch { /* يُسكت عنه */ }
+    return issues;
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
@@ -464,7 +687,7 @@ export class AyrshareProvider implements PublishingProvider {
     for (const m of input.media || []) {
       const size = m.data ? m.data.byteLength : m.size ?? 0;
       const compress = this.images && max && COMPRESSIBLE.has(m.mimeType) && size > max;
-      media.push(compress ? await fitImage(this.images!, m, max!) : m);
+      media.push(compress ? keepDescription(m, await fitImage(this.images!, m, max!)) : m);
     }
     if (media.length) {
       const urls: string[] = [];
@@ -495,33 +718,96 @@ export class AyrshareProvider implements PublishingProvider {
     if (video && platforms.includes('facebook') && facebookReel(video)) body.faceBookOptions = { reels: true };
     if (thumb && platforms.includes('linkedin')) body.linkedInOptions = { thumbNail: thumb };
     if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
+    for (const p of platforms) mergeOptions(body, p, describeMedia(p, media));
+    // منشور المستند في لينكدإن بعنوان المحتوى — وبلا عنوانٍ يأخذ اسم الملف
+    if (platforms.includes('linkedin') && media.length === 1 && isDocument(media[0])) {
+      mergeOptions(body, 'linkedin', { title: (input.title || media[0].filename).slice(0, 400) });
+    }
+    await this.applyOptions(body, platforms, input);
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
-    if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video);
-    return this.send(body);
+    if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video, input.idempotencyKey);
+    return this.send(input.idempotencyKey ? { ...body, idempotencyKey: input.idempotencyKey } : body);
+  }
+
+  /* ═══ خيارات المنصة (`services/publishOptions.ts`) بحقول Ayrshare ═══
+
+     - القصة («Instagram/Facebook Stories»): وسيطٌ واحدٌ بلا نصّ، فلا ريلز ولا
+       غلاف ولا نصٌّ بديل (إنستغرام لا يقبله للقصة)، ولا تعليقٌ أوّل. ويبقى وسم
+       الذكاء الاصطناعي: إنستغرام يقبله للقصة.
+     - سلسلة إكس («X Thread»): `thread` و`threadNumber`. وAyrshare يقسّم النص
+       على الجمل حتى حدّ المنشور — إلا إن وجد «\n\n» فيقطع عنده وحده ولو طال
+       الجزء. ففواصل الفقرات تُكتب بالفاصل الذي لا يقطع (`\u2063\n\u2063\n`
+       في توثيقه) وتبقى القسمة له.
+     - نشاطي التجاري: `callToAction` بنوعه ورابطه (والاتصال بلا رابط)، و`event`
+       بعنوانه وموعديه.
+     - يوتيوب: `categoryId` و`tags`، وملف الترجمة يُرفع كالوسيط ويُرسل رابطه
+       `subTitleUrl` مع لغته واسمها الظاهر للمشاهد. */
+  private async applyOptions(body: Record<string, unknown>, platforms: string[], input: PublishInput): Promise<void> {
+    const o = input.options || {};
+    if (o.story && platforms.includes('instagram')) {
+      const ai = (body.instagramOptions as Record<string, unknown> | undefined)?.isAIGenerated === true;
+      body.instagramOptions = { stories: true, ...(ai ? { isAIGenerated: true } : {}) };
+      delete body.firstComment;
+    }
+    if (o.story && platforms.includes('facebook')) {
+      body.faceBookOptions = { stories: true };
+      delete body.firstComment;
+    }
+    if (o.thread && platforms.includes('twitter')) {
+      mergeOptions(body, 'twitter', { thread: true, ...(o.threadNumber ? { threadNumber: true } : {}) });
+      body.post = String(body.post || '').replace(/\n\n/g, '\u2063\n\u2063\n');
+    }
+    if (platforms.includes('gmb')) {
+      const g: Record<string, unknown> = {};
+      if (o.cta) g.callToAction = o.cta.type === 'call' ? { actionType: 'call' } : { actionType: o.cta.type, url: o.cta.url };
+      if (o.event) g.event = { title: o.event.title, startDate: o.event.start, endDate: o.event.end };
+      mergeOptions(body, 'gmb', g);
+    }
+    if (platforms.includes('youtube')) {
+      const y: Record<string, unknown> = {};
+      if (o.categoryId) y.categoryId = o.categoryId;
+      if (o.tags?.length) y.tags = o.tags;
+      if (o.subtitle && input.subtitle) {
+        y.subTitleUrl = await this.uploadMedia(input.subtitle);
+        y.subTitleLanguage = o.subtitle.language;
+        y.subTitleName = o.subtitle.language === 'en' ? 'English' : 'العربية';
+      }
+      mergeOptions(body, 'youtube', y);
+    }
   }
 
   /* ═══ سناب: أكثر من نشرةٍ للموعد الواحد ═══
 
      القصة تختفي بعد يوم، فيُنشر المقطع سبوتلايت وقصةً محفوظة وقصة، والصورة
      قصةً محفوظة وقصة — كلٌّ في طلبٍ مستقل (`snapChatOptions`)، بالوسيط
-     المرفوع نفسه. والموعد منشورٌ إن نجح أحدها، وما فشل يُكتب تحته بنوعه. */
-  private async publishSnapchat(base: Record<string, unknown>, video: boolean): Promise<PublishResult> {
-    const kinds: { label: string; options?: Record<string, boolean> }[] = [
-      ...(video ? [{ label: 'سبوتلايت', options: { spotlight: true } }] : []),
-      { label: 'القصة المحفوظة', options: { savedStory: true } },
-      { label: 'القصة' },
+     المرفوع نفسه. والموعد منشورٌ إن نجح أحدها، وما فشل يُكتب تحته بنوعه.
+
+     ولكلّ نشرةٍ مفتاحُها من مفتاح الموعد: ثلاثة طلباتٍ بمفتاحٍ واحد يرفض
+     Ayrshare ثانيها وثالثها. وإن لم تُعرف نتيجةُ إحداها لم تُعرف نتيجة الموعد. */
+  private async publishSnapchat(base: Record<string, unknown>, video: boolean, key?: string): Promise<PublishResult> {
+    const kinds: { label: string; key: string; options?: Record<string, boolean> }[] = [
+      ...(video ? [{ label: 'سبوتلايت', key: 'spotlight', options: { spotlight: true } }] : []),
+      { label: 'القصة المحفوظة', key: 'saved', options: { savedStory: true } },
+      { label: 'القصة', key: 'story' },
     ];
     const done: PublishResult[] = [];
     const failed: string[] = [];
+    let uncertain = false;
     for (const k of kinds) {
+      const body = {
+        ...base,
+        ...(k.options ? { snapChatOptions: k.options } : {}),
+        ...(key ? { idempotencyKey: `${key}-${k.key}` } : {}),
+      };
       try {
-        done.push(await this.send(k.options ? { ...base, snapChatOptions: k.options } : base));
+        done.push(await this.send(body));
       } catch (err) {
+        if (err instanceof PublishUncertain) uncertain = true;
         failed.push(`${k.label}: ${String((err as Error)?.message || err)}`);
       }
     }
-    if (!done.length) throw new Error(failed.join(' · '));
+    if (!done.length) throw uncertain ? new PublishUncertain(failed.join(' · ')) : new Error(failed.join(' · '));
     const [first, ...rest] = done;
     return {
       ...first,
@@ -539,22 +825,30 @@ export class AyrshareProvider implements PublishingProvider {
   }
 
   /* الرفض يأتي ٤٠٠ ومعه `errors` بسبب كل منصة — فيُقرأ السبب منها لا من
-     رمز الحالة. */
+     رمز الحالة. وما يقول Ayrshare إنه يُعاد (`retryAvailable`) تعثّرٌ مؤقت
+     لدى المنصة: يُقال ذلك مع سببه، فيُعاد بعد دقائق لا يُبحث في المحتوى. */
   private async send(body: Record<string, unknown>): Promise<PublishResult> {
+    const failure = (raw: any, reason: string) =>
+      `فشل النشر عبر Ayrshare: ${reason}${retryableFailure(raw) ? '. تعثّرٌ مؤقت لدى المنصة — أعد النشر بعد دقائق' : ''}`;
     let data: any;
     try {
       data = await this.call('POST', '/post', body);
     } catch (err) {
+      if (uncertainOutcome(err)) throw new PublishUncertain(UNCERTAIN_ERROR);
+      const e = err as AyrshareError;
+      if (duplicateKeyRejection(e.body)) throw new Error(DUPLICATE_KEY_ERROR);
+      // التعطيل يردّ ٤٠٣ — وبلا نصّه يُقرأ رفضاً للمفتاح
+      if (e.status === 403 && this.suspended) throw new Error(this.suspended);
       // 419 سببُه مفهومٌ مسبقاً بنصٍّ يقول ما يُضبط — لا يُستبدل برسالة الواجهة
-      const known = err instanceof AyrshareError && errorCodes(err.body).includes(419);
-      const outcome = err instanceof AyrshareError && !known ? ayrshareOutcome(err.body) : null;
-      if (outcome?.state === 'failed' && outcome.error) throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error}`);
+      const outcome = errorCodes(e.body).includes(419) ? null : ayrshareOutcome(e.body);
+      if (outcome?.state === 'failed' && outcome.error) throw new Error(failure(e.body, outcome.error));
       throw err;
     }
     const post = unwrapAyrsharePost(data);
     const outcome = ayrshareOutcome(data);
     if (outcome?.state === 'failed') {
-      throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error || 'رفضت المنصة المنشور'}`);
+      if (duplicateKeyRejection(post)) throw new Error(DUPLICATE_KEY_ERROR);
+      throw new Error(failure(data, outcome.error || 'رفضت المنصة المنشور'));
     }
     const id = String(post?.id || '');
     // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
@@ -604,6 +898,37 @@ export class AyrshareProvider implements PublishingProvider {
     try { await this.call('DELETE', '/post', { id: providerPostId }); } catch { /* لا يُعطّل */ }
   }
 
+  /* ═══ حذفُ المنشور من منصته ═══
+
+     `DELETE /post` بمعرّف Ayrshare يحذفه من المنصة نفسها («Delete Post» في
+     توثيقه) — إلا إنستغرام وتيك توك: لا يتيحان الحذف عبر الواجهة، فيُحذف من
+     تطبيقهما ثم يُرسل `markManualDeleted` فيتحقّق Ayrshare أنه زال (382 إن
+     بقي) ويكفّ عن تتبّعه. و383 «حُذف من قبل» نجاحٌ: الحذف يُعاد بلا ضرر،
+     فنشرةٌ من نشرات سناب حُذفت قبل أن يتعثّر غيرها لا تُعيق الإعادة. */
+  async deleteFromPlatform(providerPostId: string, opts: { platform: string; extraIds?: string[] }): Promise<void> {
+    const ayr = ayrsharePlatform(opts.platform);
+    const name = platformNames([opts.platform], this.labels);
+    const manual = MANUAL_DELETE.has(ayr);
+    const failed: string[] = [];
+    for (const id of [providerPostId, ...(opts.extraIds || [])].filter(Boolean)) {
+      try {
+        const data = await this.call<any>('DELETE', '/post', manual ? { id, markManualDeleted: true } : { id });
+        const block = data?.[ayr];
+        if (String(block?.status || data?.status || '').toLowerCase() === 'error') {
+          failed.push(String(block?.message || ayrshareErrors(data) || 'رفضت المنصة الحذف'));
+        }
+      } catch (err) {
+        const codes = err instanceof AyrshareError ? errorCodes(err.body) : [];
+        if (codes.includes(383)) continue;
+        if (err instanceof AyrshareError && err.status === 403 && this.suspended) throw new Error(this.suspended);
+        if (codes.includes(382)) throw new Error(`المنشور ما زال على ${name}. احذفه من تطبيقها أولاً ثم أعد الحذف هنا`);
+        if (codes.includes(114)) throw new Error(`لا يعرف Ayrshare هذا المنشور. احذفه من تطبيق ${name}`);
+        failed.push(String((err as Error)?.message || err));
+      }
+    }
+    if (failed.length) throw new Error(`تعذّر حذف المنشور من ${name}: ${failed.join(' · ')}`);
+  }
+
   /* ═══ الردّ والإشراف ═══
 
      بمعرّفات المنصة لا بمعرّفات Ayrshare: التعليق كُتب على المنصة لا عبره.
@@ -613,9 +938,10 @@ export class AyrshareProvider implements PublishingProvider {
     throw new Error(`${what} على ${platformNames([ayrshareAccountPlatform({ platform })], this.labels)} غير متاح عبر Ayrshare. افعله من تطبيق المنصة`);
   }
 
-  async replyComment(_providerPostId: string, commentId: string, text: string): Promise<string> {
+  async replyComment(_providerPostId: string, commentId: string, text: string, opts: { media?: PublishMedia } = {}): Promise<string> {
     const d = decodeAyrshareId(commentId);
     if (!d) throw new Error('عنصرٌ لا يُعرف مصدره في Ayrshare — حدّث الصندوق ثم أعد المحاولة');
+    if (opts.media && d.type !== 'dm') throw new Error('المرفق يُرسل مع الرسالة الخاصة وحدها');
 
     if (d.type === 'review') {
       const res = await this.call<any>('POST', '/reviews', { platform: d.platform, reviewId: d.reviewId, reply: text });
@@ -623,7 +949,15 @@ export class AyrshareProvider implements PublishingProvider {
     }
     if (d.type === 'dm') {
       if (!d.participantId) throw new Error('لا يُعرف المُراسِل في هذه المحادثة — حدّث الصندوق ثم أعد المحاولة');
-      const res = await this.call<any>('POST', `/messages/${d.platform}`, { recipientId: d.participantId, message: text });
+      /* المرفق يُرفع كوسيط النشر ويُرسل رابطه (`mediaUrls` في «Send Message»):
+         رابطٌ ينتهي بامتداد الملف بلا استعلام، كما تشترط فيسبوك وإنستغرام. وإكس
+         يشترط نصّاً مع المرفق. */
+      if (opts.media && d.platform === 'twitter' && !text.trim()) {
+        throw new Error(`${platformNames(['x'], this.labels)} يشترط نصّاً مع المرفق. اكتب سطراً ثم أرسل`);
+      }
+      const body: Record<string, unknown> = { recipientId: d.participantId, message: text };
+      if (opts.media) body.mediaUrls = [await this.uploadMedia(opts.media)];
+      const res = await this.call<any>('POST', `/messages/${d.platform}`, body);
       return String(res?.messageId ?? '');
     }
     if (!REPLY_BY_SOCIAL_ID.has(d.platform)) this.unsupported('الردّ على التعليقات', d.platform);
@@ -798,17 +1132,30 @@ export function ayrshareMetrics(platform: string, o: any): Metric[] {
       put('completionrate', 'fullVideoWatchedRate', rate === null ? null : Math.round(rate * 10_000) / 100, 'percentage');
       break;
     }
-    case 'twitter':
+    case 'twitter': {
       put('impressions', 'impressionCount', at(o, 'publicMetrics.impressionCount', 'nonPublicMetrics.impressionCount', 'organicMetrics.impressionCount'));
-      put('views', 'video.viewCount', at(o, 'organicMetrics.video.viewCount'));
+      /* مشاهدات المقطع: في أرقام المنشور تحت `organicMetrics.video`، وفي السجلّ
+         لكل وسيطٍ في `media[]` — فكانت مقاطع السجلّ بلا مشاهدات. */
+      let mediaViews: number | null = null;
+      for (const m of Array.isArray(o.media) ? o.media : []) {
+        const v = at(m, 'publicMetrics.viewCount', 'organicMetrics.viewCount');
+        if (v !== null) mediaViews = (mediaViews ?? 0) + v;
+      }
+      const videoViews = at(o, 'organicMetrics.video.viewCount');
+      put('views', videoViews !== null ? 'video.viewCount' : 'media.viewCount', videoViews ?? mediaViews);
       put('likes', 'likeCount', at(o, 'publicMetrics.likeCount', 'organicMetrics.likeCount'));
       put('comments', 'replyCount', at(o, 'publicMetrics.replyCount', 'organicMetrics.replyCount'));
       put('retweets', 'retweetCount', at(o, 'publicMetrics.retweetCount', 'organicMetrics.retweetCount'));
       put('quotes', 'quoteCount', at(o, 'publicMetrics.quoteCount'));
       put('bookmarks', 'bookmarkCount', at(o, 'publicMetrics.bookmarkCount'));
       break;
+    }
     case 'youtube':
+      /* يوتيوب غيّر عدّ المشاهدة في ٢٤ أغسطس ٢٠٢٦: `views` من أوّل لقطة،
+         و`engagedViews` بالطريقة القديمة. فالمشاهدات بتعريف يوتيوب اليوم، ومعها
+         القديمة محفوظةً كي تُقارن الفترتان عبر ذلك اليوم. */
       put('views', 'views', at(o, 'views'));
+      put('engagedviews', 'engagedViews', at(o, 'engagedViews'));
       put('likes', 'likes', at(o, 'likes'));
       put('comments', 'comments', at(o, 'comments'));
       put('shares', 'shares', at(o, 'shares'));
@@ -836,6 +1183,8 @@ export function ayrshareMetrics(platform: string, o: any): Metric[] {
       };
       put('views', 'views', sum('views'));
       put('reach', 'viewers', sum('viewers'));
+      // «storyFavorites» إعجابُ سناب — «Number of times the post has been liked»
+      put('likes', 'storyFavorites', sum('storyFavorites'));
       put('comments', 'replies', sum('replies'));
       put('shares', 'shares', sum('shares'));
       const ms = sum('viewTime');
@@ -1011,19 +1360,32 @@ export async function ayrshareAnalyticsBySocialId(
   return out;
 }
 
+/**
+ * أرقام منشورٍ بمعرّف Ayrshare — لسناب: لا يُسأل بمعرّف المنصة
+ * (`searchPlatformId` لا يشمله)، وسجلُّه بلا أرقام. فما نُشر عبر Ayrshare وحده
+ * تُعرف أرقامه، منشوراً في الطلب. `null` = لم تُعلَن.
+ */
+export async function ayrshareAnalyticsByAyrId(
+  auth: AyrshareAuth,
+  ayrId: string,
+  platform: string,
+  budget?: CallBudget,
+): Promise<ReturnType<typeof mapMetrics> | null> {
+  const data = await ayrshareCall<any>(auth, 'POST', '/analytics/post', { id: ayrId, platforms: [platform] }, budget);
+  const analytics = data?.[platform]?.analytics;
+  if (!analytics || typeof analytics !== 'object') return null;
+  const m = ayrshareMapped(platform, analytics);
+  return m.present ? m : null;
+}
+
 /* ═══ أرقام الحساب: المتابعون والمراجعات ═══ */
 
-/** عدد المتابعين لكل منصةٍ مربوطة — من `POST /analytics/social`. */
-export async function ayrshareAudience(
-  auth: AyrshareAuth,
-  accounts: AyrshareAccount[],
-): Promise<{ platform: string; followers: number | null }[]> {
-  // الملف التجاري لا متابعين له، ومراجعاته من `/reviews`
-  const wanted = accounts.filter((a) => a.platform !== 'google');
-  if (!wanted.length) return [];
-  const platforms = [...new Set(wanted.map((a) => ayrsharePlatform(a.platform)))];
-  const data = await ayrshareCall<any>(auth, 'POST', '/analytics/social', { platforms });
-  return wanted.map((a) => {
+/**
+ * عدد المتابعين لكل حسابٍ من ردّ `/analytics/social` المجموع. والملف التجاري
+ * لا متابعين له — مراجعاته من `/reviews` — فلا يُطلب له.
+ */
+export function ayrshareFollowers(accounts: AyrshareAccount[], data: any): { platform: string; followers: number | null }[] {
+  return accounts.map((a) => {
     const p = ayrsharePlatform(a.platform);
     const an = data?.[p]?.analytics;
     const o = Array.isArray(an) ? an[0] : an;
@@ -1031,6 +1393,213 @@ export async function ayrshareAudience(
     const followers = at(o, 'followersCount', 'followerCount', 'followers.totalFollowerCount', 'subscriberCount', 'subscribers');
     return { platform: a.platform, followers };
   });
+}
+
+/* ═══ أرقام الحساب كاملةً — `POST /analytics/social` ═══
+
+   كان يُقرأ منه عددُ المتابعين وحده ويُرمى الباقي. وفيه لكل منصةٍ أرقامُ
+   الحساب نفسه لا منشوراته: مشاهداتُ محتواه ووصولُه وزياراتُ ملفّه والمتابعون
+   الجدد ومن ألغى المتابعة ووقتُ المشاهدة والنقرُ إلى الموقع، وتوزيعُ الجمهور
+   على البلد والعمر والجنس، وأداءُ الملف التجاري.
+
+   وبطريقتين: مجموعاً بنوافذ تختلف من حقلٍ إلى حقل (مدى الحياة، ١٨٠ يوماً،
+   ٩٠ يوماً…) لا تطابق فتراتنا، أو يوماً بيوم (`daily: true`) لفيسبوك
+   والملف التجاري وإنستغرام وسناب وتيك توك ويوتيوب. فأرقام الفترة من اليومي
+   تُجمع أيامُها التي في الفترة؛ والمجموعُ للّقطات وحدها — المتابعون وتوزيعهم
+   اليوم. والأسماء من صفحة «Analytics on a Social Network» في توثيقه. */
+
+/** نقطةٌ لمؤشرٍ في السجلّ — بشكل `MetricPoint` في `adapters/sources.ts`. */
+export type AccountPoint = { metricKey: string; dimKey?: string; dimValue?: string; value: number };
+
+/** نداءٌ واحد للمنصات كلّها — مجموعاً، أو يوماً بيوم بعدد الأرباع. */
+export async function ayrshareSocialAnalytics(
+  auth: AyrshareAuth,
+  platforms: string[],
+  opts: { daily?: boolean; quarters?: number } = {},
+  budget?: CallBudget,
+): Promise<any> {
+  const body: Record<string, unknown> = { platforms };
+  if (opts.daily) body.daily = true;
+  if (opts.quarters) body.quarters = opts.quarters;
+  return ayrshareCall<any>(auth, 'POST', '/analytics/social', body, budget);
+}
+
+/**
+ * اليوم الذي تخصّه قيمةٌ يومية. ميتا تُعلن نهاية اليوم — منتصف الليل بتوقيت
+ * المحيط الهادئ، `T07:00:00Z` — فالقيمة لليوم الذي قبله. وما سواها يُعلن اليوم
+ * نفسه منتصفَ ليله بتوقيت غرينتش، `T00:00:00Z`.
+ */
+export function dailyDay(endTime: unknown): string | null {
+  const t = Date.parse(String(endTime ?? ''));
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  const midnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+  return new Date(midnight ? t : t - 86_400_000).toISOString().slice(0, 10);
+}
+
+/** قيم سلسلةٍ يومية `{period, values: [{value, endTime}]}` — `null` إن لم تكن سلسلة. */
+export function dailySeries(v: any): { day: string; value: number }[] | null {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.values)) return null;
+  const out: { day: string; value: number }[] = [];
+  for (const it of v.values) {
+    const day = dailyDay(it?.endTime);
+    const value = num(it?.value);
+    if (day && value !== null) out.push({ day, value });
+  }
+  return out;
+}
+
+/**
+ * كم يوماً إلى الوراء يردّ Ayrshare يوماً بيوم. تيك توك ستون يوماً أبداً،
+ * وسناب ربعٌ واحد، وربعُ فيسبوك ٨٥ يوماً وربعُ غيره تسعون.
+ */
+export function dailyWindowDays(platform: string, quarters: number): number {
+  if (platform === 'tiktok') return 60;
+  if (platform === 'snapchat') return 90;
+  return (platform === 'facebook' ? 85 : 90) * quarters;
+}
+
+/** ما يُجمع من اليومي إلى مؤشرٍ في السجلّ — بأسماء Ayrshare، ومعامل الوحدة. */
+const DAILY_POINTS: { platform: string; fields: string[]; metricKey: string; perPlatform: boolean; scale?: number }[] = [
+  { platform: 'facebook', fields: ['pageMediaView'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'instagram', fields: ['reach'], metricKey: 'account_reach', perPlatform: true },
+  { platform: 'youtube', fields: ['views'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'youtube', fields: ['subscribersGained'], metricKey: 'new_followers', perPlatform: true },
+  { platform: 'youtube', fields: ['subscribersLost'], metricKey: 'unfollows', perPlatform: true },
+  { platform: 'youtube', fields: ['estimatedMinutesWatched'], metricKey: 'watch_time', perPlatform: true },
+  { platform: 'tiktok', fields: ['viewCountTotal'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'tiktok', fields: ['profileViews'], metricKey: 'profile_views', perPlatform: true },
+  { platform: 'tiktok', fields: ['bioLinkClicks'], metricKey: 'profile_website_clicks', perPlatform: true },
+  { platform: 'snapchat', fields: ['views'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'snapchat', fields: ['viewers'], metricKey: 'account_reach', perPlatform: true },
+  { platform: 'snapchat', fields: ['profileViews'], metricKey: 'profile_views', perPlatform: true },
+  { platform: 'snapchat', fields: ['subscribes'], metricKey: 'new_followers', perPlatform: true },
+  { platform: 'snapchat', fields: ['unsubscribes'], metricKey: 'unfollows', perPlatform: true },
+  // سناب يُعلن المدّة بالأجزاء من الألف من الثانية، والمؤشر بالدقائق
+  { platform: 'snapchat', fields: ['viewTime'], metricKey: 'watch_time', perPlatform: true, scale: 1 / 60_000 },
+  { platform: 'gmb', fields: ['websiteClicks'], metricKey: 'profile_website_clicks', perPlatform: true },
+  /* الملف التجاري رقمٌ واحد لا موزَّع: الظهور الأربعة مؤشرٌ واحد كما يطلب الدليل
+     «ظهور الملف التجاري» لا أربعةَ أرقامٍ يجمعها القارئ في رأسه. */
+  {
+    platform: 'gmb',
+    fields: ['businessImpressionsDesktopMaps', 'businessImpressionsDesktopSearch', 'businessImpressionsMobileMaps', 'businessImpressionsMobileSearch'],
+    metricKey: 'gbp_views',
+    perPlatform: false,
+  },
+  { platform: 'gmb', fields: ['callClicks'], metricKey: 'gbp_calls', perPlatform: false },
+  { platform: 'gmb', fields: ['businessDirectionRequests'], metricKey: 'gbp_directions', perPlatform: false },
+];
+
+/**
+ * أرقام الفترة من الردّ اليومي لمنصةٍ واحدة. `analytics` كائنُها (وسناب
+ * مصفوفةٌ تُجمع عناصرها)، و`internal` مفتاحها عندنا للبُعد.
+ *
+ * ولا يُكتب رقمٌ لفترةٍ لا تغطّي النافذةُ أوّلَها: رقمٌ ناقص يُقرأ هبوطاً.
+ * وسلسلةٌ لم تُعلَن لا تُكتب صفراً؛ وأيامٌ بلا قيمة في سلسلةٍ معلنة صفرٌ صادق
+ * — يوتيوب يُسقط اليوم الذي لا مشاهدة فيه.
+ */
+export function ayrshareDailyPoints(
+  platform: string,
+  internal: string,
+  analytics: any,
+  range: { start: string; end: string },
+  windowStart: string,
+): AccountPoint[] {
+  if (windowStart > range.start) return [];
+  const blocks: any[] = Array.isArray(analytics) ? analytics : analytics && typeof analytics === 'object' ? [analytics] : [];
+  const out: AccountPoint[] = [];
+  for (const spec of DAILY_POINTS) {
+    if (spec.platform !== platform) continue;
+    let total: number | null = null;
+    for (const block of blocks) {
+      for (const field of spec.fields) {
+        const series = dailySeries(block?.[field]);
+        if (!series) continue;
+        total = (total ?? 0) + series.filter((v) => v.day >= range.start && v.day <= range.end).reduce((s, v) => s + v.value, 0);
+      }
+    }
+    if (total === null) continue;
+    const value = Math.round(total * (spec.scale ?? 1) * 100) / 100;
+    out.push(spec.perPlatform ? { metricKey: spec.metricKey, dimKey: 'platform', dimValue: internal, value } : { metricKey: spec.metricKey, value });
+  }
+  return out;
+}
+
+/** الفئات العمرية بأوسعها المشترك: إنستغرام يفصل ٥٥–٦٤ و٦٥+، وتيك توك يجمعهما «55+». */
+function ageBucket(age: string): string | null {
+  const a = age.trim();
+  if (/^(55-64|65\+|55\+)$/.test(a)) return '55+';
+  return /^\d{2}-\d{2}$/.test(a) ? a : null;
+}
+
+function genderKey(g: string): string {
+  const v = g.trim().toLowerCase();
+  if (v === 'f' || v === 'female') return 'female';
+  if (v === 'm' || v === 'male') return 'male';
+  return 'unknown';
+}
+
+/**
+ * توزيع المتابعين على البلد والعمر والجنس — لقطةُ اليوم من الردّ المجموع.
+ * إنستغرام يُعلن أعداداً (`audienceCountry` و`audienceGenderAge` «F.25-34»)،
+ * وتيك توك نسباً من متابعيه (`audienceCountries` و`audienceAges`
+ * و`audienceGenders`) فتُضرب في عدد متابعيه. فيُجمع الاثنان أعداداً تُقارن.
+ * وكلاهما لا يُعلن التوزيع لحسابٍ دون مئة متابع — فلا يُكتب شيء.
+ */
+export function ayrshareAudiencePoints(data: any): AccountPoint[] {
+  const country = new Map<string, number>();
+  const age = new Map<string, number>();
+  const gender = new Map<string, number>();
+  const add = (m: Map<string, number>, k: string | null, v: number) => {
+    if (!k || !Number.isFinite(v) || v <= 0) return;
+    m.set(k, (m.get(k) ?? 0) + v);
+  };
+
+  const ig = data?.instagram?.analytics;
+  if (ig && typeof ig === 'object') {
+    for (const [k, v] of Object.entries(ig.audienceCountry ?? {})) add(country, k.toUpperCase(), Number(v));
+    for (const [k, v] of Object.entries(ig.audienceGenderAge ?? {})) {
+      const [g, a] = k.split('.');
+      add(gender, genderKey(g ?? ''), Number(v));
+      add(age, ageBucket(a ?? ''), Number(v));
+    }
+  }
+
+  const ttRaw = data?.tiktok?.analytics;
+  const tt = Array.isArray(ttRaw) ? ttRaw[0] : ttRaw;
+  const followers = at(tt, 'followerCount');
+  if (tt && typeof tt === 'object' && followers) {
+    const share = (p: unknown) => Math.round(Number(p) * followers);
+    for (const r of Array.isArray(tt.audienceCountries) ? tt.audienceCountries : []) add(country, String(r?.country ?? '').toUpperCase() || null, share(r?.percentage));
+    for (const r of Array.isArray(tt.audienceAges) ? tt.audienceAges : []) add(age, ageBucket(String(r?.age ?? '')), share(r?.percentage));
+    for (const r of Array.isArray(tt.audienceGenders) ? tt.audienceGenders : []) add(gender, genderKey(String(r?.gender ?? '')), share(r?.percentage));
+  }
+
+  const out: AccountPoint[] = [];
+  for (const [k, v] of country) if (/^[A-Z]{2}$/.test(k)) out.push({ metricKey: 'followers_country', dimKey: 'country', dimValue: k, value: v });
+  for (const [k, v] of age) out.push({ metricKey: 'followers_age', dimKey: 'age_range', dimValue: k, value: v });
+  for (const [k, v] of gender) out.push({ metricKey: 'followers_gender', dimKey: 'gender', dimValue: k, value: v });
+  return out;
+}
+
+/**
+ * المتابعون الجدد في لينكدإن الشخصي — `followersDaily` في الردّ المجموع،
+ * ثلاثون يوماً بأيامها (`dateRange.start`). وصفحة لينكدإن لا يوميَّ لها.
+ */
+export function linkedInNewFollowers(analytics: any, range: { start: string; end: string }, today: string): number | null {
+  const list: any[] = Array.isArray(analytics?.followersDaily) ? analytics.followersDaily : [];
+  if (!list.length) return null;
+  // ثلاثون يوماً إلى الوراء — فترةٌ أوّلُها أقدم لا يُكتب لها رقم ناقص
+  const windowStart = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
+  if (windowStart > range.start) return null;
+  let total = 0;
+  for (const d of list) {
+    const s = d?.dateRange?.start;
+    const day = s?.year ? `${s.year}-${String(s.month).padStart(2, '0')}-${String(s.day).padStart(2, '0')}` : '';
+    const v = num(d?.memberFollowersCount);
+    if (day >= range.start && day <= range.end && v !== null) total += v;
+  }
+  return total;
 }
 
 /** عدد مراجعات الملف التجاري ومتوسّطها — من `GET /reviews?platform=gmb`. `null` = لا مراجعات. */
@@ -1097,6 +1666,8 @@ export type AyrshareInboxItem = {
   repliedBody?: string | null;
   repliedAt?: string | null;
   rating?: number | null;
+  /** السلسلة تحت التعليق — ردودُنا وردودُ غيرنا. غيابُها: لا سلسلة لهذا النوع. */
+  thread?: ThreadEntry[];
 };
 
 function isoOr(v: unknown, fallback: string): string {
@@ -1121,53 +1692,173 @@ function authorOf(c: any): string {
   return String(c?.from?.name || c?.from?.username || c?.displayName || c?.name || c?.userName || c?.username || 'مستخدم');
 }
 
+/** ردٌّ في السلسلة من عنصر Ayrshare — إنستغرام يُعلن معرّف الردّ `id` لا `commentId`. */
+function threadEntry(c: any, ownerKeys: string[]): ThreadEntry | null {
+  const body = String(c?.comment ?? c?.text ?? '').trim();
+  if (!body) return null;
+  return {
+    id: String(c?.commentId ?? c?.id ?? ''),
+    author: authorOf(c),
+    own: isOwnAyrshareComment(c, ownerKeys),
+    body,
+    at: isoOrNull(c?.created ?? c?.createTime),
+  };
+}
+
+/** ما يتيحه Ayrshare على تعليقٍ كُتب على المنصة — بمعرّفه عليها. */
+function commentCapabilities(platform: string, ownRoot = false): Record<string, boolean> {
+  return {
+    can_like: false,
+    // تعليقُنا الذي ردّ عليه العملاء لا يُخفى ولا يُحذف من بطاقتهم
+    can_hide: !ownRoot && platform === 'tiktok',
+    can_delete: !ownRoot && (platform === 'facebook' || platform === 'instagram' || platform === 'youtube'),
+    can_private_reply: false,
+    // يوتيوب وثريدز لا يُردّ عليهما عبر Ayrshare إلا لما نُشر عبره — فيُردّ من التطبيق
+    can_reply: REPLY_BY_SOCIAL_ID.has(platform),
+  };
+}
+
+/** الردُّ الذي يجيب العميل بشكل العنصر — آخرُ ما كتبناه إن لم يكتب أحدٌ بعده. */
+function answerOf(thread: ThreadEntry[]): { repliedBody: string | null; repliedAt: string | null } {
+  const a = threadAnswer(thread);
+  return { repliedBody: a?.body ?? null, repliedAt: a?.at ?? null };
+}
+
 /**
- * تعليقات منشورٍ من ردّ `GET /comments/:id` — ما كتبه عملاؤنا وحده، ومعه
- * ردُّنا إن وُجد (كُتب من تطبيق المنصة أو من هنا). وإكس لا يُعشّش الردود:
- * ردودُه مسطّحة، وردُّنا يُعرف بأنه من حسابنا ويُشير إلى التعليق.
+ * تعليقات منشورٍ من ردّ `GET /comments/:id` — عنصرٌ لكل تعليقٍ من عملائنا،
+ * وتحته سلسلتُه كلّها: ردودُنا (من هنا أو من تطبيق المنصة) وردودُ غيرنا.
+ *
+ * وتعليقٌ كتبه حسابُنا على منشوره — رابطٌ في أول تعليق — كان يُترك بردوده،
+ * فلا يُرى سؤالُ عميلٍ ردّ عليه. فإن ردّ عليه غيرُنا صار عنصراً: أوّلُ من ردّ
+ * من العملاء كاتبُه، وما بعده سلسلتُه، والردُّ منه يقع تحت تعليقنا نفسه.
+ *
+ * وإكس لا يُعشّش الردود: المحادثة كلُّها قائمةٌ واحدة، فتُبنى شجرتها من
+ * `referencedTweets` — انظر `mapXConversation`.
  */
 export function mapAyrshareComments(platform: string, postId: string, data: any, ownerKeys: string[]): AyrshareInboxItem[] {
   const list: any[] = Array.isArray(data?.[platform]) ? data[platform] : [];
   const now = new Date().toISOString();
-
-  // إكس: ردودنا مسطّحة — تُفهرس بالتعليق الذي تردّ عليه
-  const ownByParent = new Map<string, any>();
-  for (const c of list) {
-    if (!isOwnAyrshareComment(c, ownerKeys)) continue;
-    const parents = [
-      ...(Array.isArray(c?.referencedTweets) ? c.referencedTweets.filter((r: any) => r?.type === 'replied_to').map((r: any) => r.id) : []),
-      c?.parentId,
-    ].filter(Boolean).map(String);
-    for (const p of parents) ownByParent.set(p, c);
-  }
+  if (platform === 'twitter') return mapXConversation(postId, list, ownerKeys, now);
 
   const out: AyrshareInboxItem[] = [];
   for (const c of list) {
     const commentId = String(c?.commentId ?? c?.id ?? '');
     const body = String(c?.comment ?? c?.text ?? '').trim();
-    if (!commentId || !body || isOwnAyrshareComment(c, ownerKeys)) continue;
-
+    if (!commentId) continue;
+    const urn = typeof c?.commentUrn === 'string' ? c.commentUrn : '';
     const replies: any[] = Array.isArray(c?.replies) ? c.replies : [];
-    const own = replies.filter((r) => isOwnAyrshareComment(r, ownerKeys))
-      .sort((a, b) => String(a?.created ?? a?.createTime ?? '').localeCompare(String(b?.created ?? b?.createTime ?? '')))
-      .pop() ?? ownByParent.get(commentId);
+    const thread = sortThread(replies.map((r) => threadEntry(r, ownerKeys)).filter((e): e is ThreadEntry => !!e));
 
+    if (!isOwnAyrshareComment(c, ownerKeys)) {
+      if (!body) continue;
+      /* لينكدإن لا يُعشّش الردود: تُطلب لكل تعليقٍ بطلبه (`ayrshareLinkedInReplies`)،
+         فقائمةٌ فارغةٌ هنا لا تعني أن لا ردود — ولا تمحو سلسلةً محفوظة. */
+      const known = platform !== 'linkedin' || replies.length > 0;
+      out.push({
+        id: encodeAyrshareComment(platform, postId, commentId, urn),
+        platform,
+        kind: 'comment',
+        authorName: authorOf(c),
+        body,
+        createdAt: isoOr(c?.created ?? c?.createTime, now),
+        isHidden: c?.hidden === true,
+        capabilities: commentCapabilities(platform),
+        ...answerOf(thread),
+        ...(known ? { thread } : {}),
+      });
+      continue;
+    }
+
+    // تعليقُنا: عنصرٌ إن ردّ عليه أحدٌ من عملائنا
+    const first = thread.findIndex((e) => !e.own);
+    if (first < 0) continue;
+    const root = thread[first];
+    const rest = thread.slice(first + 1);
     out.push({
-      id: encodeAyrshareComment(platform, postId, commentId, typeof c?.commentUrn === 'string' ? c.commentUrn : ''),
+      id: encodeAyrshareComment(platform, postId, commentId, urn),
       platform,
+      kind: 'comment',
+      authorName: root.author,
+      body: root.body,
+      createdAt: root.at ?? now,
+      capabilities: commentCapabilities(platform, true),
+      ...answerOf(rest),
+      thread: rest,
+    });
+  }
+  return out;
+}
+
+/**
+ * محادثة إكس: قائمةٌ مسطّحة لكل التغريدات تحت المنشور، ولكلٍّ أبوها في
+ * `referencedTweets` (`replied_to`). فالعنصر تغريدةٌ من عملائنا جذرُ فرعها —
+ * أبوها المنشور نفسه، أو تغريدةٌ منّا من سلسلة المنشور — وما تحتها كلُّه
+ * سلسلتُها: ردُّنا، وردُّ العميل على ردّنا، وردُّ غيره.
+ *
+ * وكان كل ما لم يكتبه حسابُنا عنصراً مستقلاً: ردُّ العميل على ردّنا يظهر
+ * تعليقاً جديداً بلا سياق، وردُّنا على التعليق يُطابق بأبيه المباشر وحده.
+ */
+function mapXConversation(postId: string, list: any[], ownerKeys: string[], now: string): AyrshareInboxItem[] {
+  const byId = new Map<string, any>();
+  for (const c of list) {
+    const id = String(c?.commentId ?? c?.id ?? '');
+    if (id) byId.set(id, c);
+  }
+  const parentOf = (c: any): string => {
+    const ref = (Array.isArray(c?.referencedTweets) ? c.referencedTweets : []).find((r: any) => r?.type === 'replied_to');
+    return String(ref?.id ?? c?.parentId ?? '');
+  };
+  // تغريدةٌ منّا آباؤها كلُّهم منّا حتى المنشور: تكملةُ المنشور، لا ردٌّ في محادثة
+  const chainMemo = new Map<string, boolean>();
+  const ownChain = (id: string, depth = 0): boolean => {
+    if (chainMemo.has(id)) return chainMemo.get(id)!;
+    const c = byId.get(id);
+    let v = false;
+    if (c && isOwnAyrshareComment(c, ownerKeys)) {
+      const p = parentOf(c);
+      v = !p || !byId.has(p) || depth > 50 ? true : ownChain(p, depth + 1);
+    }
+    chainMemo.set(id, v);
+    return v;
+  };
+  const rootOf = (id: string): string => {
+    let cur = id;
+    for (let i = 0; i < 100; i++) {
+      const p = parentOf(byId.get(cur));
+      if (!p || !byId.has(p) || ownChain(p)) return cur;
+      cur = p;
+    }
+    return cur;
+  };
+
+  const threads = new Map<string, ThreadEntry[]>();
+  const roots: string[] = [];
+  for (const [id, c] of byId) {
+    const root = rootOf(id);
+    if (root === id) {
+      roots.push(id);
+      continue;
+    }
+    const e = threadEntry(c, ownerKeys);
+    if (e) threads.set(root, [...(threads.get(root) ?? []), e]);
+  }
+
+  const out: AyrshareInboxItem[] = [];
+  for (const id of roots) {
+    const c = byId.get(id);
+    const body = String(c?.comment ?? c?.text ?? '').trim();
+    if (!body || isOwnAyrshareComment(c, ownerKeys)) continue;
+    const thread = sortThread(threads.get(id) ?? []);
+    out.push({
+      id: encodeAyrshareComment('twitter', postId, id),
+      platform: 'twitter',
       kind: 'comment',
       authorName: authorOf(c),
       body,
       createdAt: isoOr(c?.created ?? c?.createTime, now),
-      isHidden: c?.hidden === true,
-      capabilities: {
-        can_like: false,
-        can_hide: platform === 'tiktok',
-        can_delete: platform === 'facebook' || platform === 'instagram' || platform === 'youtube',
-        can_private_reply: false,
-      },
-      repliedBody: own ? String(own.comment ?? own.text ?? '').trim() || null : null,
-      repliedAt: own ? isoOrNull(own.created ?? own.createTime) : null,
+      capabilities: commentCapabilities('twitter'),
+      ...answerOf(thread),
+      thread,
     });
   }
   return out;
@@ -1184,8 +1875,36 @@ export async function ayrshareComments(
   return ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(postId)}?${q}`, undefined, budget);
 }
 
+/* ═══ الرد التلقائي على الرسائل الخاصة ═══
+
+   «Set/Get Auto Response»: رسالةٌ تُرسل لكل من يراسل الحساب على منصات الرسائل
+   كلّها، ولا تتكرّر للمُراسِل نفسه قبل مدّتها. وبلا ضبطٍ يردّ `status` وحده. */
+export type AutoResponse = { active: boolean; message: string; waitSeconds: number };
+
+export const AUTO_RESPONSE_DEFAULT_WAIT = 86_400;
+
+export async function ayrshareAutoResponse(auth: AyrshareAuth): Promise<AutoResponse> {
+  const d = await ayrshareCall<any>(auth, 'GET', '/messages/autoresponse');
+  const wait = Number(d?.autoResponseWaitSeconds);
+  return {
+    active: d?.autoResponseActive === true,
+    message: typeof d?.autoResponseMessage === 'string' ? d.autoResponseMessage : '',
+    waitSeconds: Number.isFinite(wait) && wait > 0 ? wait : AUTO_RESPONSE_DEFAULT_WAIT,
+  };
+}
+
+export async function setAyrshareAutoResponse(auth: AyrshareAuth, r: AutoResponse): Promise<void> {
+  await ayrshareCall(auth, 'POST', '/messages/autoresponse', {
+    autoResponseActive: r.active,
+    autoResponseMessage: r.message,
+    autoResponseWaitSeconds: r.waitSeconds,
+  });
+}
+
 /** رسالةٌ خاصة كما يردّها `GET /messages/:platform` — `action` اتجاهها. */
 export type AyrshareMessage = {
+  /** معرّفها على منصتها — به تُطابَق في سجلّ المحادثة. */
+  id: string;
   conversationId: string;
   senderId: string;
   recipientId: string;
@@ -1193,7 +1912,30 @@ export type AyrshareMessage = {
   text: string;
   created: string | null;
   direction: 'in' | 'out';
+  /** مرفقاتها بنوعها ورابطها كما تردّها المنصة (`attachments` في «Get Messages»). */
+  attachments: { type: string; url: string }[];
 };
+
+/**
+ * اسمُ المرفق حين تخلو الرسالة من نصّ — وكانت تُكتب «[image]» بنوعه الإنجليزي.
+ * الأنواع من أمثلة «Get Messages» ومن منصات ميتا: image وvideo وaudio وfile.
+ */
+export function attachmentLabel(type: string): string {
+  switch (String(type || '').toLowerCase()) {
+    case 'image':
+    case 'sticker':
+      return 'صورة مرفقة';
+    case 'video':
+    case 'reel':
+      return 'مقطع مرفق';
+    case 'audio':
+      return 'تسجيل صوتي';
+    case 'file':
+      return 'ملف مرفق';
+    default:
+      return 'مرفق';
+  }
+}
 
 /** رسائل منصةٍ — الأحدث أوّلاً، صفحاتٍ بمؤشّر `next`. */
 export async function ayrshareMessages(
@@ -1210,15 +1952,19 @@ export async function ayrshareMessages(
     const data: any = await ayrshareCall<any>(auth, 'GET', `/messages/${platform}${qs ? `?${qs}` : ''}`, undefined, opts.budget);
     for (const m of Array.isArray(data?.messages) ? data.messages : []) {
       if (!m?.conversationId) continue;
-      const attachment = Array.isArray(m.attachments) && m.attachments.length ? `[${m.attachments[0]?.type || 'مرفق'}]` : '';
+      const attachments = (Array.isArray(m.attachments) ? m.attachments : [])
+        .filter((a: any) => typeof a?.url === 'string' && /^https:\/\//.test(a.url))
+        .map((a: any) => ({ type: String(a.type || ''), url: String(a.url) }));
       out.push({
+        id: String(m.id ?? ''),
         conversationId: String(m.conversationId),
         senderId: String(m.senderId ?? ''),
         recipientId: String(m.recipientId ?? ''),
         senderName: String(m.senderDetails?.name || m.senderDetails?.username || ''),
-        text: String(m.message ?? '').trim() || attachment,
+        text: String(m.message ?? '').trim() || (attachments.length ? attachmentLabel(attachments[0].type) : ''),
         created: isoOrNull(m.created),
         direction: m.action === 'sent' ? 'out' : 'in',
+        attachments,
       });
     }
     const pg = data?.meta?.pagination;
@@ -1274,8 +2020,9 @@ export async function ayrshareReviews(auth: AyrshareAuth, platform: string, budg
    Secret»، فردّ الحساب «This endpoint does not exist» وتوقّف التسجيل كلّه. والسرّ
    حقلٌ في طلب التسجيل نفسه كما في صفحة «Register Webhook» — فيُرسل معه. */
 
-/** الأحداث التي تُسجَّل: التعليقات والرسائل للصندوق، والمجدول لحال تيك توك. */
-export const AYRSHARE_WEBHOOK_ACTIONS = ['comments', 'messages', 'scheduled'] as const;
+/** الأحداث التي تُسجَّل: التعليقات والرسائل للصندوق، والمجدول لحال تيك توك،
+    وإلغاءُ ربط الحسابات وتعطيلُ حساب النشر لتنبيه الفريق (`services/ayrshareAlerts.ts`). */
+export const AYRSHARE_WEBHOOK_ACTIONS = ['comments', 'messages', 'scheduled', 'social', 'suspended'] as const;
 
 export async function registerAyrshareWebhook(auth: AyrshareAuth, action: string, url: string, secret: string): Promise<void> {
   await ayrshareCall(auth, 'POST', '/hook/webhook', { action, url, secret });
@@ -1324,22 +2071,26 @@ export async function youtubeChannelVideos(channelId: string, budget?: CallBudge
    لينكدإن لا يُرى أبداً — قائمة الردود في التعليق فارغةٌ دائماً. وشكلُ الردّ غير
    موثّق كاملاً، فيُقرأ تسامحاً: الردود في القائمة أو في `replies` من كلٍّ منها،
    سوى التعليق نفسه. */
-export async function ayrshareLinkedInReply(
+export async function ayrshareLinkedInReplies(
   auth: AyrshareAuth,
   commentId: string,
   ownerKeys: string[],
   budget?: CallBudget,
-): Promise<{ text: string; at: string | null } | null> {
+): Promise<ThreadEntry[]> {
   const q = new URLSearchParams({ commentId: 'true', searchPlatformId: 'true', platform: 'linkedin' });
   const data = await ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(commentId)}?${q}`, undefined, budget);
   const block = data?.linkedin;
   const list: any[] = Array.isArray(block) ? block : block && typeof block === 'object' ? [block] : [];
   const all = list.flatMap((c) => [c, ...(Array.isArray(c?.replies) ? c.replies : [])]);
-  const own = all
-    .filter((c) => String(c?.commentId ?? c?.commentUrn ?? '') !== commentId && isOwnAyrshareComment(c, ownerKeys))
-    .sort((a, b) => String(a?.created ?? '').localeCompare(String(b?.created ?? '')))
-    .pop();
-  if (!own) return null;
-  const text = String(own.comment ?? own.text ?? '').trim();
-  return text ? { text, at: isoOrNull(own.created) } : null;
+  const seen = new Set<string>();
+  const entries: ThreadEntry[] = [];
+  for (const c of all) {
+    const id = String(c?.commentId ?? c?.commentUrn ?? '');
+    // التعليق نفسه يعود أوّلَ القائمة — والردّ لا يُكتب مرّتين إن عاد في `replies` أيضاً
+    if (id === commentId || String(c?.commentUrn ?? '') === commentId || (id && seen.has(id))) continue;
+    if (id) seen.add(id);
+    const e = threadEntry(c, ownerKeys);
+    if (e) entries.push(e);
+  }
+  return sortThread(entries);
 }

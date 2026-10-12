@@ -188,9 +188,16 @@ describe('حال ربط المؤشر', () => {
     await upsertValue(env, JULY, { metricKey: 'nps', value: 42, source: 'manual' });
     expect((await find('nps'))?.connected).toBe(true);
 
-    expect((await find('unfollows'))?.connected).toBe(false);
-    await upsertValue(env, JULY, { metricKey: 'unfollows', dimKey: 'platform', dimValue: 'x', value: 3, source: 'manual' });
-    expect((await find('unfollows'))?.connected).toBe(true);
+    /* مُدخَلٌ موزَّعٌ على بُعد: كان «إلغاءات المتابعة» مثاله، وصار مسحوباً من
+       مزوّد النشر (0039) — فلا مُدخَلَ موزَّعاً في الدليل اليوم. ويبقى المسلك
+       نفسه مختبَراً بتعريفٍ يُزرع هنا. */
+    db.prepare(
+      `INSERT INTO metric_definitions (key, layer, name_ar, name_en, unit, class, source, cadence, dim_key, sort)
+       VALUES ('manual_by_platform', 'reach', 'مُدخَلٌ موزَّع', 'Manual by platform', 'count', 'operational', 'manual', 'monthly', 'platform', 1999)`,
+    ).run();
+    expect((await find('manual_by_platform'))?.connected).toBe(false);
+    await upsertValue(env, JULY, { metricKey: 'manual_by_platform', dimKey: 'platform', dimValue: 'x', value: 3, source: 'manual' });
+    expect((await find('manual_by_platform'))?.connected).toBe(true);
   });
 
   it('المحتسب من قيمٍ مُدخَلة يتبع وجود قيمته', async () => {
