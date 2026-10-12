@@ -254,6 +254,19 @@ export function retryableFailure(data: any): boolean {
   return list.length > 0 && list.every((e) => e?.retryAvailable === true);
 }
 
+/* ═══ «تعثّرٌ يُعاد» ونُشر ═══
+
+   رآه الفريق على لينكدإن: يردّ Ayrshare بفشلٍ يقول إنه يُعاد (`retryAvailable`)
+   والمنشور على الصفحة. فكان الموعد يُكتب فاشلاً والمحتوى «متأخراً»، وإعادتُه
+   بمفتاحٍ جديد تكرّره. فما عاد بمعرّفٍ لدى Ayrshare لا يُكتب فاشلاً: يبقى
+   «قيد النشر» ويُسأل سجلّ المنصة عنه (`getPublishStatus`)، فإن ظهر فيه نُشر،
+   وإلا فشل بسببه بعد ربع ساعة. */
+function unsureFailure(data: any): PublishResult | null {
+  const id = String(unwrapAyrsharePost(data)?.id || '');
+  if (!id || !retryableFailure(data)) return null;
+  return { providerPostId: id, status: 'error', state: 'pending' };
+}
+
 /* ═══ حدُّ حجم الصورة لكل منصة ═══
 
    Ayrshare لا يُعلن حدود المنصات في واجهته كما يُعلنها SocialAPI، فتُكتب هنا
@@ -621,6 +634,8 @@ export async function listAyrshareWebhooks(auth: AyrshareAuth): Promise<{ event:
 /** مهلةٌ قبل سؤال سجلّ المنصة، وهامشُ فرق الساعة بيننا وبينها. */
 const SEEN_AFTER_MS = 5 * 60_000;
 const SEEN_CLOCK_SKEW_MS = 5 * 60_000;
+/** مهلةُ «تعثّرٍ يُعاد» حتى يظهر المنشور في سجلّ منصته — انظر `send`. */
+const RETRY_GRACE_MS = 15 * 60_000;
 
 /** أوّل ستين حرفاً من النصّ للمطابقة — بلا محارف الاتجاه والوصل، والمسافاتُ واحدة. */
 export function normalizeHead(text: string | undefined | null): string {
@@ -908,6 +923,8 @@ export class AyrshareProvider implements PublishingProvider {
       if (e.status === 403 && this.suspended) throw new Error(this.suspended);
       // 419 سببُه مفهومٌ مسبقاً بنصٍّ يقول ما يُضبط — لا يُستبدل برسالة الواجهة
       const outcome = errorCodes(e.body).includes(419) ? null : ayrshareOutcome(e.body);
+      const unsure = unsureFailure(e.body);
+      if (outcome?.state === 'failed' && unsure) return unsure;
       if (outcome?.state === 'failed' && outcome.error) throw new Error(failure(e.body, outcome.error));
       throw err;
     }
@@ -915,6 +932,8 @@ export class AyrshareProvider implements PublishingProvider {
     const outcome = ayrshareOutcome(data);
     if (outcome?.state === 'failed') {
       if (duplicateKeyRejection(post)) throw new Error(DUPLICATE_KEY_ERROR);
+      const unsure = unsureFailure(data);
+      if (unsure) return unsure;
       throw new Error(failure(data, outcome.error || 'رفضت المنصة المنشور'));
     }
     const id = String(post?.id || '');
@@ -924,16 +943,41 @@ export class AyrshareProvider implements PublishingProvider {
   }
 
   async getPublishStatus(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null> {
-    let check: PublishCheck | null;
+    let raw: any;
     try {
-      check = ayrshareOutcome(await this.call('GET', `/post/${encodeURIComponent(providerPostId)}`));
+      raw = await this.call('GET', `/post/${encodeURIComponent(providerPostId)}`);
     } catch (err) {
       // ٢٢١ «History not found» — المنشور لا يُعرف لدى Ayrshare
       if (err instanceof AyrshareError && errorCodes(err.body).includes(221)) return null;
       throw err;
     }
-    if (check?.state !== 'pending' || !ctx) return check;
-    return (await this.seenOnPlatform(ctx)) ? { state: 'published' } : check;
+    const check = ayrshareOutcome(raw);
+    if (!ctx) return check;
+    if (check?.state === 'pending') return (await this.seenOnPlatform(ctx)) ? { state: 'published' } : check;
+    if (check?.state !== 'failed') return check;
+
+    /* «فشل» يُصدَّق بعد سؤال المنصة نفسها: لينكدإن نشر وAyrshare يقول
+       تعثّر — انظر `unsureFailure`. وما قال إنه يُعاد يُمهَل ربع ساعة. */
+    if (await this.seenOnPlatform(ctx, { now: true })) return { state: 'published' };
+    const sent = Date.parse(ctx.sentAt || '');
+    if (retryableFailure(raw) && Number.isFinite(sent) && Date.now() - sent < RETRY_GRACE_MS) return { state: 'pending' };
+    return check;
+  }
+
+  /** وقتُ منشورٍ بالنصّ نفسه في سجلّ المنصة بعد `since` — أو `null`. */
+  async findOnPlatform(ctx: { platform: string; text: string; since: string }): Promise<string | null> {
+    const since = Date.parse(ctx.since);
+    const head = normalizeHead(ctx.text);
+    if (!Number.isFinite(since) || head.length < 10) return null;
+    if (!AYRSHARE_HISTORY_PLATFORMS.has(ayrsharePlatform(ctx.platform))) return null;
+    const page = await ayrsharePlatformHistory(
+      { key: this.key, x: this.x, rate: this.rate }, ayrsharePlatform(ctx.platform), ctx.platform, { limit: 20 },
+    );
+    const hit = page.posts.find((p) => {
+      const at = Date.parse(p.sentAt || '');
+      return (!Number.isFinite(at) || at >= since - SEEN_CLOCK_SKEW_MS) && normalizeHead(p.title) === head;
+    });
+    return hit ? hit.sentAt || ctx.since : null;
   }
 
   /* ═══ «pending» يطول: يُسأل سجلّ المنصة نفسها ═══
@@ -942,22 +986,14 @@ export class AyrshareProvider implements PublishingProvider {
      لينكدإن والموعد «قيد النشر». فبعد خمس دقائق من الإرسال يُقرأ سجلّ
      المنصة (`/history/:platform`): منشورٌ بالنصّ نفسه بعد الإرسال هو هو.
      وما لا يُطابَق يبقى ينتظر حتى مهلة التأكيد كما كان. */
-  private async seenOnPlatform(ctx: PublishStatusContext): Promise<boolean> {
+  private async seenOnPlatform(ctx: PublishStatusContext, opts: { now?: boolean } = {}): Promise<boolean> {
     const sent = Date.parse(ctx.sentAt || '');
-    const head = normalizeHead(ctx.text);
-    if (!Number.isFinite(sent) || Date.now() - sent < SEEN_AFTER_MS || head.length < 10) return false;
-    let page: PlatformHistoryPage;
+    if (!Number.isFinite(sent) || (!opts.now && Date.now() - sent < SEEN_AFTER_MS)) return false;
     try {
-      page = await ayrsharePlatformHistory(
-        { key: this.key, x: this.x }, ayrsharePlatform(ctx.platform), ctx.platform, { limit: 20 },
-      );
+      return (await this.findOnPlatform({ platform: ctx.platform, text: ctx.text, since: ctx.sentAt! })) !== null;
     } catch {
       return false; // يُسأل في الدورة التالية
     }
-    return page.posts.some((p) => {
-      const at = Date.parse(p.sentAt || '');
-      return (!Number.isFinite(at) || at >= sent - SEEN_CLOCK_SKEW_MS) && normalizeHead(p.title) === head;
-    });
   }
 
   async deletePost(providerPostId: string): Promise<void> {

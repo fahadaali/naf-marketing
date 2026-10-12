@@ -487,3 +487,110 @@ describe('لينكدإن «قيد النشر» وهو منشور', () => {
     expect(calls.some((c) => c.key.startsWith('GET /history'))).toBe(false);
   });
 });
+
+describe('«تعثّرٌ يُعاد» ولينكدإن نشر', () => {
+  const TEXT = 'تعلن شركة ناف للمحاماة عن إطلاق خدمة الاستشارات القانونية للشركات الناشئة';
+  const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const retryable = (id?: string) => ({
+    status: 'error',
+    errors: [{ action: 'post', status: 'error', code: 108, message: 'LinkedIn Error: please try again', retryAvailable: true, platform: 'linkedin' }],
+    postIds: [],
+    ...(id ? { id } : {}),
+  });
+
+  function sent(id: string, sentMinAgo: number): void {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'ع', ?, 'scheduled', 'u1')").run(id, `<p>${TEXT}</p>`);
+    db.prepare("INSERT INTO schedules (id, post_id, platform, scheduled_at, status, provider_post_id, published_at, publish_key) VALUES (?, ?, 'linkedin_page', ?, 'processing', ?, ?, 'pub_k')")
+      .run(`sch_${id}`, id, PAST, `AYR_${id}`, ago(sentMinAgo));
+  }
+  const onLinkedIn = (createdMinAgo: number) => () => ({
+    body: { posts: [{ id: 'urn:li:share:7', post: TEXT, created: ago(createdMinAgo) }] },
+  });
+
+  it('بمعرّفٍ لدى Ayrshare لا يُكتب فاشلاً: يبقى قيد النشر بمعرّفه ومفتاحه', async () => {
+    post(db, 'u1p', `<p>${TEXT}</p>`, ['linkedin_page']);
+    replies['POST /post'] = () => ({ status: 400, body: retryable('AYR_U1') });
+    const r = await runDuePublishes(env);
+    expect(r).toMatchObject({ failed: 0, pending: 1 });
+    expect(row(db, 'sch_u1p_linkedin_page')).toMatchObject({ status: 'processing', provider_post_id: 'AYR_U1', error: null });
+    expect(row(db, 'sch_u1p_linkedin_page').publish_key).toBeTruthy();
+  });
+
+  it('وبلا معرّف، أو برفضٍ لا يُعاد، يفشل كما كان', async () => {
+    post(db, 'u2p', `<p>${TEXT}</p>`, ['linkedin_page']);
+    replies['POST /post'] = () => ({ status: 400, body: retryable() });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_u2p_linkedin_page')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_u2p_linkedin_page').error).toMatch(/تعثّرٌ مؤقت لدى المنصة/);
+
+    post(db, 'u3p', `<p>${TEXT} ثانية</p>`, ['linkedin_page']);
+    replies['POST /post'] = () => ({
+      status: 400,
+      body: { status: 'error', errors: [{ code: 110, message: 'Post too long', platform: 'linkedin' }], postIds: [], id: 'AYR_U3' },
+    });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_u3p_linkedin_page').status).toBe('failed');
+  });
+
+  it('سجلّ لينكدإن يحسمه منشوراً فوراً — بلا انتظار الدقائق الخمس', async () => {
+    sent('R1', 2);
+    replies['GET /post/AYR_R1'] = () => ({ body: { ...retryable('AYR_R1') } });
+    replies['GET /history/linkedin'] = onLinkedIn(1);
+    const r = await reconcilePublishing(env);
+    expect(r.published).toBe(1);
+    expect(row(db, 'sch_R1')).toMatchObject({ status: 'published', error: null, publish_key: null });
+  });
+
+  it('لم يظهر: يُمهَل ربع ساعة، ثم يفشل بسببه', async () => {
+    sent('R2', 3);
+    sent('R3', 20);
+    replies['GET /post/AYR_R2'] = () => ({ body: retryable('AYR_R2') });
+    replies['GET /post/AYR_R3'] = () => ({ body: retryable('AYR_R3') });
+    replies['GET /history/linkedin'] = () => ({ body: { posts: [] } });
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_R2').status).toBe('processing');
+    expect(row(db, 'sch_R3')).toMatchObject({ status: 'failed' });
+    expect(row(db, 'sch_R3').error).toMatch(/LinkedIn Error/);
+  });
+
+  it('ورفضٌ لا يُعاد يُسأل عنه السجلّ مرّةً ثم يفشل بلا مهلة', async () => {
+    sent('R4', 3);
+    replies['GET /post/AYR_R4'] = () => ({
+      body: { status: 'error', errors: [{ code: 110, message: 'Post too long', platform: 'linkedin' }], id: 'AYR_R4' },
+    });
+    replies['GET /history/linkedin'] = () => ({ body: { posts: [] } });
+    await reconcilePublishing(env);
+    expect(row(db, 'sch_R4').status).toBe('failed');
+  });
+});
+
+describe('ما كُتب فاشلاً بـ«تعثّرٍ مؤقت» وهو على لينكدإن', () => {
+  const TEXT = 'تعلن شركة ناف للمحاماة عن إطلاق خدمة الاستشارات القانونية للشركات الناشئة';
+  const recent = new Date(Date.now() - 2 * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const ERR = 'فشل النشر عبر Ayrshare: LinkedIn Error. تعثّرٌ مؤقت لدى المنصة — أعد النشر بعد دقائق';
+
+  function failedRow(id: string, body: string, error = ERR): void {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'ع', ?, 'scheduled', 'u1')").run(id, `<p>${body}</p>`);
+    db.prepare("INSERT INTO schedules (id, post_id, platform, scheduled_at, status, error) VALUES (?, ?, 'linkedin_page', ?, 'failed', ?)")
+      .run(`sch_${id}`, id, recent, error);
+  }
+
+  it('يُكتب منشوراً ما وُجد بنصّه، ويبقى غيره — مرّةً واحدة', async () => {
+    failedRow('F1', TEXT);
+    failedRow('F2', 'منشورٌ آخر لم يصل لينكدإن قطّ ولا أثر له في سجلّه');
+    failedRow('F3', TEXT, 'النص أطول من حدّ لينكدإن');
+    const created = new Date(Date.parse(recent) + 3_600_000).toISOString();
+    replies['GET /history/linkedin'] = () => ({ body: { posts: [{ id: 'urn:li:share:9', post: TEXT, created }] } });
+
+    const r = await reconcilePublishing(env);
+    expect(r.published).toBe(1);
+    expect(row(db, 'sch_F1')).toMatchObject({ status: 'published', error: null, published_at: created });
+    expect(row(db, 'sch_F2').status).toBe('failed');
+    expect(row(db, 'sch_F3').status).toBe('failed');
+    expect(db.prepare("SELECT status FROM content_posts WHERE id = 'F1'").get().status).toBe('published');
+
+    const before = calls.length;
+    await reconcilePublishing(env);
+    expect(calls.length).toBe(before);
+  });
+});

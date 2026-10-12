@@ -445,8 +445,68 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
     }
   }
 
+  published += await recoverMisreportedFailures(env);
   if (published) await markFullyPublishedPosts(env);
   return { published, failed };
+}
+
+/* ═══ ما كُتب فاشلاً وهو منشور — مرّةً واحدة ═══
+
+   قبل أن يُسأل سجلّ المنصة عن «تعثّرٍ يُعاد» (`unsureFailure` في
+   `adapters/ayrshare.ts`) كُتبت مواعيدُ لينكدإن فاشلةً وهي على الصفحة، فظهر
+   محتواها «متأخراً». فتُفحص مرّةً: ما فشل بذلك السبب في أسبوعين ووُجد في سجلّ
+   منصته بنصّه بعد يومٍ قبل موعده يُكتب منشوراً. وما لم يوجد يبقى كما هو. */
+const RECOVER_KEY = 'publish_retryable_recovered_at';
+const RETRYABLE_MARK = '%تعثّرٌ مؤقت لدى المنصة%';
+
+async function recoverMisreportedFailures(env: Env): Promise<number> {
+  const done = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(RECOVER_KEY).first<{ value: string }>();
+  if (done?.value) return 0;
+  let provider: PublishingProvider;
+  try {
+    provider = await getProvider(env);
+  } catch {
+    return 0; // يُعاد في الدورة التالية
+  }
+  if (!provider.findOnPlatform) return 0;
+
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const { results } = await env.DB.prepare(
+    `SELECT s.id, s.platform, s.scheduled_at, COALESCE(NULLIF(v.body_override, ''), p.body) AS body, p.title
+     FROM schedules s
+     JOIN content_posts p ON p.id = s.post_id
+     LEFT JOIN post_variants v ON v.post_id = s.post_id AND v.platform = s.platform
+     WHERE s.status = 'failed' AND s.error LIKE ? AND s.scheduled_at >= ?
+     LIMIT 30`,
+  )
+    .bind(RETRYABLE_MARK, since)
+    .all<{ id: string; platform: string; scheduled_at: string; body: string | null; title: string | null }>();
+
+  let recovered = 0;
+  for (const row of results || []) {
+    const text = (htmlToText(row.body || '') || row.title || '').trim();
+    const from = new Date(Date.parse(row.scheduled_at) - 86_400_000).toISOString();
+    let at: string | null;
+    try {
+      at = await provider.findOnPlatform({ platform: row.platform, text, since: from });
+    } catch {
+      return recovered; // السجلّ لم يُقرأ — تُعاد المحاولة في الدورة التالية
+    }
+    if (!at) continue;
+    const r = await env.DB.prepare(
+      `UPDATE schedules SET status = 'published', error = NULL, publish_key = NULL, published_at = ?
+       WHERE id = ? AND status = 'failed'`,
+    )
+      .bind(at, row.id)
+      .run();
+    recovered += r.meta.changes ? 1 : 0;
+  }
+  await env.DB.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  )
+    .bind(RECOVER_KEY, nowIso())
+    .run();
+  return recovered;
 }
 
 /* ═══ الفحص عند الجدولة ═══
