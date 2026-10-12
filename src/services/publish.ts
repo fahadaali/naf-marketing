@@ -3,7 +3,7 @@ import { PublishUncertain, keepDescription, type PublishInput, type PublishMedia
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
-import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
+import { adaptImage, frameImage, imageDims, platformMediaFilter, videoIssues } from './mediaSpecs';
 import { optionIssues, parseOptions } from './publishOptions';
 
 // مُشغّل النشر — idempotent:
@@ -73,23 +73,17 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
   const rawBody = variant?.body_override || job.body || '';
   const text = (htmlToText(rawBody) || job.title || '').trim();
 
-  // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور
-  let assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  // الوسائط: نسخة المنصة إن حُدّدت، وإلا الوسائط المضمّنة في متن المنشور — بما تقبله المنصة منها
+  const assetIds = variant?.media_asset_id ? [variant.media_asset_id] : extractMediaIds(rawBody);
+  let media = platformMediaFilter(job.platform, await loadMedia(env, assetIds));
   /* مقطعٌ وُلّد من صورة المنصة الواحدة (تيك توك) يحلّ محلّها — ما دامت هي
      الصورة نفسها. فإن تغيّرت بعده أُرسلت الصورة، فيقول `missingRequirement`
-     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. */
-  let fromImage: string | null = null;
-  if (variant?.generated_media_id && assetIds.length === 1 && assetIds[0] === variant.generated_from_id) {
-    fromImage = assetIds[0];
-    assetIds = [variant.generated_media_id];
-  }
-  let media = await loadMedia(env, assetIds);
-  /* والمقطع المصنوع من الصورة مولَّدٌ إن كانت هي مولَّدة: الوسم للمحتوى لا للملف. */
-  if (fromImage && media.length === 1 && !media[0].aiGenerated) {
-    const src = await env.DB.prepare('SELECT ai_generated FROM media_assets WHERE id = ?')
-      .bind(fromImage)
-      .first<{ ai_generated: number | null }>();
-    if (src?.ai_generated) media = [{ ...media[0], aiGenerated: true }];
+     ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. والمقطع مولَّدٌ إن كانت صورته
+     مولَّدة: الوسم للمحتوى لا للملف. */
+  if (variant?.generated_media_id && media.length === 1 && media[0].id === variant.generated_from_id) {
+    const [image] = media;
+    const [clip] = await loadMedia(env, [variant.generated_media_id]);
+    media = [image.aiGenerated && !clip.aiGenerated ? { ...clip, aiGenerated: true } : clip];
   }
 
   /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها
@@ -267,6 +261,7 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
     }
     const key = asset.r2_key;
     out.push({
+      id,
       open: async () => (await env.MEDIA.get(key))?.body ?? null,
       size: head.size,
       mimeType: asset.mime_type || 'application/octet-stream',

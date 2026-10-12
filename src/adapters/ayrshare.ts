@@ -5,7 +5,7 @@ import {
 } from './provider';
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
-import { facebookReel, youtubeShort } from '../services/mediaSpecs';
+import { facebookReel, isDocument, youtubeShort } from '../services/mediaSpecs';
 import { sortThread, threadAnswer, type ThreadEntry } from '../services/inboxThread';
 
 /* ═══ Ayrshare ═══
@@ -358,7 +358,14 @@ function uploadType(m: PublishMedia): { fileName: string; contentType?: string }
   const KNOWN: Record<string, string> = {
     'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'video/mp4': 'mp4', 'video/quicktime': 'mov',
   };
-  const OTHER: Record<string, string> = { 'image/gif': 'gif', 'image/webp': 'webp', 'video/webm': 'webm' };
+  /* والمستند يُعرف عند لينكدإن بامتداد رابطه وحده («LinkedIn Documents»): اسمٌ
+     بلا امتداد — والأسماء العربية تُستبدل حروفها — يُنشر رابطاً لا مستنداً. */
+  const OTHER: Record<string, string> = {
+    'image/gif': 'gif', 'image/webp': 'webp', 'video/webm': 'webm',
+    'application/pdf': 'pdf', 'application/msword': 'doc', 'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  };
   const mime = (m.mimeType || '').toLowerCase();
   const ext = KNOWN[mime] || OTHER[mime] || '';
   let fileName = (m.filename || 'media').replace(/[^\w.\-]+/g, '_');
@@ -697,6 +704,10 @@ export class AyrshareProvider implements PublishingProvider {
     if (thumb && platforms.includes('linkedin')) body.linkedInOptions = { thumbNail: thumb };
     if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
     for (const p of platforms) mergeOptions(body, p, describeMedia(p, media));
+    // منشور المستند في لينكدإن بعنوان المحتوى — وبلا عنوانٍ يأخذ اسم الملف
+    if (platforms.includes('linkedin') && media.length === 1 && isDocument(media[0])) {
+      mergeOptions(body, 'linkedin', { title: (input.title || media[0].filename).slice(0, 400) });
+    }
     await this.applyOptions(body, platforms, input);
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 

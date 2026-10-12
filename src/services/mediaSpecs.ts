@@ -144,6 +144,33 @@ export function videoIssues(platform: string, m: MediaMeta & { size?: number; fi
 /** صيغٌ يقرؤها `IMAGES` ويُخرجها JPEG. والمتحرّكة (GIF) تفقد حركتها، فلا تُمسّ. */
 export const ADAPTABLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 
+/* ═══ ما تقبله كل منصة من وسائط المحتوى ═══
+
+   المحرر يُرفق بالمحتوى ملفّاتٍ من كل نوع — PDF وWord وصوت — وكانت تُرسل كلها
+   إلى كل منصة، فيُرفض المنشور على إنستغرام وإكس وغيرهما بسببٍ لا يدلّ عليه.
+   فالصورة والمقطع لكل منصة، والمستند للينكدإن وحده: يُنشر «منشور مستند» وحده
+   بلا صورٍ معه («LinkedIn Documents» في توثيق Ayrshare — PDF وWord وPowerPoint).
+   ونظيرُها في الواجهة `platformMedia` في `web/src/mediaPlan.ts`. */
+const DOCUMENT_MIME = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+export function isDocument(m: { mimeType: string; filename?: string }): boolean {
+  return DOCUMENT_MIME.has((m.mimeType || '').toLowerCase()) || /\.(pdf|docx?|pptx?)$/i.test(m.filename || '');
+}
+
+export function platformMediaFilter<T extends { mimeType: string; filename?: string }>(platform: string, media: T[]): T[] {
+  if (platform === 'linkedin' || platform === 'linkedin_page') {
+    const doc = media.find(isDocument);
+    if (doc) return [doc];
+  }
+  return media.filter((m) => /^(image|video)\//.test((m.mimeType || '').toLowerCase()));
+}
+
 /** تمويه الخلفية وتعتيمها — في الصورة المُرسلة لا في الواجهة: الخلفية تبقى
     خلفيةً، وتبرز الصورة فوقها. */
 const BACKDROP = { blur: 60, brightness: 0.8 };

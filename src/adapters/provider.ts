@@ -6,6 +6,8 @@ import type { PublishOptions } from '../services/publishOptions';
 // وسيط مرفق بالنشر — نُمرّر البايتات لأن مسار /api/media محمي بالمصادقة،
 // فلا يستطيع المزوّد جلبه برابط. المزوّدون الذين يقبلون روابط عامة يستخدمون url.
 export interface PublishMedia {
+  /** معرّف الوسيط في المكتبة — لما حُمّل منها. */
+  id?: string;
   data?: ArrayBuffer;
   /**
    * يفتح الملف تدفّقاً من التخزين — بلا تحميله كلّه في الذاكرة. ذاكرة العامل

@@ -136,16 +136,18 @@ export async function imageToVideo(image: Blob, name: string): Promise<File> {
 export async function ensureTikTokVideo(postId: string): Promise<boolean> {
   const d = await api.get<{ post: { body: string }; variants: Variant[] }>(`/posts/${postId}`);
   const variant = (d.variants || []).find((v) => v.platform === 'tiktok');
-  const ids = variant?.media_asset_id ? [variant.media_asset_id] : bodyMediaIds(d.post.body);
-  if (ids.length !== 1) return false;
-  const info = await api.get<{ media: AssetInfo[] }>(`/media/info?ids=${encodeURIComponent(ids[0])}`);
+  const ids = (variant?.media_asset_id ? [variant.media_asset_id] : bodyMediaIds(d.post.body)).slice(0, 4);
+  if (!ids.length) return false;
+  // بيانات الوسائط كلها: ملفٌّ لا تقبله تيك توك (PDF مثلاً) لا يُعدّ في صورها، كما في الخادم
+  const info = await api.get<{ media: AssetInfo[] }>(`/media/info?ids=${encodeURIComponent(ids.join(','))}`);
   const assets = Object.fromEntries(info.media.map((m) => [m.id, m]));
   const plan = platformMedia(null, 'tiktok', ids, variant, assets);
   if (!plan.needsVideo || plan.videoReady) return false;
 
-  const image = await portraitFrame(ids[0]);
-  const file = await imageToVideo(image, assets[ids[0]]?.filename || 'tiktok');
+  const imageId = plan.items[0].id;
+  const image = await portraitFrame(imageId);
+  const file = await imageToVideo(image, assets[imageId]?.filename || 'tiktok');
   const up = await uploadMedia<{ id: string }>(file);
-  await api.put(`/posts/${postId}/variants/tiktok`, { generated_media_id: up.id, generated_from_id: ids[0] });
+  await api.put(`/posts/${postId}/variants/tiktok`, { generated_media_id: up.id, generated_from_id: imageId });
   return true;
 }

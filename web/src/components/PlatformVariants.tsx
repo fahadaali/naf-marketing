@@ -14,7 +14,7 @@ import { uploadMedia } from '../mediaUpload';
 import PlatformOptions, { HAS_OPTIONS, type PlatformOptionsValue } from './PlatformOptions';
 import { formatNumber, isolate } from '../lib/format';
 import {
-  bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode,
+  bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode, isDocumentAsset,
   type AssetInfo, type MediaSpecs, type Variant,
 } from '../mediaPlan';
 
@@ -352,6 +352,7 @@ export default function PlatformVariants({
                               <span className="badge gray">كما هي</span>
                             ) : null}
                             {mode && <span className="badge blue">{mode}</span>}
+                            {isDocumentAsset(it.asset) && <span className="badge blue">منشور مستند</span>}
                           </figcaption>
                         </figure>
                       );

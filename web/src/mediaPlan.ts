@@ -70,6 +70,12 @@ const ADAPTABLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 const isImage = (a?: AssetInfo) => !!a && (a.mime_type || '').startsWith('image/');
 const isVideo = (a?: AssetInfo) => !!a && (a.mime_type || '').startsWith('video/');
 
+/** مستندٌ ينشره لينكدإن منشورَ مستند (PDF وWord وPowerPoint) — ولا تنشره منصةٌ غيره.
+    نظيرُ `isDocument` في `src/services/mediaSpecs.ts`. */
+const DOCUMENT_MIME = /^application\/(pdf|msword|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|presentationml\.presentation))$/;
+export const isDocumentAsset = (a?: AssetInfo) =>
+  !!a && (DOCUMENT_MIME.test((a.mime_type || '').toLowerCase()) || /\.(pdf|docx?|pptx?)$/i.test(a.filename || ''));
+
 export type PlannedItem = {
   id: string;
   asset?: AssetInfo;
@@ -100,7 +106,12 @@ export function platformMedia(
 ): PlatformMedia {
   const source = variant?.media_asset_id ? 'variant' : 'body';
   const ids = (variant?.media_asset_id ? [variant.media_asset_id] : bodyIds).slice(0, 4);
-  const items = ids.map((id) => {
+  /* بما تقبله المنصة كما يصفّيه الخادم (`platformMediaFilter`): المستند للينكدإن
+     وحده في منشوره، والصورة والمقطع لكل منصة. وما لم تُعرف بياناته بعدُ يبقى. */
+  const linkedin = platform === 'linkedin' || platform === 'linkedin_page';
+  const doc = linkedin ? ids.find((id) => isDocumentAsset(assets[id])) : undefined;
+  const accepted = doc ? [doc] : ids.filter((id) => !assets[id] || isImage(assets[id]) || isVideo(assets[id]));
+  const items = accepted.map((id) => {
     const asset = assets[id];
     const mime = (asset?.mime_type || '').toLowerCase();
     const frame =
