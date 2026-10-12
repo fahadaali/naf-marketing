@@ -21,6 +21,18 @@ export interface PublishMedia {
   width?: number | null;
   height?: number | null;
   duration_ms?: number | null;
+  /** النص البديل للصورة — لقارئ الشاشة على المنصات التي تقبله. */
+  alt?: string | null;
+  /** مولَّدٌ بالذكاء الاصطناعي — يُعلَم به حيث تعلن المنصة وسمه. */
+  aiGenerated?: boolean;
+}
+
+/**
+ * وصفُ الوسيط (نصّه البديل ووسمه) يبقى معه حين يُكيَّف أو يُضغط: التحويل يصنع
+ * وسيطاً جديداً بالبايتات، والوصف للصورة نفسها لا لبايتاتها.
+ */
+export function keepDescription(from: PublishMedia, to: PublishMedia): PublishMedia {
+  return to === from ? to : { ...to, alt: from.alt, aiGenerated: from.aiGenerated };
 }
 
 export interface PublishInput {

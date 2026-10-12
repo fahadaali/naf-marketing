@@ -122,6 +122,35 @@ export default function PlatformVariants({
   const [uploaded, setUploaded] = useState<Record<string, AssetInfo>>({});
   const assets = useMemo(() => ({ ...fetched, ...uploaded }), [fetched, uploaded]);
 
+  /* ═══ وصف الوسائط ═══
+     النص البديل ووسم الذكاء الاصطناعي صفةٌ للوسيط لا للمنصة: يُكتب مرّةً هنا
+     ويُرسل مع الصورة إلى كل منصةٍ تقبله. والمقطع المصنوع من صورةٍ لتيك توك
+     لا يُوصف وحده — يتبع صورته. */
+  const describable = useMemo(() => {
+    const ids = new Set(bodyIds);
+    for (const v of Object.values(rows)) if (v.media_asset_id) ids.add(v.media_asset_id);
+    return [...ids].filter((id) => /^(image|video)\//.test(assets[id]?.mime_type || ''));
+  }, [bodyIds, rows, assets]);
+  const [alts, setAlts] = useState<Record<string, string>>({});
+
+  async function describe(id: string, patch: { alt_text?: string; ai_generated?: boolean }) {
+    onError('');
+    try {
+      await api.patch(`/media/${id}/describe`, patch);
+      setUploaded((prev) => ({
+        ...prev,
+        [id]: {
+          ...assets[id],
+          ...('alt_text' in patch ? { alt_text: patch.alt_text?.trim() || null } : {}),
+          ...('ai_generated' in patch ? { ai_generated: patch.ai_generated ? 1 : 0 } : {}),
+        },
+      }));
+      onMsg('تم الحفظ');
+    } catch (e: any) {
+      onError(e.message);
+    }
+  }
+
   const plans = useMemo(
     () => Object.fromEntries(platforms.map((p) => [p, platformMedia(specs, p, bodyIds, rows[p], assets)])),
     [platforms, specs, bodyIds, rows, assets],
@@ -214,6 +243,50 @@ export default function PlatformVariants({
             اترك النص فارغاً لاستخدام النص الأساسي. «أول تعليق» يُنشر تلقائياً بعد المنشور — مناسب للروابط والوسوم.
             والصورة التي لا تقبل المنصة أبعادها تُوضع في إطارٍ بمقاسها، كما في المعاينة.
           </p>
+          {describable.length > 0 && (
+            <div className="pv-desc">
+              <h5 className="pv-desc-title">وصف الوسائط</h5>
+              <p className="muted pv-hint">
+                النص البديل يقرؤه قارئ الشاشة لمن لا يرى الصورة، ويُرسل إلى لينكدإن وفيسبوك وإنستغرام وإكس.
+                والوسيط المولّد بالذكاء الاصطناعي يُعلَن عنه في المنصات التي تتيح ذلك.
+              </p>
+              {describable.map((id) => {
+                const a = assets[id];
+                const image = (a?.mime_type || '').startsWith('image/');
+                const saved = a?.alt_text || '';
+                const value = alts[id] ?? saved;
+                return (
+                  <div key={id} className="pv-desc-row">
+                    {image
+                      ? <img className="pv-desc-thumb" src={`/api/media/${id}`} alt={saved} loading="lazy" />
+                      : <video className="pv-desc-thumb" src={`/api/media/${id}`} preload="metadata" muted playsInline />}
+                    <div className="pv-desc-fields">
+                      {image && (
+                        <input
+                          className="input"
+                          maxLength={1000}
+                          placeholder="النص البديل — صف ما في الصورة"
+                          aria-label={`النص البديل لـ ${a?.filename || 'الصورة'}`}
+                          value={value}
+                          onChange={(e) => setAlts((v) => ({ ...v, [id]: e.target.value }))}
+                          onBlur={() => { if (value.trim() !== saved) describe(id, { alt_text: value }); }}
+                        />
+                      )}
+                      <label className="pv-desc-ai">
+                        <input
+                          type="checkbox"
+                          className="chk"
+                          checked={!!a?.ai_generated}
+                          onChange={(e) => describe(id, { ai_generated: e.target.checked })}
+                        />
+                        مولّد بالذكاء الاصطناعي
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {platforms.map((p) => {
             const plan = plans[p];
             const busy = saving === p;

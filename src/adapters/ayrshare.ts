@@ -1,5 +1,5 @@
 import {
-  PublishUncertain,
+  PublishUncertain, keepDescription,
   type PublishingProvider, type PublishInput, type PublishResult, type PublishCheck, type PublishMedia,
   type AnalyticsResult, type ModerateAction, type PublishStatusContext,
 } from './provider';
@@ -173,6 +173,49 @@ export function mapPostWeight(data: any): Record<string, PostWeight> {
 
 export async function ayrsharePostWeight(auth: AyrshareAuth, text: string): Promise<Record<string, PostWeight>> {
   return mapPostWeight(await ayrshareCall<any>(auth, 'POST', '/post/checkPostWeight', { post: text }));
+}
+
+/* ═══ وصفُ الوسائط لكل منصة: النص البديل ووسم الذكاء الاصطناعي ═══
+
+   من صفحات المنصات في توثيقه:
+   - النص البديل `altText` مصفوفةٌ تقابل الوسائط بترتيبها. لينكدإن وإنستغرام
+     للصور وحدها (لا للمقطع ولا للريلز)، وإكس كذلك — ومقطعٌ معه نصٌّ بديل لا
+     يُنشر أصلاً — وفيسبوك للصورة والمقطع. ويُرسل للوسائط بترتيبها حتى أوّل
+     وسيطٍ بلا وصف: مدخلٌ فارغ في المصفوفة لا يُعرف كيف تقرؤه كل منصة.
+   - الوسم `isAIGenerated` لإكس وإنستغرام وتيك توك (للمقطع وحده)، و
+     `containsSyntheticMedia` ليوتيوب. ولينكدإن وفيسبوك لا يعلنانه. */
+const OPTIONS_KEY: Record<string, string> = {
+  twitter: 'twitterOptions', instagram: 'instagramOptions', facebook: 'faceBookOptions',
+  linkedin: 'linkedInOptions', tiktok: 'tikTokOptions', youtube: 'youTubeOptions', gmb: 'gmbOptions',
+};
+const ALT_MAX = 1000;
+
+export function describeMedia(ayrPlatform: string, media: PublishMedia[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const video = media.some((m) => m.mimeType.startsWith('video/'));
+  const altFor = ayrPlatform === 'facebook' || (['linkedin', 'instagram', 'twitter'].includes(ayrPlatform) && !video);
+  if (altFor) {
+    const alts: string[] = [];
+    for (const m of media) {
+      const alt = (m.alt || '').trim();
+      if (!alt) break;
+      alts.push(alt.slice(0, ALT_MAX));
+    }
+    if (alts.length) out.altText = alts;
+  }
+  if (media.some((m) => m.aiGenerated)) {
+    if (ayrPlatform === 'twitter' || ayrPlatform === 'instagram') out.isAIGenerated = true;
+    if (ayrPlatform === 'tiktok' && video) out.isAIGenerated = true;
+    if (ayrPlatform === 'youtube') out.containsSyntheticMedia = true;
+  }
+  return out;
+}
+
+/** يضمّ خياراتٍ إلى كائن المنصة في الطلب (`twitterOptions`…) فوق ما فيه. */
+export function mergeOptions(body: Record<string, unknown>, ayrPlatform: string, extra: Record<string, unknown>): void {
+  const key = OPTIONS_KEY[ayrPlatform];
+  if (!key || !Object.keys(extra).length) return;
+  body[key] = { ...((body[key] as Record<string, unknown>) || {}), ...extra };
 }
 
 /** منصاتٌ لا تحذف المنشور المنشور عبر الواجهة — يُحذف من تطبيقها («Delete Post»). */
@@ -619,7 +662,7 @@ export class AyrshareProvider implements PublishingProvider {
     for (const m of input.media || []) {
       const size = m.data ? m.data.byteLength : m.size ?? 0;
       const compress = this.images && max && COMPRESSIBLE.has(m.mimeType) && size > max;
-      media.push(compress ? await fitImage(this.images!, m, max!) : m);
+      media.push(compress ? keepDescription(m, await fitImage(this.images!, m, max!)) : m);
     }
     if (media.length) {
       const urls: string[] = [];
@@ -650,6 +693,7 @@ export class AyrshareProvider implements PublishingProvider {
     if (video && platforms.includes('facebook') && facebookReel(video)) body.faceBookOptions = { reels: true };
     if (thumb && platforms.includes('linkedin')) body.linkedInOptions = { thumbNail: thumb };
     if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
+    for (const p of platforms) mergeOptions(body, p, describeMedia(p, media));
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
     if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video, input.idempotencyKey);

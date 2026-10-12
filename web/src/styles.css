@@ -593,6 +593,16 @@ h3, h4 { letter-spacing: -0.01em; }
 .pv-comment { margin-top: var(--space-2); }
 /* طول النص كما تعدّه المنصة — تحت نصّها، بخطّ الملاحظات */
 .pv-length { font-size: var(--text-xs); margin: var(--space-1) 0 0; }
+/* وصف الوسائط: صورةٌ مصغّرة وحقلاها في سطر، والحقلان يأخذان ما بقي */
+.pv-desc { margin-bottom: var(--space-4); }
+.pv-desc-title { margin: 0 0 var(--space-1); font-size: var(--text-sm); }
+.pv-desc-row { display: flex; gap: var(--space-3); align-items: flex-start; margin-bottom: var(--space-3); }
+.pv-desc-thumb {
+  flex: none; width: calc(var(--spacing) * 14); height: calc(var(--spacing) * 14);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); object-fit: cover;
+}
+.pv-desc-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.pv-desc-ai { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); cursor: pointer; }
 
 /* ===== صورة الغلاف (VideoCover) ===== */
 .vc-card { margin-bottom: var(--space-4); }

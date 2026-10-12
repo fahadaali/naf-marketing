@@ -133,6 +133,34 @@ mediaRoutes.patch('/:id/meta', requirePermission('media.upload'), async (c) => {
   return c.json({ ok: true });
 });
 
+/* ═══ وصفُ الوسيط ═══
+
+   النص البديل ووسم الذكاء الاصطناعي (0042) — يُرسلان مع الوسيط إلى المنصات
+   التي تقبلهما. والنص البديل حتى ألف حرف: حدُّ إكس وإنستغرام. */
+const ALT_TEXT_MAX = 1000;
+
+mediaRoutes.patch('/:id/describe', requirePermission('media.upload'), async (c) => {
+  const b = await c.req.json<{ alt_text?: string | null; ai_generated?: boolean }>().catch(() => ({}) as any);
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  if ('alt_text' in b) {
+    const alt = String(b.alt_text ?? '').trim();
+    if (alt.length > ALT_TEXT_MAX) return c.json({ error: 'النص البديل أطول من ألف حرف. اختصره ثم احفظ' }, 400);
+    sets.push('alt_text = ?');
+    binds.push(alt || null);
+  }
+  if ('ai_generated' in b) {
+    sets.push('ai_generated = ?');
+    binds.push(b.ai_generated ? 1 : 0);
+  }
+  if (!sets.length) return c.json({ error: 'لا وصف في الطلب' }, 400);
+  const r = await c.env.DB.prepare(`UPDATE media_assets SET ${sets.join(', ')} WHERE id = ?`)
+    .bind(...binds, c.req.param('id'))
+    .run();
+  if (!r.meta.changes) return c.json({ error: 'الوسيط غير موجود' }, 404);
+  return c.json({ ok: true });
+});
+
 // مواصفات المنصات — تقرؤها المعاينة في المحرر لتعرف ما سيُكيَّف قبل الحفظ.
 // المصدر واحد (`services/mediaSpecs.ts`)، والواجهة لا تحمل نسخةً منه.
 mediaRoutes.get('/specs', (c) =>
@@ -144,7 +172,7 @@ mediaRoutes.get('/info', async (c) => {
   const ids = (c.req.query('ids') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
   if (!ids.length) return c.json({ media: [] });
   const { results } = await c.env.DB.prepare(
-    `SELECT id, mime_type, filename, size, width, height, duration_ms FROM media_assets
+    `SELECT id, mime_type, filename, size, width, height, duration_ms, alt_text, ai_generated FROM media_assets
      WHERE id IN (${ids.map(() => '?').join(',')})`,
   )
     .bind(...ids)

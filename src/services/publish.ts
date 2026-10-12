@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { PublishUncertain, type PublishInput, type PublishMedia, type PublishingProvider } from '../adapters/provider';
+import { PublishUncertain, keepDescription, type PublishInput, type PublishMedia, type PublishingProvider } from '../adapters/provider';
 import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
@@ -76,16 +76,25 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
   /* مقطعٌ وُلّد من صورة المنصة الواحدة (تيك توك) يحلّ محلّها — ما دامت هي
      الصورة نفسها. فإن تغيّرت بعده أُرسلت الصورة، فيقول `missingRequirement`
      ما ينقص بدل أن يُنشر مقطعٌ من صورةٍ قديمة. */
+  let fromImage: string | null = null;
   if (variant?.generated_media_id && assetIds.length === 1 && assetIds[0] === variant.generated_from_id) {
+    fromImage = assetIds[0];
     assetIds = [variant.generated_media_id];
   }
   let media = await loadMedia(env, assetIds);
+  /* والمقطع المصنوع من الصورة مولَّدٌ إن كانت هي مولَّدة: الوسم للمحتوى لا للملف. */
+  if (fromImage && media.length === 1 && !media[0].aiGenerated) {
+    const src = await env.DB.prepare('SELECT ai_generated FROM media_assets WHERE id = ?')
+      .bind(fromImage)
+      .first<{ ai_generated: number | null }>();
+    if (src?.ai_generated) media = [{ ...media[0], aiGenerated: true }];
+  }
 
   /* الصورة على مقاس المنصة: كما هي إن قبلتها، وإلا في إطارٍ بمقاسها
      (`adaptImage`). وبلا ربط `IMAGES` تُرسل كما هي، كما كانت. */
   if (opts.adapt && env.IMAGES) {
     const adapted: PublishMedia[] = [];
-    for (const m of media) adapted.push(await adaptImage(env.IMAGES, job.platform, m));
+    for (const m of media) adapted.push(keepDescription(m, await adaptImage(env.IMAGES, job.platform, m)));
     media = adapted;
   }
 
@@ -235,12 +244,13 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
   const out: PublishMedia[] = [];
   for (const id of assetIds.slice(0, 4)) {
     const asset = await env.DB.prepare(
-      'SELECT r2_key, mime_type, filename, width, height, duration_ms FROM media_assets WHERE id = ?',
+      'SELECT r2_key, mime_type, filename, width, height, duration_ms, alt_text, ai_generated FROM media_assets WHERE id = ?',
     )
       .bind(id)
       .first<{
         r2_key: string; mime_type: string | null; filename: string | null;
         width: number | null; height: number | null; duration_ms: number | null;
+        alt_text: string | null; ai_generated: number | null;
       }>();
     const head = asset ? await env.MEDIA.head(asset.r2_key) : null;
     if (!asset || !head) {
@@ -255,6 +265,8 @@ async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMedia[]> 
       width: asset.width,
       height: asset.height,
       duration_ms: asset.duration_ms,
+      alt: asset.alt_text?.trim() || null,
+      aiGenerated: !!asset.ai_generated,
     });
   }
   return out;

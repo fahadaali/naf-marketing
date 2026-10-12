@@ -28,6 +28,9 @@ export type AssetInfo = {
   width?: number | null;
   height?: number | null;
   duration_ms?: number | null;
+  /** النص البديل ووسم الذكاء الاصطناعي (0042) — يُرسلان مع الوسيط عند النشر. */
+  alt_text?: string | null;
+  ai_generated?: number | null;
 };
 
 export type Variant = {
