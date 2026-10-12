@@ -135,6 +135,8 @@ export type SuggestInput = {
   kind?: string; // comment | review | dm | mention
   rating?: number | null; // للتقييمات
   postText?: string | null; // المنشور الأساسي إن كان الرد على منشور
+  /** ما تحت التعليق من ردود، الأقدمُ أوّلاً — فيُجاب آخرُ ما كتبه العميل لا أوّلُه. */
+  thread?: { author: string; own: boolean; body: string }[];
 };
 
 const DEV_SUGGESTIONS = [
@@ -153,6 +155,12 @@ export async function suggestReplies(env: Env, input: SuggestInput): Promise<str
     `نوع التفاعل: ${kindAr}${input.platform ? ` على منصة ${input.platform}` : ''}.`,
     input.rating != null ? `تقييم العميل: ${input.rating} من ٥ نجوم.` : '',
     `${kindAr} العميل${input.authorName ? ` (${input.authorName})` : ''}:\n"""${String(input.commentBody).slice(0, 800)}"""`,
+    input.thread?.length
+      ? `الردود تحته بترتيبها (الأقدم أوّلاً) — والمطلوب الردّ على آخر ما كتبه العميل فيها، لا تكرار ما قلناه:\n${input.thread
+        .slice(-8)
+        .map((e) => `${e.own ? 'نحن' : e.author || 'عميل'}: """${String(e.body).slice(0, 400)}"""`)
+        .join('\n')}`
+      : '',
     'اكتب ٣ ردود مقترحة متنوّعة (كل واحد بأسلوب مختلف قليلاً) وفق هذه القواعد:',
     '- قصيرة جداً (جملة إلى جملتين).',
     '- بصيغة الجمع للمتكلّم (نحن، سعدنا، نشكرك، نعتذر...) نيابةً عن الشركة.',

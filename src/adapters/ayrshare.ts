@@ -5,6 +5,7 @@ import type {
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
 import { facebookReel, youtubeShort } from '../services/mediaSpecs';
+import { sortThread, threadAnswer, type ThreadEntry } from '../services/inboxThread';
 
 /* ═══ Ayrshare ═══
 
@@ -386,7 +387,13 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
       platform: ayrshareAccountPlatform(e),
       name: String(e.channelTitle || e.pageName || e.displayName || e.username || ''),
       messaging: e.messagingActive === true,
-      ownerKeys: [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle]
+      /* يوتيوب: `displayName` و`username` اسمُ صاحب حساب جوجل لا القناة (كما في
+         توثيق «Get User»)، والتعليق تكتبه القناة. فمعلّقٌ يوافق اسمُه اسمَ صاحب
+         الحساب كان يُعدّ منّا فيُسقط تعليقه — فالقناة تُعرف بعنوانها ومعرّفها
+         ومعرّفها المختصر وحدها. */
+      ownerKeys: (String(e.platform).toLowerCase() === 'youtube'
+        ? [e.id, e.channelTitle, e.channelId, e.handle]
+        : [e.id, e.userId, e.username, e.displayName, e.pageName, e.channelTitle, e.channelId, e.handle])
         .map(ownerKey)
         .filter(Boolean),
       ...(typeof e.channelId === 'string' && e.channelId ? { channelId: e.channelId } : {}),
@@ -1175,6 +1182,8 @@ export type AyrshareInboxItem = {
   repliedBody?: string | null;
   repliedAt?: string | null;
   rating?: number | null;
+  /** السلسلة تحت التعليق — ردودُنا وردودُ غيرنا. غيابُها: لا سلسلة لهذا النوع. */
+  thread?: ThreadEntry[];
 };
 
 function isoOr(v: unknown, fallback: string): string {
@@ -1199,53 +1208,173 @@ function authorOf(c: any): string {
   return String(c?.from?.name || c?.from?.username || c?.displayName || c?.name || c?.userName || c?.username || 'مستخدم');
 }
 
+/** ردٌّ في السلسلة من عنصر Ayrshare — إنستغرام يُعلن معرّف الردّ `id` لا `commentId`. */
+function threadEntry(c: any, ownerKeys: string[]): ThreadEntry | null {
+  const body = String(c?.comment ?? c?.text ?? '').trim();
+  if (!body) return null;
+  return {
+    id: String(c?.commentId ?? c?.id ?? ''),
+    author: authorOf(c),
+    own: isOwnAyrshareComment(c, ownerKeys),
+    body,
+    at: isoOrNull(c?.created ?? c?.createTime),
+  };
+}
+
+/** ما يتيحه Ayrshare على تعليقٍ كُتب على المنصة — بمعرّفه عليها. */
+function commentCapabilities(platform: string, ownRoot = false): Record<string, boolean> {
+  return {
+    can_like: false,
+    // تعليقُنا الذي ردّ عليه العملاء لا يُخفى ولا يُحذف من بطاقتهم
+    can_hide: !ownRoot && platform === 'tiktok',
+    can_delete: !ownRoot && (platform === 'facebook' || platform === 'instagram' || platform === 'youtube'),
+    can_private_reply: false,
+    // يوتيوب وثريدز لا يُردّ عليهما عبر Ayrshare إلا لما نُشر عبره — فيُردّ من التطبيق
+    can_reply: REPLY_BY_SOCIAL_ID.has(platform),
+  };
+}
+
+/** الردُّ الذي يجيب العميل بشكل العنصر — آخرُ ما كتبناه إن لم يكتب أحدٌ بعده. */
+function answerOf(thread: ThreadEntry[]): { repliedBody: string | null; repliedAt: string | null } {
+  const a = threadAnswer(thread);
+  return { repliedBody: a?.body ?? null, repliedAt: a?.at ?? null };
+}
+
 /**
- * تعليقات منشورٍ من ردّ `GET /comments/:id` — ما كتبه عملاؤنا وحده، ومعه
- * ردُّنا إن وُجد (كُتب من تطبيق المنصة أو من هنا). وإكس لا يُعشّش الردود:
- * ردودُه مسطّحة، وردُّنا يُعرف بأنه من حسابنا ويُشير إلى التعليق.
+ * تعليقات منشورٍ من ردّ `GET /comments/:id` — عنصرٌ لكل تعليقٍ من عملائنا،
+ * وتحته سلسلتُه كلّها: ردودُنا (من هنا أو من تطبيق المنصة) وردودُ غيرنا.
+ *
+ * وتعليقٌ كتبه حسابُنا على منشوره — رابطٌ في أول تعليق — كان يُترك بردوده،
+ * فلا يُرى سؤالُ عميلٍ ردّ عليه. فإن ردّ عليه غيرُنا صار عنصراً: أوّلُ من ردّ
+ * من العملاء كاتبُه، وما بعده سلسلتُه، والردُّ منه يقع تحت تعليقنا نفسه.
+ *
+ * وإكس لا يُعشّش الردود: المحادثة كلُّها قائمةٌ واحدة، فتُبنى شجرتها من
+ * `referencedTweets` — انظر `mapXConversation`.
  */
 export function mapAyrshareComments(platform: string, postId: string, data: any, ownerKeys: string[]): AyrshareInboxItem[] {
   const list: any[] = Array.isArray(data?.[platform]) ? data[platform] : [];
   const now = new Date().toISOString();
-
-  // إكس: ردودنا مسطّحة — تُفهرس بالتعليق الذي تردّ عليه
-  const ownByParent = new Map<string, any>();
-  for (const c of list) {
-    if (!isOwnAyrshareComment(c, ownerKeys)) continue;
-    const parents = [
-      ...(Array.isArray(c?.referencedTweets) ? c.referencedTweets.filter((r: any) => r?.type === 'replied_to').map((r: any) => r.id) : []),
-      c?.parentId,
-    ].filter(Boolean).map(String);
-    for (const p of parents) ownByParent.set(p, c);
-  }
+  if (platform === 'twitter') return mapXConversation(postId, list, ownerKeys, now);
 
   const out: AyrshareInboxItem[] = [];
   for (const c of list) {
     const commentId = String(c?.commentId ?? c?.id ?? '');
     const body = String(c?.comment ?? c?.text ?? '').trim();
-    if (!commentId || !body || isOwnAyrshareComment(c, ownerKeys)) continue;
-
+    if (!commentId) continue;
+    const urn = typeof c?.commentUrn === 'string' ? c.commentUrn : '';
     const replies: any[] = Array.isArray(c?.replies) ? c.replies : [];
-    const own = replies.filter((r) => isOwnAyrshareComment(r, ownerKeys))
-      .sort((a, b) => String(a?.created ?? a?.createTime ?? '').localeCompare(String(b?.created ?? b?.createTime ?? '')))
-      .pop() ?? ownByParent.get(commentId);
+    const thread = sortThread(replies.map((r) => threadEntry(r, ownerKeys)).filter((e): e is ThreadEntry => !!e));
 
+    if (!isOwnAyrshareComment(c, ownerKeys)) {
+      if (!body) continue;
+      /* لينكدإن لا يُعشّش الردود: تُطلب لكل تعليقٍ بطلبه (`ayrshareLinkedInReplies`)،
+         فقائمةٌ فارغةٌ هنا لا تعني أن لا ردود — ولا تمحو سلسلةً محفوظة. */
+      const known = platform !== 'linkedin' || replies.length > 0;
+      out.push({
+        id: encodeAyrshareComment(platform, postId, commentId, urn),
+        platform,
+        kind: 'comment',
+        authorName: authorOf(c),
+        body,
+        createdAt: isoOr(c?.created ?? c?.createTime, now),
+        isHidden: c?.hidden === true,
+        capabilities: commentCapabilities(platform),
+        ...answerOf(thread),
+        ...(known ? { thread } : {}),
+      });
+      continue;
+    }
+
+    // تعليقُنا: عنصرٌ إن ردّ عليه أحدٌ من عملائنا
+    const first = thread.findIndex((e) => !e.own);
+    if (first < 0) continue;
+    const root = thread[first];
+    const rest = thread.slice(first + 1);
     out.push({
-      id: encodeAyrshareComment(platform, postId, commentId, typeof c?.commentUrn === 'string' ? c.commentUrn : ''),
+      id: encodeAyrshareComment(platform, postId, commentId, urn),
       platform,
+      kind: 'comment',
+      authorName: root.author,
+      body: root.body,
+      createdAt: root.at ?? now,
+      capabilities: commentCapabilities(platform, true),
+      ...answerOf(rest),
+      thread: rest,
+    });
+  }
+  return out;
+}
+
+/**
+ * محادثة إكس: قائمةٌ مسطّحة لكل التغريدات تحت المنشور، ولكلٍّ أبوها في
+ * `referencedTweets` (`replied_to`). فالعنصر تغريدةٌ من عملائنا جذرُ فرعها —
+ * أبوها المنشور نفسه، أو تغريدةٌ منّا من سلسلة المنشور — وما تحتها كلُّه
+ * سلسلتُها: ردُّنا، وردُّ العميل على ردّنا، وردُّ غيره.
+ *
+ * وكان كل ما لم يكتبه حسابُنا عنصراً مستقلاً: ردُّ العميل على ردّنا يظهر
+ * تعليقاً جديداً بلا سياق، وردُّنا على التعليق يُطابق بأبيه المباشر وحده.
+ */
+function mapXConversation(postId: string, list: any[], ownerKeys: string[], now: string): AyrshareInboxItem[] {
+  const byId = new Map<string, any>();
+  for (const c of list) {
+    const id = String(c?.commentId ?? c?.id ?? '');
+    if (id) byId.set(id, c);
+  }
+  const parentOf = (c: any): string => {
+    const ref = (Array.isArray(c?.referencedTweets) ? c.referencedTweets : []).find((r: any) => r?.type === 'replied_to');
+    return String(ref?.id ?? c?.parentId ?? '');
+  };
+  // تغريدةٌ منّا آباؤها كلُّهم منّا حتى المنشور: تكملةُ المنشور، لا ردٌّ في محادثة
+  const chainMemo = new Map<string, boolean>();
+  const ownChain = (id: string, depth = 0): boolean => {
+    if (chainMemo.has(id)) return chainMemo.get(id)!;
+    const c = byId.get(id);
+    let v = false;
+    if (c && isOwnAyrshareComment(c, ownerKeys)) {
+      const p = parentOf(c);
+      v = !p || !byId.has(p) || depth > 50 ? true : ownChain(p, depth + 1);
+    }
+    chainMemo.set(id, v);
+    return v;
+  };
+  const rootOf = (id: string): string => {
+    let cur = id;
+    for (let i = 0; i < 100; i++) {
+      const p = parentOf(byId.get(cur));
+      if (!p || !byId.has(p) || ownChain(p)) return cur;
+      cur = p;
+    }
+    return cur;
+  };
+
+  const threads = new Map<string, ThreadEntry[]>();
+  const roots: string[] = [];
+  for (const [id, c] of byId) {
+    const root = rootOf(id);
+    if (root === id) {
+      roots.push(id);
+      continue;
+    }
+    const e = threadEntry(c, ownerKeys);
+    if (e) threads.set(root, [...(threads.get(root) ?? []), e]);
+  }
+
+  const out: AyrshareInboxItem[] = [];
+  for (const id of roots) {
+    const c = byId.get(id);
+    const body = String(c?.comment ?? c?.text ?? '').trim();
+    if (!body || isOwnAyrshareComment(c, ownerKeys)) continue;
+    const thread = sortThread(threads.get(id) ?? []);
+    out.push({
+      id: encodeAyrshareComment('twitter', postId, id),
+      platform: 'twitter',
       kind: 'comment',
       authorName: authorOf(c),
       body,
       createdAt: isoOr(c?.created ?? c?.createTime, now),
-      isHidden: c?.hidden === true,
-      capabilities: {
-        can_like: false,
-        can_hide: platform === 'tiktok',
-        can_delete: platform === 'facebook' || platform === 'instagram' || platform === 'youtube',
-        can_private_reply: false,
-      },
-      repliedBody: own ? String(own.comment ?? own.text ?? '').trim() || null : null,
-      repliedAt: own ? isoOrNull(own.created ?? own.createTime) : null,
+      capabilities: commentCapabilities('twitter'),
+      ...answerOf(thread),
+      thread,
     });
   }
   return out;
@@ -1402,22 +1531,26 @@ export async function youtubeChannelVideos(channelId: string, budget?: CallBudge
    لينكدإن لا يُرى أبداً — قائمة الردود في التعليق فارغةٌ دائماً. وشكلُ الردّ غير
    موثّق كاملاً، فيُقرأ تسامحاً: الردود في القائمة أو في `replies` من كلٍّ منها،
    سوى التعليق نفسه. */
-export async function ayrshareLinkedInReply(
+export async function ayrshareLinkedInReplies(
   auth: AyrshareAuth,
   commentId: string,
   ownerKeys: string[],
   budget?: CallBudget,
-): Promise<{ text: string; at: string | null } | null> {
+): Promise<ThreadEntry[]> {
   const q = new URLSearchParams({ commentId: 'true', searchPlatformId: 'true', platform: 'linkedin' });
   const data = await ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(commentId)}?${q}`, undefined, budget);
   const block = data?.linkedin;
   const list: any[] = Array.isArray(block) ? block : block && typeof block === 'object' ? [block] : [];
   const all = list.flatMap((c) => [c, ...(Array.isArray(c?.replies) ? c.replies : [])]);
-  const own = all
-    .filter((c) => String(c?.commentId ?? c?.commentUrn ?? '') !== commentId && isOwnAyrshareComment(c, ownerKeys))
-    .sort((a, b) => String(a?.created ?? '').localeCompare(String(b?.created ?? '')))
-    .pop();
-  if (!own) return null;
-  const text = String(own.comment ?? own.text ?? '').trim();
-  return text ? { text, at: isoOrNull(own.created) } : null;
+  const seen = new Set<string>();
+  const entries: ThreadEntry[] = [];
+  for (const c of all) {
+    const id = String(c?.commentId ?? c?.commentUrn ?? '');
+    // التعليق نفسه يعود أوّلَ القائمة — والردّ لا يُكتب مرّتين إن عاد في `replies` أيضاً
+    if (id === commentId || String(c?.commentUrn ?? '') === commentId || (id && seen.has(id))) continue;
+    if (id) seen.add(id);
+    const e = threadEntry(c, ownerKeys);
+    if (e) entries.push(e);
+  }
+  return sortThread(entries);
 }

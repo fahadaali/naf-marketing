@@ -6,7 +6,7 @@ import { registerSocialApiWebhook, listSocialApiWebhooks, deleteSocialApiWebhook
 import {
   AYRSHARE_WEBHOOK_ACTIONS, deleteAyrshareWebhook, listAyrshareWebhooks, registerAyrshareWebhook,
 } from '../adapters/ayrshare';
-import { syncComments } from '../services/commentsSync';
+import { queuePendingPost, syncComments, type PendingPost } from '../services/commentsSync';
 import { reconcilePublishing } from '../services/publish';
 
 export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -145,13 +145,33 @@ webhookRoutes.delete('/socialapi/manage/:id', async (c) => {
 
 /* ═══ Ayrshare ═══
 
-   الحدث يُشغّل ما يقرؤه كاملاً بدل الاعتماد على حمولته: حمولة التعليق في
-   إنستغرام تحمل معرّف Ayrshare للمنشور لا معرّف المنصة، وفيسبوك يُرسلها بشكل
-   ميتا الخام. فالتعليقات والرسائل تُشغّل دورة الصندوق، و«المجدول» دورة التسوية
-   التي تحسم منشور تيك توك المنتظر. ويُردّ ٢٠٠ فوراً — Ayrshare يعيد ما لم
-   يُجب في خمس عشرة ثانية، والقفل يجمع المكرّر في دورةٍ واحدة. */
+   الحدث يُشغّل دورة الصندوق، و«المجدول» دورة التسوية التي تحسم منشور تيك
+   توك المنتظر. ويُردّ ٢٠٠ فوراً — Ayrshare يعيد ما لم يُجب في خمس عشرة ثانية،
+   والقفل يجمع المكرّر في دورةٍ واحدة.
+
+   وحدثُ التعليق يحمل المنشور الذي وصل عليه بمعرّفه على منصته — `media.id` في
+   إنستغرام و`post_id` في فيسبوك (Comments Action في توثيقه)؛ و`postId` فيه
+   معرّف Ayrshare، يغيب عمّا نُشر من التطبيق. فيُقرأ ذلك المنشور أوّلاً
+   (`queuePendingPost`) — وكان لا يُقرأ ما لم يتغيّر عدد تعليقاته في أرقامه،
+   والعدد يتأخّر ساعاتٍ عن التعليق. */
 
 const AYRSHARE_SECRET_KEY = 'secret:ayrshare_webhook';
+
+/** المنشور الذي وصل عليه التعليق — بمعرّفه على منصته، أو `null`. */
+export function commentEventPost(evt: any): PendingPost | null {
+  const platform = String(evt?.platform || '').toLowerCase();
+  if (platform === 'instagram') {
+    const id = evt?.media?.id ?? evt?.media_id;
+    return id ? { platform, postId: String(id) } : null;
+  }
+  if (platform === 'facebook') {
+    // فيسبوك بشكل ميتا كما هو: تغييرٌ في `feed` الصفحة — قيمتُه في أعلى الحدث أو داخل `entry`
+    const value = evt?.value ?? evt?.entry?.[0]?.changes?.[0]?.value ?? evt?.changes?.[0]?.value ?? evt;
+    const id = value?.post_id ?? value?.postId;
+    return id && String(id).includes('_') ? { platform, postId: String(id) } : null;
+  }
+  return null;
+}
 
 webhookRoutes.post('/ayrshare', async (c) => {
   const raw = await c.req.text();
@@ -169,8 +189,11 @@ webhookRoutes.post('/ayrshare', async (c) => {
   try { evt = JSON.parse(raw); } catch { return c.text('bad request', 400); }
   const action = String(evt?.action || '');
   if (action === 'comments' || action === 'messages') {
+    const post = action === 'comments' ? commentEventPost(evt) : null;
     c.executionCtx.waitUntil(
-      syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }).catch(() => {}),
+      (post ? queuePendingPost(c.env, post).catch(() => {}) : Promise.resolve())
+        .then(() => syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }))
+        .catch(() => {}),
     );
   } else if (action === 'scheduled') {
     c.executionCtx.waitUntil(reconcilePublishing(c.env).then(() => {}).catch(() => {}));

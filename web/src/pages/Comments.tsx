@@ -1,6 +1,6 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight, BellOff } from 'lucide-react';
+import { RefreshCw, Send, MessageCircle, Mail, AtSign, Star, EyeOff, Eye, Trash2, ThumbsUp, Lock, Sparkles, Pencil, TriangleAlert, ChevronLeft, ChevronRight, BellOff, ExternalLink } from 'lucide-react';
 import { api, formatRiyadh } from '../api';
 import { RatingScale } from '../components/Rating';
 import { PlatformIcon, platformLabel } from '../platforms';
@@ -13,6 +13,16 @@ function parseCaps(v: any): Caps {
   if (!v) return {};
   if (typeof v === 'object') return v;
   try { return JSON.parse(v) || {}; } catch { return {}; }
+}
+
+/** ردٌّ في سلسلة التعليق كما يحفظه الخادم (`services/inboxThread.ts`). */
+type ThreadEntry = { id: string; author: string; own: boolean; body: string; at: string | null; here?: boolean };
+function parseThread(v: any): ThreadEntry[] {
+  if (!v) return [];
+  try {
+    const a = typeof v === 'string' ? JSON.parse(v) : v;
+    return Array.isArray(a) ? a.filter((e) => e && typeof e.body === 'string') : [];
+  } catch { return []; }
 }
 
 function kindMeta(kind: string) {
@@ -62,6 +72,10 @@ export default function Comments() {
   const [counts, setCounts] = useState<{ all: number; unreplied: number; replied: number; ignored: number }>({ all: 0, unreplied: 0, replied: 0, ignored: 0 });
   const [sync, setSync] = useState<SyncReport | null>(null);
   const [filter, setFilter] = useState<Filter>('');
+  // المنصة ومصدر الرد — «ردّ من خارج المنصة» ما كتبه الفريق في تطبيق المنصة نفسها
+  const [platform, setPlatform] = useState('');
+  const [source, setSource] = useState<'' | 'external' | 'platform'>('');
+  const [platforms, setPlatforms] = useState<string[]>([]);
   // النطاق يوماً بيوم كما يختاره المنتقي، والصفحة منه — والقديم محفوظٌ يُرى بنطاقه
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -80,6 +94,8 @@ export default function Comments() {
   function load() {
     const q = new URLSearchParams();
     if (filter) q.set('replied', filter);
+    if (platform) q.set('platform', platform);
+    if (source) q.set('source', source);
     // حدود اليوم بتوقيت الرياض (UTC+3) — كما في لوحة التحليلات
     if (from) q.set('from', new Date(`${from}T00:00:00+03:00`).toISOString());
     if (to) q.set('to', new Date(`${to}T23:59:59+03:00`).toISOString());
@@ -89,10 +105,11 @@ export default function Comments() {
       setComments(d.comments);
       setHasMore(!!d.hasMore);
       if (d.counts) setCounts(d.counts);
+      if (Array.isArray(d.platforms)) setPlatforms(d.platforms);
       setSync(d.sync ?? null);
     });
   }
-  useEffect(load, [filter, from, to, page]);
+  useEffect(load, [filter, platform, source, from, to, page]);
 
   async function refresh() {
     setMsg('جارٍ الجلب…');
@@ -193,6 +210,21 @@ export default function Comments() {
           {tab('ignored', 'متجاهَل', counts.ignored)}
         </div>
         <div className="spacer" />
+        <div className="field" style={{ margin: 0, minWidth: 160 }}>
+          <label htmlFor="cm-platform">المنصة</label>
+          <select id="cm-platform" className="select" value={platform} onChange={(e) => { setPlatform(e.target.value); setPage(1); }}>
+            <option value="">كل منصات التواصل</option>
+            {platforms.map((p) => <option key={p} value={p}>{platformLabel(p)}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ margin: 0, minWidth: 160 }}>
+          <label htmlFor="cm-source">مصدر الرد</label>
+          <select id="cm-source" className="select" value={source} onChange={(e) => { setSource(e.target.value as typeof source); setPage(1); }}>
+            <option value="">كل الردود</option>
+            <option value="external">ردّ من خارج المنصة</option>
+            <option value="platform">ردّ من هذه المنصة</option>
+          </select>
+        </div>
         <div className="field" style={{ margin: 0 }}>
           <label>الفترة</label>
           <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); setPage(1); }} />
@@ -212,6 +244,12 @@ export default function Comments() {
              يُعدَّل ردُّه في موضعه أيّاً كان كاتبه. */
           const canEditReply = (isComment && !external) || c.kind === 'review';
           const sugg = suggestions[c.id] || [];
+          const thread = parseThread(c.thread_json);
+          /* ردٌّ محفوظ لا يظهر في السلسلة — ما قبلها، أو رسالةٌ ومراجعة لا سلسلة لهما —
+             يُعرض في فقاعته كما كان. وما في السلسلة يُعرض فيها وحدها. */
+          const replyInThread = thread.some((e) => e.own && ((!!e.id && e.id === c.reply_provider_id) || e.body === c.reply_body));
+          // يوتيوب وثريدز لا يُردّ عليهما عبر Ayrshare — والغياب نعم: مزوّدٌ لا يُعلن قدراته
+          const canReply = caps.can_reply !== false;
           return (
             <div className="card" key={c.id} style={c.is_hidden ? { opacity: 0.6 } : undefined}>
               <div className="row" style={{ marginBottom: 8 }}>
@@ -223,7 +261,12 @@ export default function Comments() {
                   </div>
                   <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                     {platformLabel(c.platform)} · <span className="row" style={{ display: 'inline-flex', gap: 4 }}>{km.icon} {km.label}</span>
-                    {c.is_hidden ? ' · (مخفي)' : ''}{c.post_title ? ` · ${c.post_title}` : ''}
+                    {c.is_hidden ? ' · (مخفي)' : ''}
+                    {c.post_title && (c.post_url
+                      ? <> · <a href={c.post_url} target="_blank" rel="noreferrer" className="row" style={{ display: 'inline-flex', gap: 4 }}>
+                          {c.post_title} <ExternalLink size={16} aria-hidden="true" />
+                        </a></>
+                      : ` · ${c.post_title}`)}
                   </div>
                 </div>
                 <div className="spacer" />
@@ -241,7 +284,35 @@ export default function Comments() {
                 </div>
               )}
 
-              {c.reply_body && editing[c.id] === undefined ? (
+              {thread.length > 0 && (
+                <div className="grid" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+                  {thread.map((e, i) => {
+                    const current = e.own && !!e.id && e.id === c.reply_provider_id && canEditReply && !!c.reply_body;
+                    return (
+                      <div key={e.id || i} className="card" style={{ background: e.own ? 'var(--primary-soft)' : 'var(--muted)', padding: 'var(--space-2) var(--space-3)' }}>
+                        <div className="row" style={{ marginBottom: 'var(--space-1)' }}>
+                          <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                            {e.own
+                              ? (e.here ? <>ردّ {e.author}</> : 'ردّ من خارج المنصة')
+                              : <span style={{ fontWeight: 600 }}>{e.author}</span>}
+                            {e.at && <> — <bdi>{formatRiyadh(e.at)}</bdi></>}
+                          </div>
+                          <div className="spacer" />
+                          {current && editing[c.id] === undefined && (
+                            <>
+                              <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setEditing((d) => ({ ...d, [c.id]: c.reply_body }))} title="تعديل الرد"><Pencil size={20} /></button>
+                              <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setConfirming({ kind: 'reply', id: c.id })} title="حذف الرد"><Trash2 size={20} /></button>
+                            </>
+                          )}
+                        </div>
+                        {e.body}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {c.reply_body && replyInThread && editing[c.id] === undefined ? null : c.reply_body && editing[c.id] === undefined ? (
                 <div className="card" style={{ background: 'var(--primary-soft)', padding: 10 }}>
                   <div className="row" style={{ marginBottom: 4 }}>
                     <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
@@ -277,6 +348,16 @@ export default function Comments() {
                   <div className="spacer" />
                   <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setIgnored(c.id, false)}>إلغاء التجاهل</button>
                 </div>
+              ) : !canReply ? (
+                <div className="row" style={{ gap: 'var(--space-2)' }}>
+                  <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                    الردّ على تعليقات {platformLabel(c.platform)} من تطبيقها، ويظهر هنا بعد السحب.
+                  </span>
+                  <div className="spacer" />
+                  <button className="btn sm ghost" disabled={busy === c.id} onClick={() => setIgnored(c.id, true)}>
+                    <BellOff size={20} /> تجاهل
+                  </button>
+                </div>
               ) : (
                 <div>
                   {sugg.length > 0 && (
@@ -288,9 +369,10 @@ export default function Comments() {
                       ))}
                     </div>
                   )}
-                  <div className="row">
+                  {/* يلتفّ على الشاشة الضيّقة: كان الحقل ينضغط بين الأزرار الثلاثة إلى حرفين */}
+                  <div className="row" style={{ flexWrap: 'wrap' }}>
                     <input
-                      className="input" style={{ flex: 1 }}
+                      className="input" style={{ flex: '1 1 auto' }}
                       placeholder={privateMode[c.id] ? 'رد خاص لصاحب التعليق…' : 'اكتب رداً…'}
                       value={replyDrafts[c.id] || ''}
                       onChange={(e) => setReplyDrafts((d) => ({ ...d, [c.id]: e.target.value }))}

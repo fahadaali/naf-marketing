@@ -2,10 +2,12 @@ import type { Env } from '../types';
 import type { ModerateAction } from '../adapters/provider';
 import { ayrshareAuth, getProvider, providerKey } from '../adapters';
 import {
-  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReply, ayrshareMessages,
-  ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, errorCodes, mapAyrshareComments,
+  AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReplies, ayrshareMessages,
+  ayrsharePlatform, ayrshareReviews, ayrshareUser, decodeAyrshareId, encodeAyrshareComment, errorCodes, mapAyrshareComments,
+  postSpecificRejection,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
+import { mergeThread, parseThread, sortThread, threadAnswer, threadDecision, type ThreadEntry } from './inboxThread';
 import {
   BudgetExhausted, CallBudget, conversationLatest, isNotFound, isOwnAuthor, isUnsupported, listCommentReplies,
   listConversations, listInboxPosts, listMentions, listPostComments, listReviews,
@@ -366,10 +368,13 @@ type Row = {
   reply_checked_at: string | null;
   provider_interaction_id: string | null;
   created_at: string;
+  reply_provider_id: string | null;
+  ignored_at: string | null;
+  thread_json: string | null;
 };
 
 const ROW_COLUMNS =
-  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, provider_interaction_id, created_at';
+  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, provider_interaction_id, created_at, reply_provider_id, ignored_at, thread_json';
 
 /** صفوف منشورٍ واحد بترميزها `منشور|حساب|` — مطابقةُ بادئةٍ حرفية لا `LIKE` (معرّفات فيسبوك فيها `_`). */
 async function rowsByPrefix(env: Env, prefix: string): Promise<Map<string, Row>> {
@@ -417,6 +422,45 @@ function externalReplyStmt(env: Env, rowId: string, reply: ExternalReply): D1Pre
   ).bind(reply.text || '—', reply.at, reply.id, rowId);
 }
 
+/**
+ * سلسلة تعليقٍ قائم: تُكتب كما قُرئت مع ما يُعرف هنا وحده (`mergeThread`)،
+ * ويُكتب حاله منها (`threadDecision`): ردُّنا من التطبيق يجيبه، وما كتبه
+ * العميل بعد ردّنا يعيده إلى «بلا رد» — ومن «متجاهَل» كذلك. يعود بعدد
+ * الردود الجديدة من خارج المنصة.
+ */
+function threadUpdates(env: Env, row: Row, fetched: ThreadEntry[], updates: D1PreparedStatement[]): number {
+  const hereIds = row.reply_source === 'platform' && row.reply_provider_id ? [row.reply_provider_id] : [];
+  const thread = mergeThread(parseThread(row.thread_json), fetched, hereIds);
+  const json = JSON.stringify(thread);
+  if (json !== (row.thread_json ?? '')) {
+    updates.push(env.DB.prepare('UPDATE platform_comments SET thread_json = ? WHERE id = ?').bind(json, row.id));
+  }
+  const d = threadDecision(thread, row);
+  if (d.action === 'answer') {
+    if (d.reply.here) {
+      // ردٌّ كُتب من هنا وعاد بعد أن أُعيد التعليق «بلا رد» ثم حُذف ما بعده
+      updates.push(env.DB.prepare(
+        `UPDATE platform_comments SET reply_body = ?, replied_at = ?, reply_provider_id = COALESCE(reply_provider_id, ?), reply_source = 'platform'
+         WHERE id = ? AND reply_body IS NULL`,
+      ).bind(d.reply.body, d.reply.at, d.reply.id || null, row.id));
+      return 0;
+    }
+    updates.push(externalReplyStmt(env, row.id, { text: d.reply.body, at: d.reply.at, id: d.reply.id || null }));
+    return 1;
+  }
+  if (d.action === 'reopen') {
+    updates.push(env.DB.prepare(
+      `UPDATE platform_comments
+       SET reply_body = NULL, replied_at = NULL, replied_by = NULL, reply_provider_id = NULL, reply_source = NULL,
+           ignored_at = NULL, ignored_by = NULL
+       WHERE id = ?`,
+    ).bind(row.id));
+  } else if (d.action === 'unignore') {
+    updates.push(env.DB.prepare('UPDATE platform_comments SET ignored_at = NULL, ignored_by = NULL WHERE id = ?').bind(row.id));
+  }
+  return 0;
+}
+
 type WriteResult = { added: number; externalReplies: number; fresh: InboxItem[] };
 
 /**
@@ -443,14 +487,14 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
         stmt: env.DB.prepare(
           `INSERT INTO platform_comments
              (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at,
-              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source, provider_interaction_id)
-           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source, provider_interaction_id, thread_json)
+           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(platform, provider_comment_id) DO NOTHING`,
         ).bind(
           newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt,
           caps, it.isHidden ? 1 : 0, it.rating ?? null,
           replied ? it.repliedBody : null, replied ? it.repliedAt ?? null : null, replied ? 'external' : null,
-          it.interactionId ?? null,
+          it.interactionId ?? null, it.thread ? JSON.stringify(sortThread(it.thread)) : null,
         ),
       });
       if (replied) result.externalReplies++;
@@ -480,6 +524,10 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
           reopened ? 1 : 0, reopened ? 1 : 0, row.id,
         ),
       );
+    }
+    if (it.thread) {
+      result.externalReplies += threadUpdates(env, row, it.thread, updates);
+      continue;
     }
     if (it.repliedBody && row.reply_body === null) {
       updates.push(externalReplyStmt(env, row.id, { text: it.repliedBody, at: it.repliedAt ?? null, id: null }));
@@ -1137,6 +1185,36 @@ const AYRSHARE_RECENT_DAYS = 30;
 /* ساعةٌ لا ستّ: الردّ من تطبيق المنصة لا يُعرف إلا بإعادة قراءة تعليقات
    منشوره، وستُّ ساعاتٍ كانت تُبقي ما رُدّ عليه من إكس «بلا رد» نصفَ يوم. */
 const AYRSHARE_RECHECK_MS = 3_600_000;
+/* وكل منشورٍ في الثلاثين يوماً يُعاد كل ستّ ساعات ولو لم يتغيّر عدد تعليقاته:
+   ردُّ العميل على ردّنا في إكس لا يُحسب في عدّ المنشور، فلا يُعرف إلا بإعادة
+   القراءة. والأقدم كل ثلاثين يوماً — تعليقٌ جديد على منشورٍ قديم أُجيب عن كل
+   ما فيه كان لا يُرى أبداً. */
+const AYRSHARE_ROTATE_MS = 6 * 3_600_000;
+const AYRSHARE_ROTATE_OLD_MS = 30 * 86_400_000;
+/** منشوراتٌ وصل عليها تعليقٌ بالخطّاف — تُقرأ أوّلاً في الدورة التالية أيّاً كانت. */
+const PENDING_POSTS_KEY = 'inbox_pending_posts';
+
+/** منشورٌ عليه تعليقٌ جديد كما أعلنه الخطّاف — بمعرّفه على منصته. */
+export type PendingPost = { platform: string; postId: string };
+
+/**
+ * يُضاف المنشور إلى ما يُقرأ أوّلاً. والقائمة في الإعدادات لا في ذاكرة الطلب:
+ * قفلُ المزامنة قد يُسقط دورة الخطّاف، فتقرؤه الدورة التي بعدها.
+ */
+export async function queuePendingPost(env: Env, post: PendingPost): Promise<void> {
+  const list = await readPendingPosts(env);
+  if (list.some((p) => p.platform === post.platform && p.postId === post.postId)) return;
+  await setSetting(env, PENDING_POSTS_KEY, JSON.stringify([...list, post].slice(-50)));
+}
+
+async function readPendingPosts(env: Env): Promise<PendingPost[]> {
+  try {
+    const v = JSON.parse((await getSetting(env, PENDING_POSTS_KEY)) || '[]');
+    return Array.isArray(v) ? v.filter((p) => p && typeof p.platform === 'string' && typeof p.postId === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 /* ═══ ما سُحب أيام SocialAPI ═══
 
@@ -1329,12 +1407,15 @@ async function syncAyrshareComments(
 
   const platforms = [...byInternal.keys()];
   const cutoff = new Date(Date.now() - AYRSHARE_RECENT_DAYS * DAY).toISOString();
+  /* السجلّ كان يقف عند أحدث أربعمئةٍ من المنشورات القديمة، فما بعدها لا يُقرأ
+     أبداً ولا يُختم السجلّ مكتملاً. والقراءة تدور بموعد آخر قراءة لا بتاريخ
+     النشر، فيكفي سقفٌ أوسع يحمل المنشورات كلّها. */
   const { results: posts } = await env.DB.prepare(
     `SELECT provider_post_id, platform, metrics_json FROM analytics_snapshots
      WHERE platform IN (${platforms.map(() => '?').join(',')})
        AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
      ORDER BY sent_at DESC
-     LIMIT 400`,
+     LIMIT ${history ? 3000 : 400}`,
   )
     .bind(...platforms, cutoff)
     .all<{ provider_post_id: string; platform: string; metrics_json: string | null }>();
@@ -1361,7 +1442,8 @@ async function syncAyrshareComments(
   };
 
   const now = Date.now();
-  const queue: { postId: string; internal: string; ayr: string; signature: string; rank: number }[] = [];
+  type Queued = { postId: string; internal: string; ayr: string; signature: string; rank: number; age: number };
+  const queue: Queued[] = [];
   for (const p of posts) {
     const ayr = ayrsharePlatform(p.platform);
     const st = stateOf.get(`ayrshare:${ayr}|${p.provider_post_id}`);
@@ -1369,12 +1451,26 @@ async function syncAyrshareComments(
     const age = st?.synced_at ? now - Date.parse(st.synced_at) : Infinity;
     let rank: number | null = null;
     if (!st?.synced_at) rank = 0;
-    else if (!history && signature && signature !== st.signature) rank = 1;
+    else if (signature && signature !== st.signature) rank = 1;
     else if (unreplied.has(`${ayr}|${p.provider_post_id}`) && age > (history ? 7 * DAY : AYRSHARE_RECHECK_MS)) rank = 2;
+    else if (age > (history ? AYRSHARE_ROTATE_OLD_MS : AYRSHARE_ROTATE_MS)) rank = 3;
     else if (report.mode === 'full' && age > 30 * 60_000) rank = 3;
-    if (rank !== null) queue.push({ postId: p.provider_post_id, internal: p.platform, ayr, signature, rank });
+    if (rank === null) continue;
+    queue.push({ postId: p.provider_post_id, internal: p.platform, ayr, signature, rank, age });
   }
-  queue.sort((a, b) => a.rank - b.rank);
+
+  /* ما أعلنه الخطّاف أوّلاً — ولو لم يُعرف منشورُه بعد في لقطات التحليلات:
+     منشورٌ نُشر للتوّ من تطبيق إنستغرام لا يصل لقطاتِه إلا بعد سحبها. */
+  const pending = history ? [] : await readPendingPosts(env);
+  for (const pp of pending) {
+    const acc = accounts.find((a) => ayrsharePlatform(a.platform) === pp.platform && byInternal.has(a.platform));
+    if (!acc) continue;
+    const existing = queue.find((q) => q.ayr === pp.platform && q.postId === pp.postId);
+    if (existing) existing.rank = -1;
+    else queue.push({ postId: pp.postId, internal: acc.platform, ayr: pp.platform, signature: '', rank: -1, age: Infinity });
+  }
+  // في الرتبة الواحدة: الأقدمُ قراءةً أوّلاً — فتدور الحصّة على المنشورات كلّها
+  queue.sort((a, b) => a.rank - b.rank || b.age - a.age);
 
   let cut = false;
   /* أوّلُ رفضٍ لكل منصة، ومنصّاتٌ قُرئ منها منشورٌ واحد على الأقل. فرفضُ
@@ -1382,7 +1478,13 @@ async function syncAyrshareComments(
      السحب» ما دامت بقيّتها تُقرأ. ويُقال حين ترفض المنصة كل ما طُلب منها. */
   const refused = new Map<string, string>();
   const reached = new Set<string>();
+  /* منصّةٌ رفضت ما يخصّ الحساب كلَّه — تمهّلٌ، أو رصيد إكس، أو مفتاحاه — تُترك
+     بقيّةُ منشوراتها في هذه الدورة، ولا يُختم منها شيءٌ مقروءاً: كان يُختم فلا
+     يُعاد ما لم يتغيّر عدد تعليقاته، وما رُفض منه لم يُقرأ أصلاً. */
+  const blocked = new Set<string>();
+  const done: PendingPost[] = [];
   for (const q of queue) {
+    if (blocked.has(q.internal)) continue;
     if (budget.left <= reserve) {
       cut = true;
       break;
@@ -1395,13 +1497,16 @@ async function syncAyrshareComments(
         cut = true;
         break;
       }
-      // منشورٌ حُذف أو لا تُقرأ تعليقاته — يُختم كي لا يأكل حصّة كل دورة
-      if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500 && err.status !== 429)) throw err;
+      if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500)) throw err;
       /* وكان الرفض كلُّه يُبتلع: إكس رفض طلب التعليقات لكل منشور فلم يظهر تعليقٌ
          واحد منه، ولا سطرٌ يقول لماذا. فيُحفظ الرفض لكل منصة بسببه، إلا
          «لا يوجد» (404 و186): منشورٌ حُذف لا عطلَ فيه. */
       const notFound = err.status === 404 || errorCodes(err.body).includes(186);
       if (!notFound && !refused.has(q.internal)) refused.set(q.internal, err.message);
+      if (!postSpecificRejection(err)) {
+        blocked.add(q.internal);
+        continue;
+      }
       data = null;
     }
     if (data) {
@@ -1409,58 +1514,97 @@ async function syncAyrshareComments(
       const keys = byInternal.get(q.internal)?.ownerKeys ?? [];
       const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
       report.kinds.comment.items += items.length;
+      if (q.ayr === 'twitter') await dropAbsorbedReplies(env, q.postId, items);
       await adoptLegacy(env, legacy, items);
-      if (q.ayr === 'linkedin') await linkedInReplies(env, auth, budget, reserve, items, keys);
+      const checked = q.ayr === 'linkedin' ? await linkedInThreads(env, auth, budget, reserve, items, keys) : [];
       const res = await writeItems(env, items);
       report.added += res.added;
       report.externalReplies += res.externalReplies;
+      if (checked.length) {
+        await runBatch(env, checked.map((id) => env.DB.prepare(
+          "UPDATE platform_comments SET reply_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_comment_id = ?",
+        ).bind(id)));
+      }
     }
     await env.DB.prepare(
       `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET signature = excluded.signature, synced_at = excluded.synced_at`,
     ).bind(q.postId, `ayrshare:${q.ayr}`, q.internal, q.signature, nowIso(), nowIso()).run();
+    if (q.rank === -1) done.push({ platform: q.ayr, postId: q.postId });
   }
   for (const [p, message] of refused) {
-    if (!reached.has(p)) report.errors.push(`تعليقات ${platformName(p)}: ${message}`);
+    if (!reached.has(p) || blocked.has(p)) report.errors.push(`تعليقات ${platformName(p)}: ${message}`);
+  }
+  if (blocked.size) report.complete = false;
+  if (pending.length) {
+    // ما قُرئ يخرج من القائمة، وما لم يُعرف حسابُه أو لم يبلغه الدور يبقى
+    const left = (await readPendingPosts(env)).filter((p) => !done.some((d) => d.platform === p.platform && d.postId === p.postId));
+    await setSetting(env, PENDING_POSTS_KEY, JSON.stringify(left));
   }
   if (cut) report.complete = false;
   // السجلّ اكتمل حين لا يبقى منشورٌ قديم لم يُقرأ
-  if (history && !cut && posts.length < 400) await setSetting(env, HISTORY_DONE_KEY, nowIso());
+  if (history && !cut && !blocked.size && posts.length < 3000) await setSetting(env, HISTORY_DONE_KEY, nowIso());
 }
 
 /**
- * ردودنا على تعليقات لينكدإن — تُطلب لكل تعليقٍ بلا ردٍّ عندنا (لينكدإن لا
- * يُعشّشها في التعليق)، وتُكتب في العنصر قبل كتابته فينتقل إلى «تم الرد».
+ * إكس: ردُّ العميل على ردّنا كان عنصراً مستقلاً قبل أن تُبنى المحادثة شجرة —
+ * وصار اليوم في سلسلة تعليقه. فيبقى صفُّه القديم مكرّراً: يظهر الردّ مرّتين،
+ * وتحت «بلا رد» أبداً. فيُرفع ما صار من السلسلة، ولا يُمسّ غيره: معرّفُه معرّفُ
+ * تغريدةٍ في محادثة هذا المنشور بعينه.
  */
-async function linkedInReplies(
+async function dropAbsorbedReplies(env: Env, postId: string, items: InboxItem[]): Promise<void> {
+  const ids = items.flatMap((it) => (it.thread ?? []).filter((e) => !e.own && e.id).map((e) => encodeAyrshareComment('twitter', postId, e.id)));
+  const stmts: D1PreparedStatement[] = [];
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    stmts.push(env.DB.prepare(`DELETE FROM platform_comments WHERE provider_comment_id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk));
+  }
+  await runBatch(env, stmts);
+}
+
+/**
+ * سلاسل تعليقات لينكدإن — لينكدإن لا يُعشّش الردود في التعليق، فتُطلب لكل
+ * تعليقٍ بطلبه. وكانت تُطلب لما لا ردّ عليه وحده، وتقف عند أوّل ردٍّ منّا: فلا
+ * يُرى ما كتبه العميل بعد ردّنا. فتُطلب لكل تعليقٍ تدوّراً — ما لا ردّ عليه
+ * أوّلاً، ثم الأقدمُ فحصاً — في حدود الحصّة. وما لم يبلغه الدور لا تُمسّ سلسلته.
+ * يعود بمعرّفات ما فُحص.
+ */
+async function linkedInThreads(
   env: Env,
   auth: AyrshareAuth,
   budget: CallBudget,
   reserve: number,
   items: InboxItem[],
   ownerKeys: string[],
-): Promise<void> {
-  const pending = items.filter((it) => !it.repliedBody);
-  if (!pending.length) return;
-  const rows = await rowsByIds(env, pending.map((it) => it.id));
-  for (const it of pending) {
-    if (rows.get(it.id)?.reply_body) continue; // رُدّ عليه عندنا
+): Promise<string[]> {
+  if (!items.length) return [];
+  const rows = await rowsByIds(env, items.map((it) => it.id));
+  const order = [...items].sort((a, b) => {
+    const ra = rows.get(a.id);
+    const rb = rows.get(b.id);
+    return (ra?.reply_body ? 1 : 0) - (rb?.reply_body ? 1 : 0)
+      || String(ra?.reply_checked_at ?? '').localeCompare(String(rb?.reply_checked_at ?? ''));
+  });
+  const checked: string[] = [];
+  for (const it of order) {
     if (budget.left <= reserve) break;
     const d = decodeAyrshareId(it.id);
     if (d?.type !== 'comment') continue;
     try {
-      const reply = await ayrshareLinkedInReply(auth, d.urn || d.commentId, ownerKeys, budget);
-      if (reply) {
-        it.repliedBody = reply.text;
-        it.repliedAt = reply.at;
-      }
+      const thread = await ayrshareLinkedInReplies(auth, d.urn || d.commentId, ownerKeys, budget);
+      it.thread = thread;
+      const answer = threadAnswer(thread);
+      it.repliedBody = answer?.body ?? null;
+      it.repliedAt = answer?.at ?? null;
+      checked.push(it.id);
     } catch (err) {
       if (err instanceof BudgetExhausted) break;
       // تعليقٌ لا تُقرأ ردوده (حُذف) — يبقى كما هو ويُعاد في الدورة التالية
       if (!(err instanceof AyrshareError)) throw err;
     }
   }
+  return checked;
 }
 
 /**
@@ -1587,35 +1731,75 @@ async function syncPerPost(env: Env, report: InboxSyncReport): Promise<void> {
   }
 }
 
+/**
+ * سلسلةُ التعليق بعد ردٍّ من هنا — ما يُكتب في `thread_json` قبل أن تعيده
+ * المنصة. ولتعليقات Ayrshare وحدها: ما سواها لا سلسلة له.
+ * `replace` معرّفُ ردٍّ سابقٍ يُرفع منها (التعديل استبدالٌ والحذف رفع).
+ */
+async function threadAfterReply(
+  env: Env,
+  row: { provider_comment_id: string; kind: string; thread_json: string | null },
+  change: { add?: { id: string; body: string; userId: string }; replace?: string | null },
+): Promise<string | null> {
+  if (row.kind !== 'comment' || !row.provider_comment_id.startsWith('ayc|')) return row.thread_json;
+  let thread = parseThread(row.thread_json);
+  if (change.replace) thread = thread.filter((e) => e.id !== change.replace);
+  if (change.add) {
+    const user = await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(change.add.userId).first<{ name: string }>();
+    thread = sortThread([
+      ...thread,
+      { id: change.add.id, author: user?.name || '', own: true, here: true, body: change.add.body, at: nowIso() },
+    ]);
+  }
+  return JSON.stringify(thread);
+}
+
+/**
+ * إلى أين يُرسل الردّ. إكس محادثةٌ لا شجرة ردودٍ تحت تعليق: من ردّ على ردّنا
+ * يُجاب في تغريدته، لا في أوّل المحادثة — وإلا ظهر ردُّنا جواباً لسؤالٍ قديم.
+ * وما سواه يُرسل إلى التعليق نفسه: فيسبوك يجمع الردود تحته، وإنستغرام وتيك توك
+ * ويوتيوب لا ردَّ عندها على الردّ.
+ */
+function replyTarget(row: { provider_comment_id: string; thread_json: string | null }): string {
+  const d = decodeAyrshareId(row.provider_comment_id);
+  if (d?.type !== 'comment' || d.platform !== 'twitter') return row.provider_comment_id;
+  const last = [...parseThread(row.thread_json)].reverse().find((e) => !e.own && e.id);
+  return last ? encodeAyrshareComment('twitter', d.postId, last.id) : row.provider_comment_id;
+}
+
 export async function replyToComment(env: Env, commentId: string, text: string, userId: string): Promise<void> {
   // LEFT JOIN كي يعمل الرد حتى لتعليقات الصندوق غير المرتبطة بجدول نشر (schedule_id = NULL)
   const comment = await env.DB.prepare(
-    `SELECT pc.provider_comment_id, s.provider_post_id
+    `SELECT pc.provider_comment_id, pc.kind, pc.thread_json, s.provider_post_id
      FROM platform_comments pc LEFT JOIN schedules s ON s.id = pc.schedule_id
      WHERE pc.id = ?`,
   )
     .bind(commentId)
-    .first<{ provider_comment_id: string; provider_post_id: string | null }>();
+    .first<{ provider_comment_id: string; kind: string; thread_json: string | null; provider_post_id: string | null }>();
   if (!comment) throw new Error('التعليق غير موجود');
 
   const provider = await getProvider(env);
   if (!provider.replyComment) throw new Error('المزوّد الحالي لا يدعم الرد على التعليقات');
-  const replyId = await provider.replyComment(comment.provider_post_id || '', comment.provider_comment_id, text);
+  const replyId = await provider.replyComment(comment.provider_post_id || '', replyTarget(comment), text);
 
+  const thread = await threadAfterReply(env, comment, { add: { id: replyId || '', body: text, userId } });
   await env.DB.prepare(
-    "UPDATE platform_comments SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ?, reply_source = 'platform' WHERE id = ?",
+    `UPDATE platform_comments
+     SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ?, reply_source = 'platform',
+         thread_json = ?
+     WHERE id = ?`,
   )
-    .bind(text, replyId || null, userId, commentId)
+    .bind(text, replyId || null, userId, thread, commentId)
     .run();
 }
 
 // تعديل ردّي على المنصة (يحدّثه فعلياً للتقييمات؛ ولغيرها يستبدله)
 export async function editReply(env: Env, commentId: string, text: string, userId: string): Promise<void> {
   const row = await env.DB.prepare(
-    'SELECT provider_comment_id, reply_provider_id, reply_body FROM platform_comments WHERE id = ?',
+    'SELECT provider_comment_id, kind, thread_json, reply_provider_id, reply_body FROM platform_comments WHERE id = ?',
   )
     .bind(commentId)
-    .first<{ provider_comment_id: string; reply_provider_id: string | null; reply_body: string | null }>();
+    .first<{ provider_comment_id: string; kind: string; thread_json: string | null; reply_provider_id: string | null; reply_body: string | null }>();
   if (!row) throw new Error('التعليق غير موجود');
   if (!row.reply_body) throw new Error('لا يوجد ردّ لتعديله');
 
@@ -1623,30 +1807,36 @@ export async function editReply(env: Env, commentId: string, text: string, userI
   if (!provider.editReply) throw new Error('المزوّد الحالي لا يدعم تعديل الرد');
   const newReplyId = await provider.editReply(row.provider_comment_id, row.reply_provider_id, text);
 
+  const id = newReplyId || row.reply_provider_id || null;
+  const thread = await threadAfterReply(env, row, { replace: row.reply_provider_id, add: { id: id || '', body: text, userId } });
   await env.DB.prepare(
-    "UPDATE platform_comments SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ?, reply_source = 'platform' WHERE id = ?",
+    `UPDATE platform_comments
+     SET reply_body = ?, reply_provider_id = ?, replied_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), replied_by = ?, reply_source = 'platform',
+         thread_json = ?
+     WHERE id = ?`,
   )
-    .bind(text, newReplyId || row.reply_provider_id || null, userId, commentId)
+    .bind(text, id, userId, thread, commentId)
     .run();
 }
 
 // حذف ردّي من المنصة، وإرجاع العنصر إلى حالة «بلا رد» محلياً
 export async function deleteReply(env: Env, commentId: string): Promise<void> {
   const row = await env.DB.prepare(
-    'SELECT provider_comment_id, reply_provider_id FROM platform_comments WHERE id = ?',
+    'SELECT provider_comment_id, kind, thread_json, reply_provider_id FROM platform_comments WHERE id = ?',
   )
     .bind(commentId)
-    .first<{ provider_comment_id: string; reply_provider_id: string | null }>();
+    .first<{ provider_comment_id: string; kind: string; thread_json: string | null; reply_provider_id: string | null }>();
   if (!row) throw new Error('التعليق غير موجود');
 
   const provider = await getProvider(env);
   if (!provider.deleteReply) throw new Error('المزوّد الحالي لا يدعم حذف الرد');
   await provider.deleteReply(row.provider_comment_id, row.reply_provider_id);
 
+  const thread = row.reply_provider_id ? await threadAfterReply(env, row, { replace: row.reply_provider_id }) : row.thread_json;
   await env.DB.prepare(
-    'UPDATE platform_comments SET reply_body = NULL, reply_provider_id = NULL, replied_at = NULL, replied_by = NULL, reply_source = NULL WHERE id = ?',
+    'UPDATE platform_comments SET reply_body = NULL, reply_provider_id = NULL, replied_at = NULL, replied_by = NULL, reply_source = NULL, thread_json = ? WHERE id = ?',
   )
-    .bind(commentId)
+    .bind(thread, commentId)
     .run();
 }
 

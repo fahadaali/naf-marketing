@@ -3,6 +3,7 @@ import type {
   ModerateAction,
 } from './provider';
 import { platformNames } from '../platformLabels';
+import type { ThreadEntry } from '../services/inboxThread';
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
@@ -665,6 +666,8 @@ export type InboxItem = {
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
   /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
   interactionId?: string | null;
+  /** السلسلة تحت التعليق كلُّها — من Ayrshare. غيابُها: لا سلسلة تُكتب ولا تُمسّ. */
+  thread?: ThreadEntry[];
 };
 
 /** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */
