@@ -2,10 +2,11 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  AyrshareError, ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, youtubeChannelVideos, listAyrshareWebhooks,
-  type AyrshareAuth,
+  AyrshareError, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, isOwnAyrshareComment, ownerKey,
+  youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth, type PostWeight,
 } from '../adapters/ayrshare';
 import { ayrshareAuth, providerKey } from '../adapters';
+import { htmlToText } from '../util';
 import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
 import { localSyncHealth } from './socialapi';
 
@@ -90,6 +91,39 @@ function identity(c: any, owners: Set<string>) {
     keys: c && typeof c === 'object' ? Object.keys(c).sort() : [],
   };
 }
+
+/* ═══ طول النص لكل منصة — لعدّاد «نسخة كل منصة» ═══
+
+   النصّ لكل منصةٍ كما يُرسل عند النشر (`prepareInput`): نسختها إن كُتبت وإلا
+   المتن، مجرّداً من الوسوم بالدالة نفسها. ويُسأل Ayrshare مرّةً لكل نصٍّ مختلف
+   لا لكل منصة. ولا عدّاد بلا Ayrshare: يُردّ فارغاً فلا يظهر شيء. */
+ayrshareRoutes.post('/post-length', requirePermission('draft.edit'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  type Ask = { body?: string; title?: string; overrides?: Record<string, string>; platforms?: string[] };
+  const { body = '', title = '', overrides = {}, platforms = [] } = await c.req.json<Ask>().catch((): Ask => ({}));
+  const name = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>())?.value;
+  if (!auth || (name || c.env.PROVIDER_NAME || '').toLowerCase() !== 'ayrshare' || !Array.isArray(platforms)) {
+    return c.json({ lengths: {} });
+  }
+
+  const textOf = (p: string) => (htmlToText(String(overrides?.[p] || '').trim() || String(body || '')) || String(title || '')).trim();
+  const byText = new Map<string, string[]>();
+  for (const p of platforms.slice(0, 20)) {
+    const t = textOf(String(p));
+    if (t) byText.set(t, [...(byText.get(t) ?? []), String(p)]);
+  }
+  const lengths: Record<string, PostWeight> = {};
+  try {
+    for (const [text, list] of [...byText].slice(0, 5)) {
+      const weight = await ayrsharePostWeight(auth, text);
+      for (const p of list) {
+        const w = weight[ayrsharePlatform(p)];
+        if (w) lengths[p] = w;
+      }
+    }
+  } catch { /* العدّاد زينة: تعذّره يُخفيه ولا يمنع الكتابة */ }
+  return c.json({ lengths });
+});
 
 ayrshareRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {
   const auth: AyrshareAuth | null = ayrshareAuth(c.env);

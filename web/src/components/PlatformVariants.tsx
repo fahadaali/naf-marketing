@@ -11,7 +11,7 @@ import { Upload } from 'lucide-react';
 import { api } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { uploadMedia } from '../mediaUpload';
-import { isolate } from '../lib/format';
+import { formatNumber, isolate } from '../lib/format';
 import {
   bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode,
   type AssetInfo, type MediaSpecs, type Variant,
@@ -68,6 +68,7 @@ export default function PlatformVariants({
   const [rows, setRows] = useState<Record<string, VariantRow>>({});
   const [saving, setSaving] = useState('');
   const [specs, setSpecs] = useState<MediaSpecs | null>(null);
+  const [lengths, setLengths] = useState<Record<string, { length: number; max: number; valid: boolean }>>({});
   const autoOpened = useRef(false);
   // حقل ملفٍ واحد للمنصات كلها — الزرّ يُركَّز بلوحة المفاتيح، والحقل مخفيّ
   const fileRef = useRef<HTMLInputElement>(null);
@@ -90,6 +91,23 @@ export default function PlatformVariants({
     setComments(c);
     setRows(r);
   }, [variants]);
+
+  /* طول النص لكل منصة كما تعدّه هي (Ayrshare: الرابط في إكس ٢٣ حرفاً، والرمز
+     التعبيري حرفان). يُسأل والبطاقة مفتوحة وحدها، بعد أن يهدأ الكتابة —
+     فطلبات المزوّد حصّةٌ يشترك فيها السحب والنشر. وتعذّره يُخفي العدّاد. */
+  const lengthKey = JSON.stringify([open, body, texts, platforms]);
+  useEffect(() => {
+    if (!open || !platforms.length) return;
+    const t = window.setTimeout(() => {
+      api
+        .post<{ lengths: Record<string, { length: number; max: number; valid: boolean }> }>(
+          '/ayrshare/post-length', { body, overrides: texts, platforms },
+        )
+        .then((d) => setLengths(d.lengths || {}))
+        .catch(() => setLengths({}));
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [lengthKey]);
 
   const bodyIds = useMemo(() => bodyMediaIds(body), [body]);
   const allIds = useMemo(() => {
@@ -273,6 +291,12 @@ export default function PlatformVariants({
                   value={texts[p] || ''}
                   onChange={(e) => setTexts((v) => ({ ...v, [p]: e.target.value }))}
                 />
+                {lengths[p] && (
+                  <p className={`pv-length ${lengths[p].valid ? 'muted' : 'err'}`}>
+                    الطول <bdi>{formatNumber(lengths[p].length)} / {formatNumber(lengths[p].max)}</bdi>
+                    {!lengths[p].valid && ` — أطول من حدّ ${platformLabel(p, platLabels)}`}
+                  </p>
+                )}
                 <input
                   className="input pv-comment"
                   placeholder="أول تعليق (اختياري) — للروابط والوسوم"

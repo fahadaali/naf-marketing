@@ -144,6 +144,37 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   return null;
 }
 
+/* ═══ طول النص كما تعدّه المنصات ═══
+
+   `POST /post/checkPostWeight` يردّ الطول الموزون لكل منصة وحدّها وصحّته
+   («Check Post Length» في توثيقه): إكس يعدّ الرابط ٢٣ حرفاً والرمز التعبيري
+   حرفين، فالعدّ بالحروف وحده يخطئ. والحقول بأسماء Ayrshare وبحالة أحرفها كما
+   في المثال الموثّق — وما لم يرد فيه (ثريدز وسناب)، أو ورد طولُه بلا حكمٍ
+   بصحّته (بلوسكاي)، لا يُقرأ له طول ولا يُحكم عليه بحدٍّ من عندنا. */
+const WEIGHT_FIELD: Record<string, string> = {
+  twitter: 'twitter', linkedin: 'linkedIn', facebook: 'facebook', instagram: 'instagram', tiktok: 'tikTok',
+  youtube: 'youtube', gmb: 'gmb', pinterest: 'pinterest', bluesky: 'bluesky',
+};
+
+export type PostWeight = { length: number; max: number; valid: boolean };
+
+/** طول النص وحدّه لكل منصةٍ لدى Ayrshare — باسمها عنده (`twitter`، `gmb`…). */
+export function mapPostWeight(data: any): Record<string, PostWeight> {
+  const out: Record<string, PostWeight> = {};
+  for (const [ayr, field] of Object.entries(WEIGHT_FIELD)) {
+    const length = Number(data?.[`${field}WeightedLength`]);
+    const max = Number(data?.maxCharLimits?.[ayr]);
+    const valid = data?.[`${field}Valid`];
+    if (!Number.isFinite(length) || !Number.isFinite(max) || typeof valid !== 'boolean') continue;
+    out[ayr] = { length, max, valid };
+  }
+  return out;
+}
+
+export async function ayrsharePostWeight(auth: AyrshareAuth, text: string): Promise<Record<string, PostWeight>> {
+  return mapPostWeight(await ayrshareCall<any>(auth, 'POST', '/post/checkPostWeight', { post: text }));
+}
+
 /** منصاتٌ لا تحذف المنشور المنشور عبر الواجهة — يُحذف من تطبيقها («Delete Post»). */
 export const MANUAL_DELETE = new Set(['instagram', 'tiktok']);
 
@@ -534,8 +565,40 @@ export class AyrshareProvider implements PublishingProvider {
     return accessUrl;
   }
 
+  /* ═══ الفحص عند الجدولة ═══
+
+     حدّ الصور هنا، ثم ما يقوله Ayrshare نفسه بلا وسيط: طولُ النص كما تعدّه
+     المنصة (`checkPostWeight`)، وأمربوطةٌ المنصة في الحساب أصلاً. و`/validate/post`
+     لا يُسأل: يشترط روابط الوسائط كما في النشر، ووسائطنا خلف المصادقة فلا تصله
+     إلا برفعها — وبلا وسيطٍ يردّ رفضاً لا أصل له لإنستغرام وتيك توك ويوتيوب.
+     وتعذّرُ السؤال لا يُعدّ عيباً في المنشور: يُسكت عنه، والنشر يقول ما بقي. */
   async preflight(input: PublishInput): Promise<string[]> {
-    return ayrshareMediaIssues(input, !!this.images);
+    const issues = ayrshareMediaIssues(input, !!this.images);
+    const auth = { key: this.key, x: this.x };
+    const targets = [...new Set(input.platforms)];
+    if (input.text) {
+      try {
+        const weight = await ayrsharePostWeight(auth, input.text);
+        for (const p of targets) {
+          const w = weight[ayrsharePlatform(p)];
+          if (w && !w.valid) {
+            issues.push(
+              `النص أطول من حدّ ${platformNames([p], this.labels)} (⁨${w.length}⁩ من ⁨${w.max}⁩). اكتب له نصّاً أقصر في «نسخة كل منصة»`,
+            );
+          }
+        }
+      } catch { /* يُسكت عنه */ }
+    }
+    try {
+      const { accounts } = await ayrshareUser(auth);
+      const linked = new Set(accounts.map((a) => ayrsharePlatform(a.platform)));
+      for (const p of targets) {
+        if (!linked.has(ayrsharePlatform(p))) {
+          issues.push(`${platformNames([p], this.labels)} غير مربوط في Ayrshare: اربطه من Social Accounts قبل الموعد، وإلا لم يُنشر`);
+        }
+      }
+    } catch { /* يُسكت عنه */ }
+    return issues;
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {

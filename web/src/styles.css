@@ -591,6 +591,8 @@ h3, h4 { letter-spacing: -0.01em; }
 .pv-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .pv-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }
 .pv-comment { margin-top: var(--space-2); }
+/* طول النص كما تعدّه المنصة — تحت نصّها، بخطّ الملاحظات */
+.pv-length { font-size: var(--text-xs); margin: var(--space-1) 0 0; }
 
 /* ===== صورة الغلاف (VideoCover) ===== */
 .vc-card { margin-bottom: var(--space-4); }
