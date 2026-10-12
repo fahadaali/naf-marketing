@@ -375,7 +375,62 @@ function uploadType(m: PublishMedia): { fileName: string; contentType?: string }
 }
 
 /** ما يُصادَق به كل طلب: مفتاح الحساب، ومفتاحا تطبيق إكس إن ضُبطا. */
-export type AyrshareAuth = { key: string; x?: AyrshareXKeys };
+/* ═══ حدُّ طلبات الحساب: ⁨300⁩ كل خمس دقائق ═══
+
+   الحدّ للحساب كلّه لا للنداء (صفحة «HTTP Errors» في توثيقه، 429): يشترك فيه
+   السحبُ المجدول والنشرُ وما يطلبه المستخدم. وكان السحب يملؤه وحده — حصّةُ
+   التحليلات عند ‎:02 وحصّةُ الصندوق عند ‎:04 مئةٌ وخمسون لكلٍّ منهما، معاً
+   ثلاثمئة في دقيقتين — فيُرفض بعدهما «سحب الآن» والنشر حتى تنقضي النافذة.
+   وألفُ رفضٍ في يومٍ يُعطّل الحساب كلَّه.
+
+   فيُقرأ العدّاد من ترويسة كل ردّ (`x-ratelimit-count` و`x-ratelimit-max`)،
+   والسحبُ — ما له حصّة — يقف حين يبقى ⁨100⁩: هي للنشر وللمستخدم. والرفضُ
+   يُحفظ في الإعدادات خمس دقائق لا يُنادى فيها Ayrshare من أي استدعاء، فلا
+   تتراكم الرفضات نحو التعطيل. */
+export const AYRSHARE_RATE_KEY = 'ayrshare_rate_until';
+export const AYRSHARE_SYNC_RESERVE = 100;
+const RATE_WINDOW_MS = 5 * 60_000;
+export const RATE_LIMIT_ERROR = 'بلغ حساب Ayrshare حدّ طلباته: ⁨300⁩ طلب كل خمس دقائق. أعد المحاولة بعد خمس دقائق';
+
+/** أين يُحفظ وقتُ انقضاء الرفض بين الاستدعاءات — جدول الإعدادات (`adapters/index.ts`). */
+export type RateStore = { read(): Promise<number>; write(until: number): Promise<void> };
+
+/** عدّاد الحدّ لاستدعاءٍ واحد، ومعه ما حُفظ من رفضٍ سابق. */
+export class AyrshareRate {
+  private until: number | null = null;
+  count = 0;
+  max = 0;
+  constructor(private store?: RateStore) {}
+
+  /** لحظةٌ لا يُنادى قبلها — تُقرأ من المخزن مرّةً في الاستدعاء. */
+  async blockedUntil(): Promise<number> {
+    if (this.until === null) {
+      try { this.until = this.store ? await this.store.read() : 0; } catch { this.until = 0; }
+    }
+    return this.until;
+  }
+
+  /** بلغ الحسابُ ما يُترك للنشر وللمستخدم. */
+  get nearLimit(): boolean {
+    return this.max > 0 && this.count >= this.max - AYRSHARE_SYNC_RESERVE;
+  }
+
+  note(res: Response): void {
+    const max = Number(res.headers?.get('x-ratelimit-max'));
+    const count = Number(res.headers?.get('x-ratelimit-count'));
+    if (max > 0 && Number.isFinite(count)) {
+      this.max = max;
+      this.count = count;
+    }
+  }
+
+  async trip(): Promise<void> {
+    this.until = Date.now() + RATE_WINDOW_MS;
+    try { await this.store?.write(this.until); } catch { /* يبقى في هذا الاستدعاء وحده */ }
+  }
+}
+
+export type AyrshareAuth = { key: string; x?: AyrshareXKeys; rate?: AyrshareRate };
 
 function ayrHeaders(auth: AyrshareAuth, json: boolean): Record<string, string> {
   const h: Record<string, string> = { authorization: `Bearer ${auth.key}` };
@@ -395,6 +450,15 @@ export async function ayrshareCall<T = any>(
   body?: unknown,
   budget?: CallBudget,
 ): Promise<T> {
+  // الحساب في نافذة رفض، أو السحبُ بلغ ما يُترك لغيره: لا يُنادى
+  const rate = auth.rate;
+  if (rate && ((await rate.blockedUntil()) > Date.now() || (budget && rate.nearLimit))) {
+    if (budget) {
+      budget.stop('rate_limit');
+      throw new BudgetExhausted();
+    }
+    throw new AyrshareError(RATE_LIMIT_ERROR, 429, null);
+  }
   // نداءات المزامنة بحصّة الاستدعاء — انظر `services/limits.ts`
   budget?.spend();
   let res: Response;
@@ -412,6 +476,7 @@ export async function ayrshareCall<T = any>(
     }
     throw err;
   }
+  rate?.note(res);
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text.slice(0, 200) }; }
@@ -464,12 +529,13 @@ export async function ayrshareCall<T = any>(
     );
   }
   if (res.status === 429) {
-    // المزوّد طلب التمهّل: يقف السحب هنا ويُستأنف في دورته التالية
+    // المزوّد طلب التمهّل: لا يُنادى خمس دقائق، ويُستأنف السحب في دورته بعدها
+    await rate?.trip();
     if (budget) {
       budget.stop('rate_limit');
       throw new BudgetExhausted();
     }
-    throw new AyrshareError('تجاوزت المنصة حدّ طلبات Ayrshare (٣٠٠ طلب كل خمس دقائق). أعد المحاولة بعد دقائق', res.status, data);
+    throw new AyrshareError(RATE_LIMIT_ERROR, res.status, data);
   }
   /* سببٌ بلا رسالة يُذكر بمساره ورمزه — وكان «خطأ من Ayrshare (400)» وحده لا
      يقول أيُّ طلبٍ رُفض. والمسار بلا استعلامه: فيه مؤشّر الصفحة. */
@@ -578,12 +644,13 @@ export class AyrshareProvider implements PublishingProvider {
     private labels: Record<string, string> = {},
     private images?: ImagesBinding,
     private suspended = '',
+    private rate?: AyrshareRate,
   ) {
     this.key = (apiKey || '').trim();
   }
 
   private call<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-    return ayrshareCall<T>({ key: this.key, x: this.x }, method, path, body);
+    return ayrshareCall<T>({ key: this.key, x: this.x, rate: this.rate }, method, path, body);
   }
 
   /* ═══ رفعُ الوسيط ═══

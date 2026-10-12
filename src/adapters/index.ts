@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import type { PublishingProvider } from './provider';
 import { MockProvider } from './mock';
-import { AyrshareProvider, type AyrshareAuth } from './ayrshare';
+import { AYRSHARE_RATE_KEY, AyrshareProvider, AyrshareRate, type AyrshareAuth } from './ayrshare';
 import { BufferProvider } from './buffer';
 import { SocialApiProvider } from './socialapi';
 import { customPlatformLabels } from '../platformLabels';
@@ -23,7 +23,26 @@ export function providerKey(env: Env, name: string): string {
 export function ayrshareAuth(env: Env): AyrshareAuth | null {
   const key = providerKey(env, 'ayrshare');
   if (!key) return null;
-  return { key, x: { key: env.AYRSHARE_X_API_KEY?.trim(), secret: env.AYRSHARE_X_API_SECRET?.trim() } };
+  return {
+    key,
+    x: { key: env.AYRSHARE_X_API_KEY?.trim(), secret: env.AYRSHARE_X_API_SECRET?.trim() },
+    rate: ayrshareRate(env),
+  };
+}
+
+/** عدّاد حدّ الطلبات، ورفضُه محفوظٌ في الإعدادات بين الاستدعاءات — انظر `AyrshareRate`. */
+function ayrshareRate(env: Env): AyrshareRate {
+  return new AyrshareRate({
+    async read() {
+      const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(AYRSHARE_RATE_KEY).first<{ value: string }>();
+      return Number(row?.value) || 0;
+    },
+    async write(until) {
+      await env.DB.prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      ).bind(AYRSHARE_RATE_KEY, String(until)).run();
+    },
+  });
 }
 
 /** المزوّدون الذين ينشرون فعلاً — وما عداهم تجريبيٌّ أو غير مدعوم. */
@@ -57,7 +76,7 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
     case 'ayrshare':
       if (!key) throw new Error('مفتاح Ayrshare غير مضبوط (AYRSHARE_API_KEY أو PROVIDER_API_KEY)');
       return new AyrshareProvider(
-        key, ayrshareAuth(env)?.x, await customPlatformLabels(env), env.IMAGES, await suspensionNotice(env),
+        key, ayrshareAuth(env)?.x, await customPlatformLabels(env), env.IMAGES, await suspensionNotice(env), ayrshareRate(env),
       );
     case 'buffer': {
       if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
