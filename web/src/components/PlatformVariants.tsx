@@ -11,13 +11,14 @@ import { Upload } from 'lucide-react';
 import { api } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { uploadMedia } from '../mediaUpload';
+import PlatformOptions, { HAS_OPTIONS, type PlatformOptionsValue } from './PlatformOptions';
 import { formatNumber, isolate } from '../lib/format';
 import {
   bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode,
   type AssetInfo, type MediaSpecs, type Variant,
 } from '../mediaPlan';
 
-export type VariantRow = Variant & { body_override?: string | null; first_comment?: string | null };
+export type VariantRow = Variant & { body_override?: string | null; first_comment?: string | null; options_json?: string | null };
 
 let specsPromise: Promise<MediaSpecs | null> | null = null;
 /** المواصفات لا تتغيّر في الجلسة — تُطلب مرّةً. وتعذّرها يُخفي الشارات ولا يمنع شيئاً. */
@@ -65,6 +66,7 @@ export default function PlatformVariants({
 }: Props) {
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
+  const [options, setOptions] = useState<Record<string, PlatformOptionsValue>>({});
   const [rows, setRows] = useState<Record<string, VariantRow>>({});
   const [saving, setSaving] = useState('');
   const [specs, setSpecs] = useState<MediaSpecs | null>(null);
@@ -81,14 +83,19 @@ export default function PlatformVariants({
   useEffect(() => {
     const t: Record<string, string> = {};
     const c: Record<string, string> = {};
+    const o: Record<string, PlatformOptionsValue> = {};
     const r: Record<string, VariantRow> = {};
     for (const v of variants) {
       if (v.body_override) t[v.platform] = v.body_override;
       if (v.first_comment) c[v.platform] = v.first_comment;
+      if (v.options_json) {
+        try { o[v.platform] = JSON.parse(v.options_json); } catch { /* بلا خيارات */ }
+      }
       r[v.platform] = v;
     }
     setTexts(t);
     setComments(c);
+    setOptions(o);
     setRows(r);
   }, [variants]);
 
@@ -177,6 +184,7 @@ export default function PlatformVariants({
       await put(platform, {
         body_override: texts[platform]?.trim() || null,
         first_comment: comments[platform]?.trim() || null,
+        ...(HAS_OPTIONS.has(platform) ? { options: options[platform] || null } : {}),
       });
       onMsg('تم الحفظ');
     } catch (e: any) {
@@ -215,7 +223,9 @@ export default function PlatformVariants({
     }
   }
 
-  const custom = Object.values(texts).filter((v) => v?.trim()).length + Object.values(rows).filter((v) => v.media_asset_id).length;
+  const custom = Object.values(texts).filter((v) => v?.trim()).length
+    + Object.values(rows).filter((v) => v.media_asset_id).length
+    + Object.values(rows).filter((v) => v.options_json).length;
 
   return (
     <div className="card pv-card">
@@ -364,17 +374,30 @@ export default function PlatformVariants({
                   value={texts[p] || ''}
                   onChange={(e) => setTexts((v) => ({ ...v, [p]: e.target.value }))}
                 />
-                {lengths[p] && (
-                  <p className={`pv-length ${lengths[p].valid ? 'muted' : 'err'}`}>
-                    الطول <bdi>{formatNumber(lengths[p].length)} / {formatNumber(lengths[p].max)}</bdi>
-                    {!lengths[p].valid && ` — أطول من حدّ ${platformLabel(p, platLabels)}`}
-                  </p>
-                )}
+                {/* القصة بلا نصّ فلا طول لها، وسلسلة إكس تقسم ما طال */}
+                {lengths[p] && !options[p]?.story && (() => {
+                  const split = p === 'x' && !!options[p]?.thread;
+                  const over = !lengths[p].valid && !split;
+                  return (
+                    <p className={`pv-length ${over ? 'err' : 'muted'}`}>
+                      الطول <bdi>{formatNumber(lengths[p].length)} / {formatNumber(lengths[p].max)}</bdi>
+                      {over && ` — أطول من حدّ ${platformLabel(p, platLabels)}`}
+                      {split && !lengths[p].valid && ' — يُنشر سلسلة'}
+                    </p>
+                  );
+                })()}
                 <input
                   className="input pv-comment"
                   placeholder="أول تعليق (اختياري) — للروابط والوسوم"
                   value={comments[p] || ''}
                   onChange={(e) => setComments((v) => ({ ...v, [p]: e.target.value }))}
+                />
+                <PlatformOptions
+                  key={`${p}:${rows[p]?.options_json || ''}`}
+                  platform={p}
+                  value={options[p] || {}}
+                  onChange={(v) => setOptions((prev) => ({ ...prev, [p]: v }))}
+                  onError={onError}
                 />
               </div>
             );

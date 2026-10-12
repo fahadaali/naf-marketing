@@ -108,7 +108,7 @@ describe('الفحص عند الجدولة', () => {
     });
     replies['GET /user'] = linked(['twitter', 'linkedin']);
     await preflightSchedules(env, 'p1', ['x', 'linkedin']);
-    expect(error('sch_p1_x')).toBe('النص أطول من حدّ إكس (⁨312⁩ من ⁨280⁩). اكتب له نصّاً أقصر في «نسخة كل منصة»');
+    expect(error('sch_p1_x')).toBe('النص أطول من حدّ إكس (\u2068312\u2069 من \u2068280\u2069). اكتب له نصّاً أقصر في «نسخة كل منصة»');
     expect(error('sch_p1_linkedin')).toBeNull();
     expect(calls.find((c) => c.key === 'POST /post/checkPostWeight')!.body).toEqual({ post: 'نص' });
   });

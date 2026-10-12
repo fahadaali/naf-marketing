@@ -4,6 +4,7 @@ import { getProvider } from '../adapters';
 import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
 import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
+import { optionIssues, parseOptions } from './publishOptions';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -58,14 +59,15 @@ export function mediaIssues(platform: string, media: PublishMedia[]): string[] {
     والفحص المسبق لا يكيّف الصور (`adapt: false`): يكفيه أن يعرف ما سيُرسل. */
 async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}): Promise<PublishInput> {
   const variant = await env.DB.prepare(
-    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id, options_json
      FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(job.post_id, job.platform)
     .first<{
       body_override: string | null; media_asset_id: string | null; first_comment: string | null;
-      generated_media_id: string | null; generated_from_id: string | null;
+      generated_media_id: string | null; generated_from_id: string | null; options_json: string | null;
     }>();
+  const options = parseOptions(variant?.options_json);
 
   // محتوى المحرر HTML — نُجرّده إلى نص صالح للنشر (وإلا ظهرت الوسوم حرفياً في المنشور)
   const rawBody = variant?.body_override || job.body || '';
@@ -98,6 +100,11 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
     media = adapted;
   }
 
+  // ملف الترجمة من مكتبة الوسائط — وما حُذف منها يُنشر المقطع بلا ترجمة كما يُنشر بلا غلاف
+  const subtitle = options.subtitle
+    ? (await loadMedia(env, [options.subtitle.mediaId]).catch(() => [] as PublishMedia[]))[0]
+    : undefined;
+
   return {
     platforms: [job.platform],
     text,
@@ -105,6 +112,8 @@ async function prepareInput(env: Env, job: Job, opts: { adapt?: boolean } = {}):
     media,
     firstComment: variant?.first_comment || undefined,
     cover: opts.adapt ? await loadCover(env, job.post_id, media) : undefined,
+    ...(Object.keys(options).length ? { options } : {}),
+    ...(subtitle ? { subtitle } : {}),
   };
 }
 
@@ -199,7 +208,7 @@ async function publishJobs(
       const input = { ...(await prepareInput(env, job, { adapt: true })), idempotencyKey: key?.publish_key || undefined };
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
-      const issues = mediaIssues(job.platform, input.media || []);
+      const issues = [...mediaIssues(job.platform, input.media || []), ...optionIssues(job.platform, input.options || {}, input.media || [])];
       if (issues.length) throw new Error(issues.join(' · '));
 
       const result = await provider.publish(input);
@@ -483,6 +492,7 @@ export async function preflightSchedules(
       const missing = missingRequirement(platform, input.text, input.media || []);
       if (missing) issues.push(missing);
       issues.push(...mediaIssues(platform, input.media || []));
+      issues.push(...optionIssues(platform, input.options || {}, input.media || []));
       if (provider.preflight) issues.push(...(await provider.preflight(input)));
     } catch (err: any) {
       issues.push(String(err?.message || err));

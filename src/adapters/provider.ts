@@ -1,3 +1,5 @@
+import type { PublishOptions } from '../services/publishOptions';
+
 // طبقة النشر المجرّدة — واجهة محايدة للمزوّد.
 // أي مزوّد (Zernio / Late / Ayrshare ...) ينفّذ هذه الواجهة، ويبقى بقية الكود محايداً.
 
@@ -51,6 +53,10 @@ export interface PublishInput {
    * بعد كل نتيجةٍ معروفة. ومن لا يقبله من المزوّدين يتجاهله.
    */
   idempotencyKey?: string;
+  /** خيارات النشر لهذه المنصة (`services/publishOptions.ts`) — ومن لا يعرفها من المزوّدين يتجاهلها. */
+  options?: PublishOptions;
+  /** ملف ترجمة المقطع (يوتيوب) إن اختير في خياراتها. */
+  subtitle?: PublishMedia;
 }
 
 /**

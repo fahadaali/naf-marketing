@@ -622,9 +622,12 @@ export class AyrshareProvider implements PublishingProvider {
     if (input.text) {
       try {
         const weight = await ayrsharePostWeight(auth, input.text);
+        // سلسلة إكس تقسم نصّها، والقصة لا نصّ لها — فلا يُعدّ طولها عيباً
+        const exempt = (p: string) =>
+          (p === 'x' && input.options?.thread) || ((p === 'instagram' || p === 'facebook') && input.options?.story);
         for (const p of targets) {
           const w = weight[ayrsharePlatform(p)];
-          if (w && !w.valid) {
+          if (w && !w.valid && !exempt(p)) {
             issues.push(
               `النص أطول من حدّ ${platformNames([p], this.labels)} (⁨${w.length}⁩ من ⁨${w.max}⁩). اكتب له نصّاً أقصر في «نسخة كل منصة»`,
             );
@@ -694,10 +697,58 @@ export class AyrshareProvider implements PublishingProvider {
     if (thumb && platforms.includes('linkedin')) body.linkedInOptions = { thumbNail: thumb };
     if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
     for (const p of platforms) mergeOptions(body, p, describeMedia(p, media));
+    await this.applyOptions(body, platforms, input);
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
     if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video, input.idempotencyKey);
     return this.send(input.idempotencyKey ? { ...body, idempotencyKey: input.idempotencyKey } : body);
+  }
+
+  /* ═══ خيارات المنصة (`services/publishOptions.ts`) بحقول Ayrshare ═══
+
+     - القصة («Instagram/Facebook Stories»): وسيطٌ واحدٌ بلا نصّ، فلا ريلز ولا
+       غلاف ولا نصٌّ بديل (إنستغرام لا يقبله للقصة)، ولا تعليقٌ أوّل. ويبقى وسم
+       الذكاء الاصطناعي: إنستغرام يقبله للقصة.
+     - سلسلة إكس («X Thread»): `thread` و`threadNumber`. وAyrshare يقسّم النص
+       على الجمل حتى حدّ المنشور — إلا إن وجد «\n\n» فيقطع عنده وحده ولو طال
+       الجزء. ففواصل الفقرات تُكتب بالفاصل الذي لا يقطع (`\u2063\n\u2063\n`
+       في توثيقه) وتبقى القسمة له.
+     - نشاطي التجاري: `callToAction` بنوعه ورابطه (والاتصال بلا رابط)، و`event`
+       بعنوانه وموعديه.
+     - يوتيوب: `categoryId` و`tags`، وملف الترجمة يُرفع كالوسيط ويُرسل رابطه
+       `subTitleUrl` مع لغته واسمها الظاهر للمشاهد. */
+  private async applyOptions(body: Record<string, unknown>, platforms: string[], input: PublishInput): Promise<void> {
+    const o = input.options || {};
+    if (o.story && platforms.includes('instagram')) {
+      const ai = (body.instagramOptions as Record<string, unknown> | undefined)?.isAIGenerated === true;
+      body.instagramOptions = { stories: true, ...(ai ? { isAIGenerated: true } : {}) };
+      delete body.firstComment;
+    }
+    if (o.story && platforms.includes('facebook')) {
+      body.faceBookOptions = { stories: true };
+      delete body.firstComment;
+    }
+    if (o.thread && platforms.includes('twitter')) {
+      mergeOptions(body, 'twitter', { thread: true, ...(o.threadNumber ? { threadNumber: true } : {}) });
+      body.post = String(body.post || '').replace(/\n\n/g, '\u2063\n\u2063\n');
+    }
+    if (platforms.includes('gmb')) {
+      const g: Record<string, unknown> = {};
+      if (o.cta) g.callToAction = o.cta.type === 'call' ? { actionType: 'call' } : { actionType: o.cta.type, url: o.cta.url };
+      if (o.event) g.event = { title: o.event.title, startDate: o.event.start, endDate: o.event.end };
+      mergeOptions(body, 'gmb', g);
+    }
+    if (platforms.includes('youtube')) {
+      const y: Record<string, unknown> = {};
+      if (o.categoryId) y.categoryId = o.categoryId;
+      if (o.tags?.length) y.tags = o.tags;
+      if (o.subtitle && input.subtitle) {
+        y.subTitleUrl = await this.uploadMedia(input.subtitle);
+        y.subTitleLanguage = o.subtitle.language;
+        y.subTitleName = o.subtitle.language === 'en' ? 'English' : 'العربية';
+      }
+      mergeOptions(body, 'youtube', y);
+    }
   }
 
   /* ═══ سناب: أكثر من نشرةٍ للموعد الواحد ═══

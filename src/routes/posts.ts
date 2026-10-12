@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { normalizeOptions } from '../services/publishOptions';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { hasPermission } from '../permissions';
@@ -472,25 +473,37 @@ postRoutes.put('/:id/variants/:platform', requirePermission('draft.edit'), async
     first_comment?: string | null;
     generated_media_id?: string | null;
     generated_from_id?: string | null;
+    options?: Record<string, unknown> | null;
   }>();
   const prev = await c.env.DB.prepare(
-    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id
+    `SELECT body_override, media_asset_id, first_comment, generated_media_id, generated_from_id, options_json
      FROM post_variants WHERE post_id = ? AND platform = ?`,
   )
     .bind(id, platform)
     .first<Record<string, string | null>>();
-  const pick = (k: keyof typeof b) => (k in b ? b[k] || null : prev?.[k] ?? null);
+  const pick = (k: Exclude<keyof typeof b, 'options'>) => (k in b ? b[k] || null : prev?.[k] ?? null);
+  // خيارات المنصة تُصفّى بما تقبله هي (`publishOptions.ts`) — وما لا يُرسل يبقى كما هو
+  let options = prev?.options_json ?? null;
+  if ('options' in b) {
+    const n = normalizeOptions(platform, b.options);
+    if (n.error) return c.json({ error: n.error }, 400);
+    options = n.options ? JSON.stringify(n.options) : null;
+  }
   const generated = pick('generated_media_id');
   const from = generated ? pick('generated_from_id') : null;
   await c.env.DB.prepare(
     `INSERT INTO post_variants
-       (id, post_id, platform, body_override, media_asset_id, first_comment, generated_media_id, generated_from_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (id, post_id, platform, body_override, media_asset_id, first_comment, generated_media_id, generated_from_id, options_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(post_id, platform) DO UPDATE SET body_override = excluded.body_override,
        media_asset_id = excluded.media_asset_id, first_comment = excluded.first_comment,
-       generated_media_id = excluded.generated_media_id, generated_from_id = excluded.generated_from_id`,
+       generated_media_id = excluded.generated_media_id, generated_from_id = excluded.generated_from_id,
+       options_json = excluded.options_json`,
   )
-    .bind(newId('var'), id, platform, pick('body_override'), pick('media_asset_id'), pick('first_comment'), generated, generated && from ? from : null)
+    .bind(
+      newId('var'), id, platform, pick('body_override'), pick('media_asset_id'), pick('first_comment'),
+      generated, generated && from ? from : null, options,
+    )
     .run();
   return c.json({ ok: true });
 });
