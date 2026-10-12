@@ -1853,6 +1853,8 @@ export async function ayrshareComments(
 
 /** رسالةٌ خاصة كما يردّها `GET /messages/:platform` — `action` اتجاهها. */
 export type AyrshareMessage = {
+  /** معرّفها على منصتها — به تُطابَق في سجلّ المحادثة. */
+  id: string;
   conversationId: string;
   senderId: string;
   recipientId: string;
@@ -1860,7 +1862,30 @@ export type AyrshareMessage = {
   text: string;
   created: string | null;
   direction: 'in' | 'out';
+  /** مرفقاتها بنوعها ورابطها كما تردّها المنصة (`attachments` في «Get Messages»). */
+  attachments: { type: string; url: string }[];
 };
+
+/**
+ * اسمُ المرفق حين تخلو الرسالة من نصّ — وكانت تُكتب «[image]» بنوعه الإنجليزي.
+ * الأنواع من أمثلة «Get Messages» ومن منصات ميتا: image وvideo وaudio وfile.
+ */
+export function attachmentLabel(type: string): string {
+  switch (String(type || '').toLowerCase()) {
+    case 'image':
+    case 'sticker':
+      return 'صورة مرفقة';
+    case 'video':
+    case 'reel':
+      return 'مقطع مرفق';
+    case 'audio':
+      return 'تسجيل صوتي';
+    case 'file':
+      return 'ملف مرفق';
+    default:
+      return 'مرفق';
+  }
+}
 
 /** رسائل منصةٍ — الأحدث أوّلاً، صفحاتٍ بمؤشّر `next`. */
 export async function ayrshareMessages(
@@ -1877,15 +1902,19 @@ export async function ayrshareMessages(
     const data: any = await ayrshareCall<any>(auth, 'GET', `/messages/${platform}${qs ? `?${qs}` : ''}`, undefined, opts.budget);
     for (const m of Array.isArray(data?.messages) ? data.messages : []) {
       if (!m?.conversationId) continue;
-      const attachment = Array.isArray(m.attachments) && m.attachments.length ? `[${m.attachments[0]?.type || 'مرفق'}]` : '';
+      const attachments = (Array.isArray(m.attachments) ? m.attachments : [])
+        .filter((a: any) => typeof a?.url === 'string' && /^https:\/\//.test(a.url))
+        .map((a: any) => ({ type: String(a.type || ''), url: String(a.url) }));
       out.push({
+        id: String(m.id ?? ''),
         conversationId: String(m.conversationId),
         senderId: String(m.senderId ?? ''),
         recipientId: String(m.recipientId ?? ''),
         senderName: String(m.senderDetails?.name || m.senderDetails?.username || ''),
-        text: String(m.message ?? '').trim() || attachment,
+        text: String(m.message ?? '').trim() || (attachments.length ? attachmentLabel(attachments[0].type) : ''),
         created: isoOrNull(m.created),
         direction: m.action === 'sent' ? 'out' : 'in',
+        attachments,
       });
     }
     const pg = data?.meta?.pagination;

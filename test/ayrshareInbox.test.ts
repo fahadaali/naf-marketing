@@ -18,7 +18,8 @@ vi.mock('../src/services/notify', () => ({
 }));
 
 import { syncComments, replyToComment, moderateComment, deleteReply } from '../src/services/commentsSync';
-import { mapAyrshareComments, encodeAyrshareComment } from '../src/adapters/ayrshare';
+import { mapAyrshareComments, encodeAyrshareComment, attachmentLabel } from '../src/adapters/ayrshare';
+import { mergeDmThread } from '../src/services/inboxThread';
 import { notifyUsers } from '../src/services/notify';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -338,5 +339,79 @@ describe('الردّ عبر Ayrshare', () => {
     await deleteReply(env, 'c1');
     expect(calls.at(-1)!.body).toEqual({ searchPlatformId: true, platform: 'facebook' });
     expect(rows()[0].reply_body).toBeNull();
+  });
+});
+
+/* ═══ سجلّ المحادثة الخاصة ═══
+   الرسائل بمعرّفها ومرفقاتها كما في «Get Messages»: `id` و`attachments: [{type, url}]`. */
+describe('سجلّ المحادثة الخاصة', () => {
+  const page = (messages: unknown[]) => () => ({ body: { status: 'success', messages } });
+  const dmRow = () => db.prepare("SELECT * FROM platform_comments WHERE kind = 'dm'").get();
+  const thread = () => JSON.parse(dmRow().thread_json);
+
+  it('يُحفظ بالاتجاهين بترتيبه، والمرفق باسمه العربي ورابطه', async () => {
+    routes['GET /messages/facebook'] = page([
+      { id: 'm3', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', created: ago(1),
+        attachments: [{ type: 'image', url: 'https://scontent.xx.fbcdn.net/v/1.jpg' }], senderDetails: { name: 'ريم' } },
+      { id: 'm2', conversationId: 'c1', senderId: 'fb_page', recipientId: 'psid_1', action: 'sent', message: 'أرسلي صورة العقد', created: ago(2), senderDetails: { name: 'ناف' } },
+      { id: 'm1', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'عندي سؤال عن عقد', created: ago(3), senderDetails: { name: 'ريم' } },
+    ]);
+    await syncComments(env);
+    expect(dmRow().body).toBe('صورة مرفقة');
+    expect(thread().map((e: any) => [e.id, e.own, e.body])).toEqual([
+      ['m1', false, 'عندي سؤال عن عقد'],
+      ['m2', true, 'أرسلي صورة العقد'],
+      ['m3', false, 'صورة مرفقة'],
+    ]);
+    expect(thread()[2].attachments).toEqual([{ type: 'image', url: 'https://scontent.xx.fbcdn.net/v/1.jpg' }]);
+  });
+
+  it('ما خرج من الصفحة المقروءة باقٍ في السجلّ — والجديد يُضمّ إليه', async () => {
+    routes['GET /messages/facebook'] = page([
+      { id: 'm1', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'السلام عليكم', created: ago(3), senderDetails: { name: 'ريم' } },
+    ]);
+    await syncComments(env);
+    routes['GET /messages/facebook'] = page([
+      { id: 'm5', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'هل من ردّ؟', created: ago(0.5), senderDetails: { name: 'ريم' } },
+    ]);
+    await syncComments(env);
+    expect(thread().map((e: any) => e.id)).toEqual(['m1', 'm5']);
+  });
+
+  it('الردّ من هنا يدخل السجلّ باسم من كتبه، ويبقى له حين تعيده المنصة', async () => {
+    routes['GET /messages/facebook'] = page([
+      { id: 'm1', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'أريد موعداً', created: ago(2), senderDetails: { name: 'ريم' } },
+    ]);
+    await syncComments(env);
+    routes['POST /messages/facebook'] = () => ({ body: { status: 'success', messageId: 'm_out' } });
+    await replyToComment(env, dmRow().id, 'الأحد العاشرة صباحاً', 'u1');
+    expect(thread().at(-1)).toMatchObject({ id: 'm_out', own: true, here: true, author: 'فهد', body: 'الأحد العاشرة صباحاً' });
+
+    // المنصة تعيده بمعرّفه، وصاحبه يكتب بعده
+    routes['GET /messages/facebook'] = page([
+      { id: 'm7', conversationId: 'c1', senderId: 'psid_1', recipientId: 'fb_page', action: 'received', message: 'تمام، شكراً', created: new Date(Date.now() + 60_000).toISOString(), senderDetails: { name: 'ريم' } },
+      { id: 'm_out', conversationId: 'c1', senderId: 'fb_page', recipientId: 'psid_1', action: 'sent', message: 'الأحد العاشرة صباحاً', created: new Date().toISOString(), senderDetails: { name: 'ناف' } },
+    ]);
+    await syncComments(env);
+    const entries = thread();
+    expect(entries.map((e: any) => e.id)).toEqual(['m1', 'm_out', 'm7']);
+    expect(entries[1]).toMatchObject({ own: true, here: true, author: 'فهد' });
+  });
+});
+
+describe('ضمّ سجلّ المحادثة', () => {
+  const e = (id: string, own: boolean, body: string, at: string, extra: Record<string, unknown> = {}) => ({ id, author: own ? 'ناف' : 'ريم', own, body, at, ...extra });
+
+  it('ما أُرسل من هنا وعاد بمعرّفٍ آخر يُعرف بنصّه ووقته — فلا يتكرّر', () => {
+    const stored = [e('m1', false, 'سؤال', '2026-10-12T08:00:00Z'), e('x_here', true, 'الجواب', '2026-10-12T08:05:00Z', { here: true, author: 'فهد' })];
+    const fetched = [e('m9', true, 'الجواب', '2026-10-12T08:06:00Z')];
+    const merged = mergeDmThread(stored, fetched);
+    expect(merged.map((x) => x.id)).toEqual(['m1', 'm9']);
+    expect(merged[1]).toMatchObject({ here: true, author: 'فهد' });
+  });
+
+  it('اسم المرفق بالعربية لكل نوع', () => {
+    expect(['image', 'video', 'audio', 'file', 'share'].map(attachmentLabel))
+      .toEqual(['صورة مرفقة', 'مقطع مرفق', 'تسجيل صوتي', 'ملف مرفق', 'مرفق']);
   });
 });

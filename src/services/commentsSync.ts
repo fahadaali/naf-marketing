@@ -7,7 +7,7 @@ import {
   postSpecificRejection,
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
-import { mergeThread, parseThread, sortThread, threadAnswer, threadDecision, type ThreadEntry } from './inboxThread';
+import { mergeDmThread, mergeThread, parseThread, sortThread, threadAnswer, threadDecision, type ThreadEntry } from './inboxThread';
 import {
   BudgetExhausted, CallBudget, conversationLatest, isNotFound, isOwnAuthor, isUnsupported, listCommentReplies,
   listConversations, listInboxPosts, listMentions, listPostComments, listReviews,
@@ -1607,6 +1607,16 @@ async function linkedInThreads(
   return checked;
 }
 
+/** اسمُ من ردّ من هنا على العنصر — لردٍّ أعادته المنصة قبل أن يُحفظ في سجلّه. */
+async function replierName(env: Env, rowId: string): Promise<string> {
+  const r = await env.DB.prepare(
+    'SELECT u.name FROM platform_comments pc JOIN users u ON u.id = pc.replied_by WHERE pc.id = ?',
+  )
+    .bind(rowId)
+    .first<{ name: string }>();
+  return r?.name || '';
+}
+
 /**
  * محادثات منصةٍ من رسائلها — عنصرٌ لكل محادثة كما في SocialAPI: نصُّه آخرُ ما
  * كتبه العميل، وردُّنا آخرُ ما أرسلناه بعده. وعميلٌ كتب بعد آخر ردٍّ يُعيد
@@ -1619,15 +1629,27 @@ async function writeAyrshareConversations(
   ayr: string,
   messages: AyrshareMessage[],
 ): Promise<number> {
-  type Conv = { lastIn: AyrshareMessage | null; lastOut: AyrshareMessage | null };
+  type Conv = { lastIn: AyrshareMessage | null; lastOut: AyrshareMessage | null; all: AyrshareMessage[] };
   const convs = new Map<string, Conv>();
   // الأحدث أوّلاً — فأوّلُ ما يُرى من كل اتجاهٍ هو الأخير
   for (const m of messages) {
-    const cv = convs.get(m.conversationId) ?? { lastIn: null, lastOut: null };
+    const cv = convs.get(m.conversationId) ?? { lastIn: null, lastOut: null, all: [] };
     if (m.direction === 'in' && !cv.lastIn) cv.lastIn = m;
     if (m.direction === 'out' && !cv.lastOut) cv.lastOut = m;
+    cv.all.push(m);
     convs.set(m.conversationId, cv);
   }
+  /* سجلّ المحادثة: رسائلها في الصفحة المقروءة بالاتجاهين — تحت العنصر كما تُعرض
+     سلسلة التعليق، ويُضمّ إلى ما حُفظ منها (`mergeDmThread`). */
+  const entries = (cv: Conv): ThreadEntry[] =>
+    cv.all.map((m) => ({
+      id: m.id,
+      author: m.senderName || (m.direction === 'in' ? 'مستخدم' : ''),
+      own: m.direction === 'out',
+      body: m.text,
+      at: m.created,
+      ...(m.attachments.length ? { attachments: m.attachments } : {}),
+    }));
 
   const keyOf = (id: string, cv: Conv) => `ayd|${ayr}|${id}|${cv.lastIn?.senderId || cv.lastOut?.recipientId || ''}`;
   const existing = await rowsByIds(env, [...convs].map(([id, cv]) => keyOf(id, cv)));
@@ -1640,7 +1662,11 @@ async function writeAyrshareConversations(
     const key = keyOf(id, cv);
     const row = existing.get(key);
     const lastIn = { text: cv.lastIn.text, at: cv.lastIn.created };
-    items.push({ id: key, platform: internal, kind: 'dm', authorName: cv.lastIn.senderName || 'مستخدم', body: lastIn.text, createdAt: lastIn.at });
+    items.push({
+      id: key, platform: internal, kind: 'dm', authorName: cv.lastIn.senderName || 'مستخدم', body: lastIn.text, createdAt: lastIn.at,
+      // الصفّ الجديد يُكتب بسجلّه؛ والقائم يُضمّ سجلُّه بعد الكتابة — لا بقاعدة سلسلة التعليق
+      ...(row ? {} : { thread: entries(cv) }),
+    });
     const out = cv.lastOut?.created && cv.lastOut.created >= lastIn.at ? cv.lastOut : null;
     if (out) {
       if (!row || row.reply_body === null) replies.push({ key, reply: { text: out.text, at: out.created, id: null } });
@@ -1651,6 +1677,19 @@ async function writeAyrshareConversations(
 
   const written = await writeItems(env, items, existing);
   report.added += written.added;
+
+  const threads: D1PreparedStatement[] = [];
+  for (const [id, cv] of convs) {
+    const row = existing.get(keyOf(id, cv));
+    if (!row) continue;
+    const hereIds = row.reply_source === 'platform' && row.reply_provider_id ? [row.reply_provider_id] : [];
+    const author = hereIds.length ? await replierName(env, row.id) : '';
+    const merged = JSON.stringify(mergeDmThread(parseThread(row.thread_json), entries(cv), hereIds, author));
+    if (merged !== (row.thread_json || '[]')) {
+      threads.push(env.DB.prepare('UPDATE platform_comments SET thread_json = ? WHERE id = ?').bind(merged, row.id));
+    }
+  }
+  await runBatch(env, threads);
 
   if (replies.length || reopen.length) {
     const after = await rowsByIds(env, [...replies.map((x) => x.key), ...reopen.map((x) => x.key)]);
@@ -1741,7 +1780,10 @@ async function threadAfterReply(
   row: { provider_comment_id: string; kind: string; thread_json: string | null },
   change: { add?: { id: string; body: string; userId: string }; replace?: string | null },
 ): Promise<string | null> {
-  if (row.kind !== 'comment' || !row.provider_comment_id.startsWith('ayc|')) return row.thread_json;
+  // سلسلة التعليق وسجلّ المحادثة الخاصة كلاهما من Ayrshare — وما سواهما بلا سلسلة
+  const ayrComment = row.kind === 'comment' && row.provider_comment_id.startsWith('ayc|');
+  const ayrDm = row.kind === 'dm' && row.provider_comment_id.startsWith('ayd|');
+  if (!ayrComment && !ayrDm) return row.thread_json;
   let thread = parseThread(row.thread_json);
   if (change.replace) thread = thread.filter((e) => e.id !== change.replace);
   if (change.add) {

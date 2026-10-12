@@ -21,6 +21,8 @@ export type ThreadEntry = {
   at: string | null;
   /** كُتب من هنا — به يُعرف ردُّنا قبل أن تعيده المنصة، ويُعدَّل ويُحذف. */
   here?: boolean;
+  /** مرفقات الرسالة الخاصة بنوعها ورابطها على منصتها. */
+  attachments?: { type: string; url: string }[];
 };
 
 /** أقصى ما يُحفظ من السلسلة — أحدثُها. منشورٌ بمئات الردود لا يُثقل صفّه. */
@@ -78,6 +80,43 @@ export function mergeThread(stored: ThreadEntry[], fetched: ThreadEntry[], hereI
     if (!e.here || (e.id && seen.has(e.id))) continue;
     const t = e.at ? Date.parse(e.at) : NaN;
     if (Number.isFinite(t) && now - t < HERE_PENDING_MS) merged.push(e);
+  }
+  return sortThread(merged);
+}
+
+/* ═══ سجلّ المحادثة الخاصة ═══
+
+   الرسائل تُقرأ صفحةً واحدة لكل منصة في السحب المعتاد — أحدثُ ما فيها لا كلُّ
+   المحادثة. فما حُفظ ولم يرد في الصفحة باقٍ: خارجها لا محذوفٌ منها، بخلاف سلسلة
+   التعليق التي تُردّ كاملة. وما أُرسل من هنا يُعرف بمعرّفه (`hereIds`) — أو
+   بنصّه إن أعادته المنصة بمعرّفٍ غير الذي ردّه الإرسال. */
+const SAME_MESSAGE_MS = 10 * 60_000;
+
+export function mergeDmThread(
+  stored: ThreadEntry[],
+  fetched: ThreadEntry[],
+  hereIds: string[] = [],
+  hereAuthor = '',
+): ThreadEntry[] {
+  const time = (e: ThreadEntry) => (e.at ? Date.parse(e.at) : NaN);
+  const storedById = new Map(stored.filter((e) => e.id).map((e) => [e.id, e]));
+  const here = new Set([...stored.filter((e) => e.here && e.id).map((e) => e.id), ...hereIds.filter(Boolean)]);
+  const merged = fetched.map((e) => {
+    if (!e.id || !here.has(e.id)) return e;
+    const prev = storedById.get(e.id);
+    return { ...e, own: true, here: true, author: prev?.here && prev.author ? prev.author : hereAuthor || e.author };
+  });
+  const fetchedIds = new Set(fetched.map((e) => e.id).filter(Boolean));
+  for (const e of stored) {
+    if (e.id && fetchedIds.has(e.id)) continue;
+    if (e.here) {
+      const twin = merged.findIndex((f) => f.own && !f.here && f.body === e.body && Math.abs(time(f) - time(e)) < SAME_MESSAGE_MS);
+      if (twin >= 0) {
+        merged[twin] = { ...merged[twin], here: true, author: e.author };
+        continue;
+      }
+    }
+    merged.push(e);
   }
   return sortThread(merged);
 }

@@ -16,7 +16,24 @@ function parseCaps(v: any): Caps {
 }
 
 /** ردٌّ في سلسلة التعليق كما يحفظه الخادم (`services/inboxThread.ts`). */
-type ThreadEntry = { id: string; author: string; own: boolean; body: string; at: string | null; here?: boolean };
+type ThreadEntry = {
+  id: string; author: string; own: boolean; body: string; at: string | null; here?: boolean;
+  attachments?: { type: string; url: string }[];
+};
+
+/** اسمُ المرفق كما يُعرض — نظيرُ `attachmentLabel` في `src/adapters/ayrshare.ts`. */
+function attachmentLabel(type: string): string {
+  switch ((type || '').toLowerCase()) {
+    case 'image': case 'sticker': return 'صورة مرفقة';
+    case 'video': case 'reel': return 'مقطع مرفق';
+    case 'audio': return 'تسجيل صوتي';
+    case 'file': return 'ملف مرفق';
+    default: return 'مرفق';
+  }
+}
+
+/** ما يظهر من سجلّ المحادثة الخاصة قبل «عرض الرسائل السابقة». */
+const DM_VISIBLE = 4;
 function parseThread(v: any): ThreadEntry[] {
   if (!v) return [];
   try {
@@ -90,6 +107,8 @@ export default function Comments() {
   /* نافذة تأكيدٍ من المنصة لا مربّع المتصفح — العلّة في `ConfirmModal`.
      والحذفان مختلفان: حذفُ تعليقِ قارئٍ من المنصة، وحذفُ ردّنا نحن. */
   const [confirming, setConfirming] = useState<{ kind: 'comment' | 'reply'; id: string } | null>(null);
+  // المحادثات الخاصة التي فُتح سجلّها كاملاً
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   function load() {
     const q = new URLSearchParams();
@@ -272,7 +291,8 @@ export default function Comments() {
                 <div className="spacer" />
                 <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{formatRiyadh(c.created_at)}</span>
               </div>
-              <p style={{ margin: '0 0 12px' }}>{c.body}</p>
+              {/* المحادثة الخاصة يُعرض سجلّها وفيه آخرُ ما كتبه العميل — فلا يتكرّر في سطرٍ فوقه */}
+              {!(c.kind === 'dm' && thread.some((e) => !e.own)) && <p style={{ margin: '0 0 var(--space-3)' }}>{c.body}</p>}
 
               {isComment && (caps.can_hide || caps.can_delete || caps.can_like) && (
                 <div className="row" style={{ gap: 6, marginBottom: 10 }}>
@@ -286,7 +306,13 @@ export default function Comments() {
 
               {thread.length > 0 && (
                 <div className="grid" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-                  {thread.map((e, i) => {
+                  {c.kind === 'dm' && thread.length > DM_VISIBLE && !expanded[c.id] && (
+                    <button type="button" className="btn sm ghost" style={{ justifySelf: 'start' }} aria-expanded={false}
+                      onClick={() => setExpanded((d) => ({ ...d, [c.id]: true }))}>
+                      <span>عرض الرسائل السابقة (<bdi>{thread.length - DM_VISIBLE}</bdi>)</span>
+                    </button>
+                  )}
+                  {(c.kind === 'dm' && !expanded[c.id] ? thread.slice(-DM_VISIBLE) : thread).map((e, i) => {
                     const current = e.own && !!e.id && e.id === c.reply_provider_id && canEditReply && !!c.reply_body;
                     return (
                       <div key={e.id || i} className="card" style={{ background: e.own ? 'var(--primary-soft)' : 'var(--muted)', padding: 'var(--space-2) var(--space-3)' }}>
@@ -305,7 +331,24 @@ export default function Comments() {
                             </>
                           )}
                         </div>
-                        {e.body}
+                        {(() => {
+                          /* مرفقات الرسالة روابطُ إلى منصتها تُفتح في نافذةٍ جديدة. والرسالة بلا نصٍّ
+                             نصُّها اسمُ مرفقها (`attachmentLabel`) — فيُعرض الرابط وحده لا الاسم مرّتين. */
+                          const atts = (e.attachments || []).filter((a) => a.url);
+                          const onlyAttachment = atts.length > 0 && e.body === attachmentLabel(atts[0].type);
+                          return (
+                            <>
+                              {!onlyAttachment && e.body}
+                              {atts.map((a, j) => (
+                                <div key={j}>
+                                  <a href={a.url} target="_blank" rel="noreferrer" className="row" style={{ display: 'inline-flex', gap: 4 }}>
+                                    {attachmentLabel(a.type)} <ExternalLink size={16} aria-hidden="true" />
+                                  </a>
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </div>
                     );
                   })}
