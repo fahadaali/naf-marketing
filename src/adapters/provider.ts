@@ -33,6 +33,24 @@ export interface PublishInput {
   scheduleAt?: string; // ISO 8601, UTC
   /** غلاف المقطع — مكيّفاً إلى أبعاده — للمنصات التي تقبله. */
   cover?: PublishMedia;
+  /**
+   * مفتاحُ محاولة النشر لدى المزوّد — طلبٌ ثانٍ بالمفتاح نفسه يُرفض ولا يُنشر.
+   * يبقى للموعد ما دامت نتيجة محاولته لا تُعرف (`PublishUncertain`)، ويُجدَّد
+   * بعد كل نتيجةٍ معروفة. ومن لا يقبله من المزوّدين يتجاهله.
+   */
+  idempotencyKey?: string;
+}
+
+/**
+ * نشرٌ لا تُعرف نتيجته: انقطع الاتصال أو انتهت المهلة قبل ردّ المزوّد، فقد
+ * يكون المنشور وصله. فيبقى للموعد مفتاحُ محاولته — وإعادةُ النشر بالمفتاح
+ * نفسه يرفضها المزوّد إن كان المنشور وصله، فلا يُنشر مرّتين.
+ */
+export class PublishUncertain extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublishUncertain';
+  }
 }
 
 /**

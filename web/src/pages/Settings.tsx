@@ -1,5 +1,6 @@
 import { isolate } from '../lib/format';
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { ConnectionBadge } from '../components/StateBadge';
 import { api, ROLE_LABELS, formatRiyadh } from '../api';
@@ -22,7 +23,15 @@ export default function Settings() {
     can('settings.manage') && { id: 'notifications', label: 'الإشعارات' },
   ].filter(Boolean) as { id: string; label: string }[];
 
-  const [tab, setTab] = useState(tabs[0]?.id || 'users');
+  /* `?tab=` يفتح تبويباً بعينه — إشعارُ انفصال حسابٍ في Ayrshare يفتح بطاقة
+     المزوّد. وتبويبٌ لا يملكه القارئ يُفتح بدله أوّلُ ما يملك. */
+  const [sp] = useSearchParams();
+  const asked = sp.get('tab');
+  const [tab, setTab] = useState(tabs.find((t) => t.id === asked)?.id || tabs[0]?.id || 'users');
+  // والإشعار يُفتح والشاشة مفتوحة: يتغيّر الرابط ولا تُنشأ الشاشة من جديد
+  useEffect(() => {
+    if (asked && tabs.some((t) => t.id === asked)) setTab(asked);
+  }, [asked]);
 
   return (
     <div>

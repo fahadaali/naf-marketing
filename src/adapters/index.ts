@@ -5,6 +5,7 @@ import { AyrshareProvider, type AyrshareAuth } from './ayrshare';
 import { BufferProvider } from './buffer';
 import { SocialApiProvider } from './socialapi';
 import { customPlatformLabels } from '../platformLabels';
+import { suspensionNotice } from '../services/ayrshareAlerts';
 
 // يحل مفتاح المزوّد: يُفضّل السرّ الخاص بالمزوّد، ثم يتراجع إلى PROVIDER_API_KEY العام.
 // هكذا يمكن تخزين مفتاح Buffer وSocialAPI معاً على Cloudflare بأسماء مختلفة والتبديل بينهما.
@@ -55,7 +56,9 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
   switch (name) {
     case 'ayrshare':
       if (!key) throw new Error('مفتاح Ayrshare غير مضبوط (AYRSHARE_API_KEY أو PROVIDER_API_KEY)');
-      return new AyrshareProvider(key, ayrshareAuth(env)?.x, await customPlatformLabels(env), env.IMAGES);
+      return new AyrshareProvider(
+        key, ayrshareAuth(env)?.x, await customPlatformLabels(env), env.IMAGES, await suspensionNotice(env),
+      );
     case 'buffer': {
       if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
       const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();

@@ -1,7 +1,7 @@
 import type { Env } from '../types';
-import type { PublishInput, PublishMedia, PublishingProvider } from '../adapters/provider';
+import { PublishUncertain, type PublishInput, type PublishMedia, type PublishingProvider } from '../adapters/provider';
 import { getProvider } from '../adapters';
-import { nowIso, htmlToText, extractMediaIds } from '../util';
+import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
 import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
 
@@ -9,6 +9,7 @@ import { adaptImage, frameImage, imageDims, videoIssues } from './mediaSpecs';
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
 // 2) بعد النشر يخزّن provider_post_id ويضع الحالة 'published'.
 // إعادة المحاولة لا تنشر نفس المنشور مرتين لأن الالتقاط يعتمد على انتقال pending -> processing.
+// 3) ومحاولةٌ لا تُعرف نتيجتها تُعاد بمفتاحها نفسه (`publish_key`)، فيرفضها المزوّد إن كانت الأولى وصلته.
 
 type Job = { id: string; post_id: string; platform: string; body: string; title: string };
 
@@ -127,9 +128,18 @@ function extraIds(ids?: string[]): string | null {
   return ids?.length ? JSON.stringify(ids) : null;
 }
 
-async function failJob(env: Env, job: Job, errMsg: string): Promise<void> {
-  await env.DB.prepare("UPDATE schedules SET status = 'failed', error = ?, published_at = NULL WHERE id = ?")
-    .bind(errMsg, job.id)
+/**
+ * يكتب الفشل على الموعد ويُشعر به. ومفتاحُ المحاولة يُمحى — الرفض نتيجةٌ
+ * معروفة، والإعادة محاولةٌ جديدة — إلا ما لا تُعرف نتيجته (`keepKey`): يبقى
+ * مفتاحه فتُرفض إعادته لدى المزوّد إن كان المنشور وصله.
+ */
+async function failJob(env: Env, job: Job, errMsg: string, opts: { keepKey?: boolean } = {}): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE schedules SET status = 'failed', error = ?, published_at = NULL,
+            publish_key = CASE WHEN ? = 1 THEN publish_key ELSE NULL END
+     WHERE id = ?`,
+  )
+    .bind(errMsg, opts.keepKey ? 1 : 0, job.id)
     .run();
   try { await notifyPublishFailed(env, job.post_id, job.platform, errMsg); } catch { /* لا تعطّل النشر */ }
 }
@@ -158,18 +168,26 @@ async function publishJobs(
   for (const job of jobs) {
     /* قفل ذرّي: لا ينجح إلا لأول عامل يلتقط الوظيفة. ووقتُ الالتقاط في
        `published_at` ما دام الجدول «قيد النشر» — به يُعرف جدولٌ انقطع عامله
-       قبل أن يكتب النتيجة (`reconcilePublishing`). */
+       قبل أن يكتب النتيجة (`reconcilePublishing`).
+
+       ومفتاحُ المحاولة يُولد هنا إن لم يبقَ للموعد مفتاحٌ من محاولةٍ لا تُعرف
+       نتيجتها — فإن بقي أُرسل هو نفسه (`publish_key` في 0040). */
     const lock = await env.DB.prepare(
-      "UPDATE schedules SET status = 'processing', published_at = ?, error = NULL WHERE id = ? AND status IN ('pending','failed')",
+      `UPDATE schedules SET status = 'processing', published_at = ?, error = NULL,
+              publish_key = COALESCE(publish_key, ?)
+       WHERE id = ? AND status IN ('pending','failed')`,
     )
-      .bind(nowIso(), job.id)
+      .bind(nowIso(), newId('pub'), job.id)
       .run();
     if (lock.meta.changes === 0) continue; // التقطها عامل آخر أو نُشرت مسبقاً
 
     try {
       if (!provider) throw new Error(providerError);
 
-      const input = await prepareInput(env, job, { adapt: true });
+      const key = await env.DB.prepare('SELECT publish_key FROM schedules WHERE id = ?')
+        .bind(job.id)
+        .first<{ publish_key: string | null }>();
+      const input = { ...(await prepareInput(env, job, { adapt: true })), idempotencyKey: key?.publish_key || undefined };
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
       const issues = mediaIssues(job.platform, input.media || []);
@@ -188,13 +206,15 @@ async function publishJobs(
       }
       // `note`: نشرةٌ من نشرات الموعد لم تُنشر وغيرها نُشر (سناب) — يُكتب تحته
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?, extra_provider_ids = ? WHERE id = ?",
+        `UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?,
+                extra_provider_ids = ?, publish_key = NULL
+         WHERE id = ?`,
       )
         .bind(result.providerPostId, nowIso(), result.note || null, extraIds(result.extraIds), job.id)
         .run();
       published++;
     } catch (err: any) {
-      await failJob(env, job, String(err?.message || err));
+      await failJob(env, job, String(err?.message || err), { keepKey: err instanceof PublishUncertain });
       failed++;
     }
   }
@@ -343,6 +363,7 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
     .bind(interruptedBefore)
     .all<{ id: string; post_id: string; platform: string }>();
   for (const row of stuck.results || []) {
+    // ومفتاح محاولته يبقى: إن كان المنشور وصل المزوّد رُفضت إعادته ولم يتكرّر
     const r = await env.DB.prepare(
       "UPDATE schedules SET status = 'failed', error = ?, published_at = NULL WHERE id = ? AND status = 'processing'",
     )
@@ -390,14 +411,17 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
         const msg = check.state === 'failed'
           ? `فشل النشر عبر المزوّد: ${check.error || 'رفضت المنصة المنشور'}`
           : UNCONFIRMED_ERROR;
-        await failJob(env, { id: row.id, post_id: row.post_id, platform: row.platform, body: '', title: '' }, msg);
+        // ما لم يُؤكَّد قد يُنشر بعد: يبقى مفتاحه فلا تُكرّره إعادة النشر
+        await failJob(env, { id: row.id, post_id: row.post_id, platform: row.platform, body: '', title: '' }, msg, {
+          keepKey: check.state === 'pending',
+        });
         failed++;
         continue;
       }
       // نُشر — أو لا يُعلن المزوّد حالاً يُقرأ فيُعدّ منشوراً كما كان. ووقتُ
       // النشر وقتُ الإرسال المحفوظ لا وقتُ هذا السؤال.
       await env.DB.prepare(
-        "UPDATE schedules SET status = 'published', error = NULL WHERE id = ? AND status = 'processing'",
+        "UPDATE schedules SET status = 'published', error = NULL, publish_key = NULL WHERE id = ? AND status = 'processing'",
       )
         .bind(row.id)
         .run();

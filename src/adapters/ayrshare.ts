@@ -1,6 +1,7 @@
-import type {
-  PublishingProvider, PublishInput, PublishResult, PublishCheck, PublishMedia, AnalyticsResult, ModerateAction,
-  PublishStatusContext,
+import {
+  PublishUncertain,
+  type PublishingProvider, type PublishInput, type PublishResult, type PublishCheck, type PublishMedia,
+  type AnalyticsResult, type ModerateAction, type PublishStatusContext,
 } from './provider';
 import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
 import { platformNames } from '../platformLabels';
@@ -141,6 +142,39 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   }
   if (status === 'success' || status === 'scheduled') return { state: 'published' };
   return null;
+}
+
+/* ═══ نشرٌ لا تُعرف نتيجته، ومفتاحٌ رُفض لأنه أُرسل ═══
+
+   انقطاعُ الاتصال قبل الردّ، أو بوّابةٌ ترد ٥٠٢–٥٠٤ بلا رمز خطأ من Ayrshare:
+   قد يكون المنشور وصله ونُشر. فيُرمى `PublishUncertain` ويبقى للموعد مفتاحُ
+   محاولته (`idempotencyKey`)، فإن أُعيد النشر رفضه Ayrshare بدل أن يكرّره.
+
+   ورفضُ المفتاح المكرّر لا رمز له في التوثيق — «an error will be returned,
+   indicating that a duplicate key was found» — فيُعرف من نصّه. */
+const GATEWAY_STATUS = new Set([502, 503, 504]);
+
+export const UNCERTAIN_ERROR =
+  'انقطع الاتصال بـ Ayrshare قبل أن يردّ، فقد يكون المنشور وصله. أعد النشر حين تشاء: إن كان وصله فلن يتكرّر';
+export const DUPLICATE_KEY_ERROR =
+  'وصل هذا المنشور إلى Ayrshare في محاولةٍ سابقة، فلم يُرسل ثانيةً. تحقّق منه على المنصة، وإن لم تجده فأعد النشر';
+
+/** نتيجةٌ لا تُعرف من خطأ النداء: لا ردّ أصلاً، أو بوّابةٌ بلا رمزٍ من Ayrshare. */
+export function uncertainOutcome(err: unknown): boolean {
+  if (!(err instanceof AyrshareError)) return true;
+  return GATEWAY_STATUS.has(err.status) && !errorCodes(err.body).length;
+}
+
+/** رفضُ Ayrshare مفتاحاً أُرسل من قبل — من نصّ الخطأ إذ لا رمز له. */
+export function duplicateKeyRejection(data: any): boolean {
+  const list: any[] = Array.isArray(data?.errors) ? data.errors : [];
+  return [data?.message, ...list.map((e) => e?.message)].some((m) => /idempoten/i.test(String(m || '')));
+}
+
+/** أخطاءٌ كلها يقول Ayrshare إنها تُعاد (`retryAvailable`) — تعثّرٌ مؤقت لدى المنصة. */
+export function retryableFailure(data: any): boolean {
+  const list: any[] = Array.isArray(unwrapAyrsharePost(data)?.errors) ? unwrapAyrsharePost(data).errors : [];
+  return list.length > 0 && list.every((e) => e?.retryAvailable === true);
 }
 
 /* ═══ حدُّ حجم الصورة لكل منصة ═══
@@ -436,12 +470,15 @@ export class AyrshareProvider implements PublishingProvider {
   private key: string;
 
   // `labels` الأسماء المخصّصة من الإعدادات — لرسائل الخطأ وحدها. و`images` ربط
-  // Cloudflare Images لضغط الصورة الكبيرة؛ وبدونه تُرفض كما كانت.
+  // Cloudflare Images لضغط الصورة الكبيرة؛ وبدونه تُرفض كما كانت. و`suspended`
+  // نصُّ تعطيل حساب النشر إن كان قائماً (`services/ayrshareAlerts.ts`): به يُقال
+  // رفضُ ٤٠٣ — وإلا قيل «رفض المفتاح» والمفتاح سليم.
   constructor(
     apiKey: string,
     private x: AyrshareXKeys = {},
     private labels: Record<string, string> = {},
     private images?: ImagesBinding,
+    private suspended = '',
   ) {
     this.key = (apiKey || '').trim();
   }
@@ -549,31 +586,41 @@ export class AyrshareProvider implements PublishingProvider {
     if (thumb && platforms.includes('twitter')) body.twitterOptions = { thumbNail: thumb };
     if (input.scheduleAt) body.scheduleDate = input.scheduleAt;
 
-    if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video);
-    return this.send(body);
+    if (platforms.length === 1 && platforms[0] === 'snapchat') return this.publishSnapchat(body, !!video, input.idempotencyKey);
+    return this.send(input.idempotencyKey ? { ...body, idempotencyKey: input.idempotencyKey } : body);
   }
 
   /* ═══ سناب: أكثر من نشرةٍ للموعد الواحد ═══
 
      القصة تختفي بعد يوم، فيُنشر المقطع سبوتلايت وقصةً محفوظة وقصة، والصورة
      قصةً محفوظة وقصة — كلٌّ في طلبٍ مستقل (`snapChatOptions`)، بالوسيط
-     المرفوع نفسه. والموعد منشورٌ إن نجح أحدها، وما فشل يُكتب تحته بنوعه. */
-  private async publishSnapchat(base: Record<string, unknown>, video: boolean): Promise<PublishResult> {
-    const kinds: { label: string; options?: Record<string, boolean> }[] = [
-      ...(video ? [{ label: 'سبوتلايت', options: { spotlight: true } }] : []),
-      { label: 'القصة المحفوظة', options: { savedStory: true } },
-      { label: 'القصة' },
+     المرفوع نفسه. والموعد منشورٌ إن نجح أحدها، وما فشل يُكتب تحته بنوعه.
+
+     ولكلّ نشرةٍ مفتاحُها من مفتاح الموعد: ثلاثة طلباتٍ بمفتاحٍ واحد يرفض
+     Ayrshare ثانيها وثالثها. وإن لم تُعرف نتيجةُ إحداها لم تُعرف نتيجة الموعد. */
+  private async publishSnapchat(base: Record<string, unknown>, video: boolean, key?: string): Promise<PublishResult> {
+    const kinds: { label: string; key: string; options?: Record<string, boolean> }[] = [
+      ...(video ? [{ label: 'سبوتلايت', key: 'spotlight', options: { spotlight: true } }] : []),
+      { label: 'القصة المحفوظة', key: 'saved', options: { savedStory: true } },
+      { label: 'القصة', key: 'story' },
     ];
     const done: PublishResult[] = [];
     const failed: string[] = [];
+    let uncertain = false;
     for (const k of kinds) {
+      const body = {
+        ...base,
+        ...(k.options ? { snapChatOptions: k.options } : {}),
+        ...(key ? { idempotencyKey: `${key}-${k.key}` } : {}),
+      };
       try {
-        done.push(await this.send(k.options ? { ...base, snapChatOptions: k.options } : base));
+        done.push(await this.send(body));
       } catch (err) {
+        if (err instanceof PublishUncertain) uncertain = true;
         failed.push(`${k.label}: ${String((err as Error)?.message || err)}`);
       }
     }
-    if (!done.length) throw new Error(failed.join(' · '));
+    if (!done.length) throw uncertain ? new PublishUncertain(failed.join(' · ')) : new Error(failed.join(' · '));
     const [first, ...rest] = done;
     return {
       ...first,
@@ -591,22 +638,30 @@ export class AyrshareProvider implements PublishingProvider {
   }
 
   /* الرفض يأتي ٤٠٠ ومعه `errors` بسبب كل منصة — فيُقرأ السبب منها لا من
-     رمز الحالة. */
+     رمز الحالة. وما يقول Ayrshare إنه يُعاد (`retryAvailable`) تعثّرٌ مؤقت
+     لدى المنصة: يُقال ذلك مع سببه، فيُعاد بعد دقائق لا يُبحث في المحتوى. */
   private async send(body: Record<string, unknown>): Promise<PublishResult> {
+    const failure = (raw: any, reason: string) =>
+      `فشل النشر عبر Ayrshare: ${reason}${retryableFailure(raw) ? '. تعثّرٌ مؤقت لدى المنصة — أعد النشر بعد دقائق' : ''}`;
     let data: any;
     try {
       data = await this.call('POST', '/post', body);
     } catch (err) {
+      if (uncertainOutcome(err)) throw new PublishUncertain(UNCERTAIN_ERROR);
+      const e = err as AyrshareError;
+      if (duplicateKeyRejection(e.body)) throw new Error(DUPLICATE_KEY_ERROR);
+      // التعطيل يردّ ٤٠٣ — وبلا نصّه يُقرأ رفضاً للمفتاح
+      if (e.status === 403 && this.suspended) throw new Error(this.suspended);
       // 419 سببُه مفهومٌ مسبقاً بنصٍّ يقول ما يُضبط — لا يُستبدل برسالة الواجهة
-      const known = err instanceof AyrshareError && errorCodes(err.body).includes(419);
-      const outcome = err instanceof AyrshareError && !known ? ayrshareOutcome(err.body) : null;
-      if (outcome?.state === 'failed' && outcome.error) throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error}`);
+      const outcome = errorCodes(e.body).includes(419) ? null : ayrshareOutcome(e.body);
+      if (outcome?.state === 'failed' && outcome.error) throw new Error(failure(e.body, outcome.error));
       throw err;
     }
     const post = unwrapAyrsharePost(data);
     const outcome = ayrshareOutcome(data);
     if (outcome?.state === 'failed') {
-      throw new Error(`فشل النشر عبر Ayrshare: ${outcome.error || 'رفضت المنصة المنشور'}`);
+      if (duplicateKeyRejection(post)) throw new Error(DUPLICATE_KEY_ERROR);
+      throw new Error(failure(data, outcome.error || 'رفضت المنصة المنشور'));
     }
     const id = String(post?.id || '');
     // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
@@ -1683,8 +1738,9 @@ export async function ayrshareReviews(auth: AyrshareAuth, platform: string, budg
    Secret»، فردّ الحساب «This endpoint does not exist» وتوقّف التسجيل كلّه. والسرّ
    حقلٌ في طلب التسجيل نفسه كما في صفحة «Register Webhook» — فيُرسل معه. */
 
-/** الأحداث التي تُسجَّل: التعليقات والرسائل للصندوق، والمجدول لحال تيك توك. */
-export const AYRSHARE_WEBHOOK_ACTIONS = ['comments', 'messages', 'scheduled'] as const;
+/** الأحداث التي تُسجَّل: التعليقات والرسائل للصندوق، والمجدول لحال تيك توك،
+    وإلغاءُ ربط الحسابات وتعطيلُ حساب النشر لتنبيه الفريق (`services/ayrshareAlerts.ts`). */
+export const AYRSHARE_WEBHOOK_ACTIONS = ['comments', 'messages', 'scheduled', 'social', 'suspended'] as const;
 
 export async function registerAyrshareWebhook(auth: AyrshareAuth, action: string, url: string, secret: string): Promise<void> {
   await ayrshareCall(auth, 'POST', '/hook/webhook', { action, url, secret });

@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth,
+  AyrshareError, ayrshareCall, ayrshareUser, isOwnAyrshareComment, ownerKey, youtubeChannelVideos, listAyrshareWebhooks,
+  type AyrshareAuth,
 } from '../adapters/ayrshare';
 import { ayrshareAuth, providerKey } from '../adapters';
+import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
 import { localSyncHealth } from './socialapi';
 
 export const ayrshareRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -25,12 +27,19 @@ ayrshareRoutes.get('/health', requirePermission('settings.manage'), async (c) =>
   const out: Record<string, unknown> = { configured: true };
   const mapping: Record<string, string> = {};
 
+  /* حسابُ النشر المعطّل يردّ كل طلبٍ ٤٠٣ — فيُقال التعطيل وسببه بدل «رفض
+     المفتاح» الذي يُبحث بعده في سرٍّ سليم. وطلبٌ نجح يعني أن الحساب فُعّل:
+     فإن فات حدثُ التفعيل لم يبقَ التعطيل المحفوظ قائماً بلا نهاية. */
+  const suspended = await suspensionNotice(c.env);
   try {
     const { accounts, messagingEnabled } = await ayrshareUser(auth);
     out.accounts = accounts.map((a) => ({ id: a.id, platform: a.platform, name: a.name }));
     out.messaging_enabled = messagingEnabled;
     for (const a of accounts) mapping[a.platform] = a.id;
-  } catch (e: any) { out.accounts_error = String(e?.message || e); }
+    if (suspended) await clearSuspension(c.env);
+  } catch (e: any) {
+    out.accounts_error = suspended && e instanceof AyrshareError && e.status === 403 ? suspended : String(e?.message || e);
+  }
 
   try {
     out.webhooks = (await listAyrshareWebhooks(auth)).map((h) => ({ id: h.event, url: h.url, is_active: true }));

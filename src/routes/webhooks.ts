@@ -8,6 +8,7 @@ import {
 } from '../adapters/ayrshare';
 import { queuePendingPost, syncComments, type PendingPost } from '../services/commentsSync';
 import { reconcilePublishing } from '../services/publish';
+import { onSocialEvent, onSuspendedEvent } from '../services/ayrshareAlerts';
 
 export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -146,8 +147,9 @@ webhookRoutes.delete('/socialapi/manage/:id', async (c) => {
 /* ═══ Ayrshare ═══
 
    الحدث يُشغّل دورة الصندوق، و«المجدول» دورة التسوية التي تحسم منشور تيك
-   توك المنتظر. ويُردّ ٢٠٠ فوراً — Ayrshare يعيد ما لم يُجب في خمس عشرة ثانية،
-   والقفل يجمع المكرّر في دورةٍ واحدة.
+   توك المنتظر، وإلغاءُ ربط حسابٍ أو تعطيلُ حساب النشر تنبيهَ الفريق
+   (`services/ayrshareAlerts.ts`). ويُردّ ٢٠٠ فوراً — Ayrshare يعيد ما لم
+   يُجب في خمس عشرة ثانية، والقفل يجمع المكرّر في دورةٍ واحدة.
 
    وحدثُ التعليق يحمل المنشور الذي وصل عليه بمعرّفه على منصته — `media.id` في
    إنستغرام و`post_id` في فيسبوك (Comments Action في توثيقه)؛ و`postId` فيه
@@ -197,6 +199,10 @@ webhookRoutes.post('/ayrshare', async (c) => {
     );
   } else if (action === 'scheduled') {
     c.executionCtx.waitUntil(reconcilePublishing(c.env).then(() => {}).catch(() => {}));
+  } else if (action === 'social') {
+    c.executionCtx.waitUntil(onSocialEvent(c.env, evt).catch(() => {}));
+  } else if (action === 'suspended') {
+    c.executionCtx.waitUntil(onSuspendedEvent(c.env, evt).catch(() => {}));
   }
   return c.text('ok', 200);
 });
