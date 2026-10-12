@@ -1707,7 +1707,7 @@ async function syncPerPost(env: Env, report: InboxSyncReport): Promise<void> {
 
   const { results } = await env.DB.prepare(
     `SELECT DISTINCT s.post_id, s.platform, s.provider_post_id, s.id AS schedule_id
-     FROM schedules s WHERE s.status = 'published' AND s.provider_post_id IS NOT NULL`,
+     FROM schedules s WHERE s.status = 'published' AND s.provider_post_id IS NOT NULL AND s.deleted_at IS NULL`,
   ).all<{ post_id: string; platform: string; provider_post_id: string; schedule_id: string }>();
 
   for (const row of results) {

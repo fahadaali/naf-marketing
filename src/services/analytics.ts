@@ -262,7 +262,7 @@ async function pullViaSchedules(env: Env): Promise<number> {
   const { results } = await env.DB.prepare(
     `SELECT DISTINCT s.post_id, s.platform, s.provider_post_id, s.published_at, p.title
      FROM schedules s JOIN content_posts p ON p.id = s.post_id
-     WHERE s.status = 'published' AND s.provider_post_id IS NOT NULL`,
+     WHERE s.status = 'published' AND s.provider_post_id IS NOT NULL AND s.deleted_at IS NULL`,
   ).all<{ post_id: string; platform: string; provider_post_id: string; published_at: string | null; title: string }>();
 
   let captured = 0;

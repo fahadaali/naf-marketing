@@ -144,6 +144,9 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
   return null;
 }
 
+/** منصاتٌ لا تحذف المنشور المنشور عبر الواجهة — يُحذف من تطبيقها («Delete Post»). */
+export const MANUAL_DELETE = new Set(['instagram', 'tiktok']);
+
 /* ═══ نشرٌ لا تُعرف نتيجته، ومفتاحٌ رُفض لأنه أُرسل ═══
 
    انقطاعُ الاتصال قبل الردّ، أو بوّابةٌ ترد ٥٠٢–٥٠٤ بلا رمز خطأ من Ayrshare:
@@ -709,6 +712,37 @@ export class AyrshareProvider implements PublishingProvider {
   async deletePost(providerPostId: string): Promise<void> {
     // إنستغرام وتيك توك لا يحذفان المنشور عبر الواجهة — والحذف غير حرِج
     try { await this.call('DELETE', '/post', { id: providerPostId }); } catch { /* لا يُعطّل */ }
+  }
+
+  /* ═══ حذفُ المنشور من منصته ═══
+
+     `DELETE /post` بمعرّف Ayrshare يحذفه من المنصة نفسها («Delete Post» في
+     توثيقه) — إلا إنستغرام وتيك توك: لا يتيحان الحذف عبر الواجهة، فيُحذف من
+     تطبيقهما ثم يُرسل `markManualDeleted` فيتحقّق Ayrshare أنه زال (382 إن
+     بقي) ويكفّ عن تتبّعه. و383 «حُذف من قبل» نجاحٌ: الحذف يُعاد بلا ضرر،
+     فنشرةٌ من نشرات سناب حُذفت قبل أن يتعثّر غيرها لا تُعيق الإعادة. */
+  async deleteFromPlatform(providerPostId: string, opts: { platform: string; extraIds?: string[] }): Promise<void> {
+    const ayr = ayrsharePlatform(opts.platform);
+    const name = platformNames([opts.platform], this.labels);
+    const manual = MANUAL_DELETE.has(ayr);
+    const failed: string[] = [];
+    for (const id of [providerPostId, ...(opts.extraIds || [])].filter(Boolean)) {
+      try {
+        const data = await this.call<any>('DELETE', '/post', manual ? { id, markManualDeleted: true } : { id });
+        const block = data?.[ayr];
+        if (String(block?.status || data?.status || '').toLowerCase() === 'error') {
+          failed.push(String(block?.message || ayrshareErrors(data) || 'رفضت المنصة الحذف'));
+        }
+      } catch (err) {
+        const codes = err instanceof AyrshareError ? errorCodes(err.body) : [];
+        if (codes.includes(383)) continue;
+        if (err instanceof AyrshareError && err.status === 403 && this.suspended) throw new Error(this.suspended);
+        if (codes.includes(382)) throw new Error(`المنشور ما زال على ${name}. احذفه من تطبيقها أولاً ثم أعد الحذف هنا`);
+        if (codes.includes(114)) throw new Error(`لا يعرف Ayrshare هذا المنشور. احذفه من تطبيق ${name}`);
+        failed.push(String((err as Error)?.message || err));
+      }
+    }
+    if (failed.length) throw new Error(`تعذّر حذف المنشور من ${name}: ${failed.join(' · ')}`);
   }
 
   /* ═══ الردّ والإشراف ═══

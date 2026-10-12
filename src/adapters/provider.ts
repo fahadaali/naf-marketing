@@ -110,7 +110,15 @@ export interface CommentItem {
 export interface PublishingProvider {
   publish(input: PublishInput): Promise<PublishResult>;
   getAnalytics(providerPostId: string): Promise<AnalyticsResult>;
+  /** تنظيفٌ لا يُعطّل: يبتلع خطأه. وللحذف الذي يراه الفريق `deleteFromPlatform`. */
   deletePost(providerPostId: string): Promise<void>;
+  /**
+   * يحذف منشوراً نُشر من منصته نفسها — ويرمي بسببٍ يُقرأ إن تعذّر. اختيارية:
+   * من لا يُعلنها يُقال عنه إن مزوّد النشر لا يحذف. و`extraIds` منشوراتٌ أخرى
+   * للموعد نفسه (سناب). والمنصة التي لا تحذف عبر الواجهة (إنستغرام وتيك توك)
+   * يُحذف منشورها من تطبيقها، ثم يُسجَّل هنا محذوفاً بعد أن يتحقّق المزوّد.
+   */
+  deleteFromPlatform?(providerPostId: string, opts: { platform: string; extraIds?: string[] }): Promise<void>;
   /**
    * حالُ منشورٍ قبله المزوّد ولم يؤكّد نشره — اختيارية. `null` = المزوّد لا
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
