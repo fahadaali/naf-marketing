@@ -432,6 +432,21 @@ export async function ayrshareCall<T = any>(
       res.status, data,
     );
   }
+  /* الرسائل الخاصة: ٣٦١ يأتي ٤٠٣ — الإضافة غير مفعّلة في الحساب — فيُقرأ رفضاً
+     للمفتاح وهو سليم. و٣٦٢ تفعّلت ولم يُعَد ربط فيسبوك أو إنستغرام بعدها
+     (Messages API Overview). */
+  if (codes.includes(361)) {
+    throw new AyrshareError(
+      'الرسائل الخاصة غير مفعّلة في حساب Ayrshare. فعّلها من صفحة Account في Ayrshare، ثم أعد ربط فيسبوك وإنستغرام',
+      res.status, data,
+    );
+  }
+  if (codes.includes(362)) {
+    throw new AyrshareError(
+      'أعد ربط فيسبوك وإنستغرام في Ayrshare لتعمل الرسائل الخاصة: Social Accounts ثم أعد الربط',
+      res.status, data,
+    );
+  }
   if (res.status === 401 || res.status === 403) {
     throw new AyrshareError(
       `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
@@ -1858,6 +1873,32 @@ export async function ayrshareComments(
 ): Promise<any> {
   const q = new URLSearchParams({ searchPlatformId: 'true', platform });
   return ayrshareCall<any>(auth, 'GET', `/comments/${encodeURIComponent(postId)}?${q}`, undefined, budget);
+}
+
+/* ═══ الرد التلقائي على الرسائل الخاصة ═══
+
+   «Set/Get Auto Response»: رسالةٌ تُرسل لكل من يراسل الحساب على منصات الرسائل
+   كلّها، ولا تتكرّر للمُراسِل نفسه قبل مدّتها. وبلا ضبطٍ يردّ `status` وحده. */
+export type AutoResponse = { active: boolean; message: string; waitSeconds: number };
+
+export const AUTO_RESPONSE_DEFAULT_WAIT = 86_400;
+
+export async function ayrshareAutoResponse(auth: AyrshareAuth): Promise<AutoResponse> {
+  const d = await ayrshareCall<any>(auth, 'GET', '/messages/autoresponse');
+  const wait = Number(d?.autoResponseWaitSeconds);
+  return {
+    active: d?.autoResponseActive === true,
+    message: typeof d?.autoResponseMessage === 'string' ? d.autoResponseMessage : '',
+    waitSeconds: Number.isFinite(wait) && wait > 0 ? wait : AUTO_RESPONSE_DEFAULT_WAIT,
+  };
+}
+
+export async function setAyrshareAutoResponse(auth: AyrshareAuth, r: AutoResponse): Promise<void> {
+  await ayrshareCall(auth, 'POST', '/messages/autoresponse', {
+    autoResponseActive: r.active,
+    autoResponseMessage: r.message,
+    autoResponseWaitSeconds: r.waitSeconds,
+  });
 }
 
 /** رسالةٌ خاصة كما يردّها `GET /messages/:platform` — `action` اتجاهها. */

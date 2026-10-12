@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  AyrshareError, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, isOwnAyrshareComment, ownerKey,
-  youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth, type PostWeight,
+  AyrshareError, ayrshareAutoResponse, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, isOwnAyrshareComment,
+  ownerKey, setAyrshareAutoResponse, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth, type PostWeight,
 } from '../adapters/ayrshare';
+import { logAudit } from '../services/audit';
 import { ayrshareAuth, providerKey } from '../adapters';
 import { htmlToText } from '../util';
 import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
@@ -123,6 +124,45 @@ ayrshareRoutes.post('/post-length', requirePermission('draft.edit'), async (c) =
     }
   } catch { /* العدّاد زينة: تعذّره يُخفيه ولا يمنع الكتابة */ }
   return c.json({ lengths });
+});
+
+/* ═══ الرد التلقائي على الرسائل الخاصة ═══
+
+   للمدير العام كبقية إعدادات المزوّد: كل محادثةٍ يُرسل فيها الردّ تُحتسب محادثةً
+   نشطة في فاتورة Ayrshare. والنصّ مطلوبٌ حين يُفعَّل — فارغُه يُرسل نصَّ Ayrshare
+   الإنجليزي الافتراضي لعملاء عرب. والمدد المعروضة وحدها تُقبل. */
+const AUTO_WAITS = [3600, 21_600, 86_400, 259_200];
+const AUTO_MESSAGE_MAX = 1000;
+
+ayrshareRoutes.get('/autoresponse', requirePermission('settings.manage'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  try {
+    return c.json(await ayrshareAutoResponse(auth));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+ayrshareRoutes.post('/autoresponse', requirePermission('settings.manage'), async (c) => {
+  const auth = ayrshareAuth(c.env);
+  if (!auth) return c.json({ error: 'لا يوجد مفتاح Ayrshare' }, 400);
+  const b = await c.req.json<{ active?: boolean; message?: string; waitSeconds?: number }>().catch(() => ({}) as any);
+  const message = String(b.message ?? '').trim();
+  const waitSeconds = Number(b.waitSeconds);
+  if (b.active && !message) return c.json({ error: 'اكتب نص الرد التلقائي قبل تفعيله' }, 400);
+  if (message.length > AUTO_MESSAGE_MAX) return c.json({ error: 'نص الرد التلقائي أطول من ألف حرف. اختصره ثم احفظ' }, 400);
+  if (!AUTO_WAITS.includes(waitSeconds)) return c.json({ error: 'اختر مدّةً من القائمة' }, 400);
+  try {
+    await setAyrshareAutoResponse(auth, { active: !!b.active, message, waitSeconds });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+  const user = c.get('user');
+  c.executionCtx.waitUntil(
+    logAudit(c.env, { id: user.id, name: user.name }, 'settings_update', 'settings', undefined, 'الرد التلقائي على الرسائل الخاصة'),
+  );
+  return c.json({ ok: true });
 });
 
 ayrshareRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) => {

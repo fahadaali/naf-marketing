@@ -419,6 +419,7 @@ function Platforms() {
 
       {(provider === 'socialapi' || provider === 'ayrshare') && <IntegrationHealth provider={provider} />}
       {(provider === 'socialapi' || provider === 'ayrshare') && <ProviderWebhook provider={provider} />}
+      {provider === 'ayrshare' && <AutoResponse />}
 
       {msg && <p className="ok">{msg}</p>}
       <button className="btn" onClick={save}>حفظ الإعدادات</button>
@@ -477,6 +478,7 @@ function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
       </div>
       <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
         يسجّل نقطة استقبال لدى {PROVIDER_NAMES[provider]} لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
+        {provider === 'ayrshare' && ' ولتنبيه الفريق إن أُلغي ربط حسابٍ أو عُطّل حساب النشر — والتسجيل من جديد يضيف ما استجدّ من الأحداث.'}
       </p>
       {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
       {hooks.map((h) => (
@@ -485,6 +487,85 @@ function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
           <button className="btn ghost sm" onClick={() => remove(h.id)} disabled={busy}>حذف</button>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ===== الرد التلقائي على الرسائل الخاصة (Ayrshare) =====
+
+   رسالةٌ تُرسل لكل من يراسل حسابات الشركة، ولا تتكرّر له قبل مدّتها. ويُقال
+   أثرها في الفاتورة: كل محادثةٍ يُرسل فيها تُحتسب محادثةً نشطة. */
+const AUTO_WAIT_OPTIONS: [number, string][] = [
+  [3600, 'ساعة'],
+  [21_600, 'ست ساعات'],
+  [86_400, 'يوم'],
+  [259_200, 'ثلاثة أيام'],
+];
+
+function AutoResponse() {
+  const [active, setActive] = useState(false);
+  const [message, setMessage] = useState('');
+  const [wait, setWait] = useState(86_400);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/ayrshare/autoresponse')
+      .then((d) => {
+        setActive(!!d.active);
+        setMessage(d.message || '');
+        setWait(AUTO_WAIT_OPTIONS.some(([s]) => s === d.waitSeconds) ? d.waitSeconds : 86_400);
+        setLoaded(true);
+      })
+      .catch((e) => setErr(e.message));
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setErr(''); setMsg('');
+    try {
+      await api.post('/ayrshare/autoresponse', { active, message, waitSeconds: wait });
+      setMsg('تم الحفظ');
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
+      <strong style={{ fontSize: 'var(--text-sm)' }}>الرد التلقائي على الرسائل الخاصة</strong>
+      <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+        يُرسل لكل من يراسل حسابات الشركة على فيسبوك وإنستغرام وإكس، ولا يتكرّر للمُراسِل نفسه قبل المدة المختارة.
+        وكل محادثةٍ يُرسل فيها تُحتسب محادثةً نشطة في فاتورة Ayrshare.
+      </p>
+      {err && <p className="err">{err}</p>}
+      {loaded && (
+        <>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
+            <input type="checkbox" className="chk" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            تفعيل الرد التلقائي
+          </label>
+          <div className="field" style={{ marginTop: 'var(--space-2)' }}>
+            <label htmlFor="auto-msg">نص الرد</label>
+            <textarea id="auto-msg" className="input" rows={3} maxLength={1000} value={message}
+              placeholder="شكراً لتواصلك مع ناف. يردّ عليك فريقنا في أقرب وقت."
+              onChange={(e) => setMessage(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="auto-wait">لا يتكرّر للمُراسِل نفسه قبل</label>
+            <select id="auto-wait" className="select" style={{ maxWidth: 'calc(var(--spacing) * 60)' }} value={wait}
+              onChange={(e) => setWait(Number(e.target.value))}>
+              {AUTO_WAIT_OPTIONS.map(([sec, label]) => <option key={sec} value={sec}>{label}</option>)}
+            </select>
+          </div>
+          {msg && <p className="ok">{msg}</p>}
+          <button className="btn sm" onClick={save} disabled={busy}>{busy ? 'جارٍ الحفظ…' : 'حفظ'}</button>
+        </>
+      )}
     </div>
   );
 }
