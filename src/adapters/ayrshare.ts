@@ -67,6 +67,33 @@ export function errorCodes(data: any): number[] {
 }
 
 /**
+ * رفضٌ يخصّ ما طُلب بعينه — منشورٌ حُذف أو لا أرقام له — لا الحسابَ كلَّه.
+ * فهو ٤xx سوى المفتاح (٤٠١ و٤٠٣)، ورصيد إكس (٤٠٢ برمز 416)، وتمهّل المنصة
+ * (٤٢٩)، ومفتاحَي إكس (419)، وإعادة ربط لينكدإن (475). وما يخصّ الحساب لا
+ * يُختم مقروءاً: يُعاد حين يزول سببه.
+ */
+export function postSpecificRejection(err: AyrshareError): boolean {
+  if (err.status < 400 || err.status >= 500 || [401, 402, 403, 429].includes(err.status)) return false;
+  return !errorCodes(err.body).some((c) => c === 416 || c === 419 || c === 475);
+}
+
+/** رمزا تمهّل المنصة نفسها لا Ayrshare — انظر `ayrshareCall`. */
+const PLATFORM_THROTTLE = new Set([364, 444]);
+
+/**
+ * المنصة التي طلبت التمهّل باسمها لدى Ayrshare — أو فارغ. فيسبوك يحمل رمزه
+ * داخل كتلته (`facebook.code: 444`)، وإكس في أعلى الردّ مع `platform`.
+ */
+export function platformThrottle(data: any): string {
+  if (!data || typeof data !== 'object') return '';
+  if (errorCodes(data).some((c) => PLATFORM_THROTTLE.has(c))) return String(data.platform || 'twitter');
+  for (const [key, v] of Object.entries(data)) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && PLATFORM_THROTTLE.has(Number((v as any).code))) return key;
+  }
+  return '';
+}
+
+/**
  * الردّ مع ملفّ مستخدم يُغلَّف في `posts: [...]` — والملف الرئيسي يردّه مكشوفاً.
  * يُقرأ الشكلان فلا يتوقّف النشر لو ربطت الحسابات بملفّ مستخدم لاحقاً.
  */
@@ -278,9 +305,27 @@ export async function ayrshareCall<T = any>(
       res.status, data,
     );
   }
+  /* ٤٧٥ يأتي ٤٠٣ وليس رفضاً للمفتاح: حسابُ لينكدإن الشخصي رُبط قبل صلاحيات
+     الأرقام. وكان يُقرأ «رفض Ayrshare المفتاح» فيُبحث في السرّ وهو سليم. */
+  if (codes.includes(475)) {
+    throw new AyrshareError(
+      'لينكدإن يحتاج إعادة ربط الحساب في Ayrshare لتُقرأ أرقامه: Social Accounts ثم أعد ربط لينكدإن. والنشر لا يتأثّر',
+      res.status, data,
+    );
+  }
   if (res.status === 401 || res.status === 403) {
     throw new AyrshareError(
       `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
+      res.status, data,
+    );
+  }
+  /* تمهّلُ منصةٍ بعينها ليس تمهّلَ Ayrshare: فيسبوك ٤٤٤ لكل صفحة، وإكس ٣٦٤ لكل
+     تطبيق. وكان كلاهما يوقف السحب كلَّه فلا تُقرأ منصةٌ أخرى في تلك الدورة —
+     فيُقال لمنصّته وحدها، وتمضي البقية، ويُعاد هو في السحب التالي. */
+  const throttled = platformThrottle(data);
+  if (res.status === 429 && throttled) {
+    throw new AyrshareError(
+      `${platformNames([ayrshareAccountPlatform({ platform: throttled })])}: طلبت المنصة التمهّل. يُستأنف في السحب التالي`,
       res.status, data,
     );
   }
@@ -798,17 +843,30 @@ export function ayrshareMetrics(platform: string, o: any): Metric[] {
       put('completionrate', 'fullVideoWatchedRate', rate === null ? null : Math.round(rate * 10_000) / 100, 'percentage');
       break;
     }
-    case 'twitter':
+    case 'twitter': {
       put('impressions', 'impressionCount', at(o, 'publicMetrics.impressionCount', 'nonPublicMetrics.impressionCount', 'organicMetrics.impressionCount'));
-      put('views', 'video.viewCount', at(o, 'organicMetrics.video.viewCount'));
+      /* مشاهدات المقطع: في أرقام المنشور تحت `organicMetrics.video`، وفي السجلّ
+         لكل وسيطٍ في `media[]` — فكانت مقاطع السجلّ بلا مشاهدات. */
+      let mediaViews: number | null = null;
+      for (const m of Array.isArray(o.media) ? o.media : []) {
+        const v = at(m, 'publicMetrics.viewCount', 'organicMetrics.viewCount');
+        if (v !== null) mediaViews = (mediaViews ?? 0) + v;
+      }
+      const videoViews = at(o, 'organicMetrics.video.viewCount');
+      put('views', videoViews !== null ? 'video.viewCount' : 'media.viewCount', videoViews ?? mediaViews);
       put('likes', 'likeCount', at(o, 'publicMetrics.likeCount', 'organicMetrics.likeCount'));
       put('comments', 'replyCount', at(o, 'publicMetrics.replyCount', 'organicMetrics.replyCount'));
       put('retweets', 'retweetCount', at(o, 'publicMetrics.retweetCount', 'organicMetrics.retweetCount'));
       put('quotes', 'quoteCount', at(o, 'publicMetrics.quoteCount'));
       put('bookmarks', 'bookmarkCount', at(o, 'publicMetrics.bookmarkCount'));
       break;
+    }
     case 'youtube':
+      /* يوتيوب غيّر عدّ المشاهدة في ٢٤ أغسطس ٢٠٢٦: `views` من أوّل لقطة،
+         و`engagedViews` بالطريقة القديمة. فالمشاهدات بتعريف يوتيوب اليوم، ومعها
+         القديمة محفوظةً كي تُقارن الفترتان عبر ذلك اليوم. */
       put('views', 'views', at(o, 'views'));
+      put('engagedviews', 'engagedViews', at(o, 'engagedViews'));
       put('likes', 'likes', at(o, 'likes'));
       put('comments', 'comments', at(o, 'comments'));
       put('shares', 'shares', at(o, 'shares'));
@@ -836,6 +894,8 @@ export function ayrshareMetrics(platform: string, o: any): Metric[] {
       };
       put('views', 'views', sum('views'));
       put('reach', 'viewers', sum('viewers'));
+      // «storyFavorites» إعجابُ سناب — «Number of times the post has been liked»
+      put('likes', 'storyFavorites', sum('storyFavorites'));
       put('comments', 'replies', sum('replies'));
       put('shares', 'shares', sum('shares'));
       const ms = sum('viewTime');
@@ -1009,6 +1069,24 @@ export async function ayrshareAnalyticsBySocialId(
     out.set(id, ayrshareMapped(platform, item.analytics));
   }
   return out;
+}
+
+/**
+ * أرقام منشورٍ بمعرّف Ayrshare — لسناب: لا يُسأل بمعرّف المنصة
+ * (`searchPlatformId` لا يشمله)، وسجلُّه بلا أرقام. فما نُشر عبر Ayrshare وحده
+ * تُعرف أرقامه، منشوراً في الطلب. `null` = لم تُعلَن.
+ */
+export async function ayrshareAnalyticsByAyrId(
+  auth: AyrshareAuth,
+  ayrId: string,
+  platform: string,
+  budget?: CallBudget,
+): Promise<ReturnType<typeof mapMetrics> | null> {
+  const data = await ayrshareCall<any>(auth, 'POST', '/analytics/post', { id: ayrId, platforms: [platform] }, budget);
+  const analytics = data?.[platform]?.analytics;
+  if (!analytics || typeof analytics !== 'object') return null;
+  const m = ayrshareMapped(platform, analytics);
+  return m.present ? m : null;
 }
 
 /* ═══ أرقام الحساب: المتابعون والمراجعات ═══ */

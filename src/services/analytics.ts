@@ -7,9 +7,9 @@ import {
   type AccountPost, type SocialApiAccount,
 } from '../adapters/socialapi';
 import {
-  AYRSHARE_HISTORY_PLATFORMS, AYRSHARE_SOCIAL_ID_PLATFORMS, AyrshareError, ayrshareAnalyticsBySocialId,
+  AYRSHARE_HISTORY_PLATFORMS, AYRSHARE_SOCIAL_ID_PLATFORMS, AyrshareError, ayrshareAnalyticsByAyrId, ayrshareAnalyticsBySocialId,
   ayrsharePlatform, ayrsharePlatformHistory, ayrshareSentPosts, ayrshareUser, errorCodes as ayrshareErrorCodes,
-  youtubeChannelVideos,
+  postSpecificRejection, youtubeChannelVideos,
   type AyrshareAccount,
 } from '../adapters/ayrshare';
 import { ayrshareAuth } from '../adapters';
@@ -357,9 +357,38 @@ type Snapshot = {
   engagement: number | null;
   metrics_at: string | null;
   provider_uuid: string | null;
+  metrics_json: string | null;
 };
 
-const SNAP_COLUMNS = 'id, provider_post_id, platform, title, sent_at, external_url, reach, impressions, engagement, metrics_at, provider_uuid';
+const SNAP_COLUMNS = 'id, provider_post_id, platform, title, sent_at, external_url, reach, impressions, engagement, metrics_at, provider_uuid, metrics_json';
+
+/**
+ * أرقامُ السجلّ تُضمّ إلى المحفوظ نوعاً بنوع ولا تمحوه.
+ *
+ * السجلّ يُقرأ كل ساعة وأرقامه أقلّ من الحيّة: إنستغرام فيه الإعجاب والتعليق
+ * وحدهما، وفيسبوك بلا ظهور. وكانت لقطته تُكتب مكان الحيّة كلَّها، فيصير ظهور
+ * فيسبوك صفراً — يُؤخذ من مشاهدات المقطع — وينقص تفاعل إنستغرام بلا حفظٍ ولا
+ * مشاركة، خمسَ ساعاتٍ من كل ستّ حتى يعيدها الطلب الحيّ. فما في السجلّ يُحدّث
+ * نوعه، وما ليس فيه يبقى على آخر ما قيس، ثم يُحسب الوصول والظهور والتفاعل
+ * من المجموع.
+ */
+export function mergeRawMetrics(stored: string | null, fresh: any[]): any[] {
+  let old: unknown = [];
+  try {
+    old = stored ? JSON.parse(stored) : [];
+  } catch {
+    old = [];
+  }
+  const keyOf = (m: any) => String(m?.type ?? m?.name ?? '').toLowerCase();
+  const freshKeys = new Set(fresh.map(keyOf));
+  let kept = (Array.isArray(old) ? old : []).filter((m) => m && typeof m === 'object' && keyOf(m) && !freshKeys.has(keyOf(m)));
+  let incoming = fresh;
+  /* «reactions» في فيسبوك تضمّ الإعجاب، فلا يُجمعان إن جاء كلٌّ من مصدر: قصّةُ
+     فيسبوك في السجلّ بلا تفاعلات (`reactions: {}`) فيُكتب إعجابُها وحده. */
+  if (freshKeys.has('reactions') && !freshKeys.has('likes')) kept = kept.filter((m) => keyOf(m) !== 'likes');
+  if (!freshKeys.has('reactions') && kept.some((m) => keyOf(m) === 'reactions')) incoming = fresh.filter((m) => keyOf(m) !== 'likes');
+  return [...kept, ...incoming];
+}
 
 async function snapshotsByKeys(env: Env, keys: string[]): Promise<Map<string, Snapshot>> {
   const out = new Map<string, Snapshot>();
@@ -469,17 +498,19 @@ async function ingestAccountPosts(
     const match = matchSnapshot(h, platform, candidates);
     const via = schedMap.get(h.id);
     const metricsAt = h.metrics.present ? h.metrics.syncedAt ?? nowIso() : null;
+    // ما قيس قبله يُضمّ إليه ولا يُمحى — انظر `mergeRawMetrics`
+    const m = h.metrics.present && match?.metrics_json ? mapMetrics(mergeRawMetrics(match.metrics_json, h.metrics.raw)) : h.metrics;
     writes.push(upsertStmt(env, {
       providerPostId: match?.provider_post_id ?? h.id,
       platform,
       title: match?.title || via?.title || h.title || null,
       postId: via?.postId || null,
       viaPlatform: via ? 1 : 0,
-      reach: h.metrics.reach,
-      impressions: h.metrics.impressions,
-      engagement: h.metrics.engagement,
+      reach: m.reach,
+      impressions: m.impressions,
+      engagement: m.engagement,
       sentAt: h.sentAt,
-      metricsJson: JSON.stringify(h.metrics.raw),
+      metricsJson: JSON.stringify(m.raw),
       externalUrl: h.externalUrl,
       source: 'account',
       metricsAt,
@@ -490,6 +521,7 @@ async function ingestAccountPosts(
       candidates.push({
         id: '', provider_post_id: h.id, platform, title: h.title, sent_at: h.sentAt, external_url: h.externalUrl,
         reach: h.metrics.reach, impressions: h.metrics.impressions, engagement: h.metrics.engagement, metrics_at: metricsAt, provider_uuid: null,
+        metrics_json: h.metrics.present ? JSON.stringify(h.metrics.raw) : null,
       });
     }
   }
@@ -755,6 +787,9 @@ async function pullAllSocialApi(
 
 const AYRSHARE_LIVE_EVERY_MS = 6 * 3_600_000;
 
+/** منشورات سناب التي تُطلب أرقامها في السحب الواحد — طلبٌ لكلٍّ منها. */
+const SNAPCHAT_PER_PULL = 20;
+
 /**
  * حجم صفحة السجلّ. إكس وثريدز لهما مؤشّرٌ يُمضى به صفحةً بعد صفحة؛ وما سواهما
  * بلا مؤشّر في التوثيق فيُقرأ بصفحةٍ واحدة بأقصاها (٥٠٠). وفيسبوك وإنستغرام
@@ -963,10 +998,12 @@ async function pullAllAyrshare(
             break outer;
           }
           /* رفضٌ يخصّ هذه المنشورات (محذوفة، 186) يُختم وقتُ طلبها كي لا تبقى
-             أوّل القائمة تأكل حصّتها — وما سواه يُقال ويُعاد في السحب التالي. */
-          if (!(err instanceof AyrshareError && err.status >= 400 && err.status < 500)) {
+             أوّل القائمة تأكل حصّتها. وما يخصّ الحساب — تمهّلُ المنصة، وحسابٌ
+             يحتاج إعادة ربط (475) — يُقال ويُترك باقي منصّته إلى السحب التالي،
+             ولا يُختم: كان يُختم فلا تُطلب أرقامها ستّ ساعات بلا سبب ظاهر. */
+          if (!(err instanceof AyrshareError) || !postSpecificRejection(err)) {
             stop(err);
-            continue;
+            continue outer;
           }
           metrics = new Map();
         }
@@ -988,6 +1025,56 @@ async function pullAllAyrshare(
         }
         await runBatch(env, writes);
       }
+    }
+  }
+
+  /* ٤ب) سناب بمعرّف Ayrshare — لا يُسأل بمعرّف المنصة، وسجلُّه بلا أرقام، فكانت
+     منشوراته كلّها بلا رقمٍ واحد. وما نُشر عبر Ayrshare وحده له معرّفٌ يُسأل به
+     (`provider_uuid`)، منشوراً في الطلب — فيُطلب منه عددٌ محدود في كل سحب. */
+  if (accounts.some((a) => a.platform === 'snapchat') && !budget.stoppedBy) {
+    const staleBefore = new Date(Date.now() - (opts.history ? 7 * DAY : AYRSHARE_LIVE_EVERY_MS)).toISOString();
+    const since = new Date(Date.now() - 45 * DAY).toISOString();
+    const { results: due } = await env.DB.prepare(
+      `SELECT provider_post_id, provider_uuid FROM analytics_snapshots
+       WHERE platform = 'snapchat' AND provider_uuid IS NOT NULL AND sent_at IS NOT NULL AND sent_at ${opts.history ? '<' : '>='} ?
+         AND COALESCE(metrics_checked_at, '') < ?
+       ORDER BY COALESCE(metrics_checked_at, '') ASC
+       LIMIT ${SNAPCHAT_PER_PULL}`,
+    )
+      .bind(since, staleBefore)
+      .all<{ provider_post_id: string; provider_uuid: string }>();
+    for (const row of due) {
+      if (budget.left <= 0) {
+        report.complete = false;
+        break;
+      }
+      let m: Awaited<ReturnType<typeof ayrshareAnalyticsByAyrId>> = null;
+      try {
+        m = await ayrshareAnalyticsByAyrId(auth, row.provider_uuid, 'snapchat', budget);
+      } catch (err) {
+        if (err instanceof BudgetExhausted) {
+          report.complete = false;
+          break;
+        }
+        if (!(err instanceof AyrshareError) || !postSpecificRejection(err)) {
+          stop(err);
+          break;
+        }
+      }
+      const writes: D1PreparedStatement[] = [];
+      if (m) {
+        writes.push(env.DB.prepare(
+          `UPDATE analytics_snapshots
+           SET reach = COALESCE(?, reach), impressions = COALESCE(?, impressions), engagement = COALESCE(?, engagement),
+               metrics_json = ?, metrics_at = ?, captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+           WHERE provider_post_id = ?`,
+        ).bind(m.reach, m.impressions, m.engagement, JSON.stringify(m.raw), nowIso(), row.provider_post_id));
+        report.refreshed++;
+      }
+      writes.push(env.DB.prepare(
+        "UPDATE analytics_snapshots SET metrics_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_post_id = ?",
+      ).bind(row.provider_post_id));
+      await runBatch(env, writes);
     }
   }
 

@@ -306,3 +306,130 @@ describe('مصدر مزوّد النشر عبر Ayrshare', () => {
     expect(points.find((p) => p.metricKey === 'gbp_rating')?.value).toBe(4.6);
   });
 });
+
+describe('السجلّ لا يمحو الأرقام الحيّة', () => {
+  it('ظهور فيسبوك ووصوله يبقيان بعد سحب السجلّ، والإعجاب لا يُعدّ مع التفاعلات مرّتين', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'fb', platform: 'facebook', pageName: 'ناف' }] } });
+    let likes = 10;
+    // السجلّ: بلا ظهور، ومشاهدات المقطع صفر — وقصّةٌ بلا تفاعلات فيُكتب إعجابها وحده
+    routes['GET /history/facebook'] = () => ({
+      body: { status: 'success', posts: [{ id: 'fb_1', post: 'منشور', created: RECENT, likeCount: likes, commentsCount: 3, videoViews: 0, reactions: {} }] },
+    });
+    routes['POST /analytics/post'] = (_u, body) => ({
+      body: {
+        facebook: body.postIds.map((id: string) => ({
+          id, analytics: { mediaView: 2000, totalMediaViewUnique: 1500, reactions: { like: 20, love: 5, total: 25 }, commentsCount: 3, sharesCount: 2 },
+        })),
+      },
+    });
+
+    await pullAnalytics(env);
+    expect(snaps()[0]).toMatchObject({ impressions: 2000, reach: 1500, engagement: 30 });
+
+    // بعد ساعة: السجلّ وحده — والحيّ لم يحن
+    likes = 12;
+    routes['GET /history/facebook'] = () => ({
+      body: { status: 'success', posts: [{ id: 'fb_1', post: 'منشور', created: RECENT, likeCount: likes, commentsCount: 4, videoViews: 0, reactions: {} }] },
+    });
+    await pullAnalytics(env);
+    expect(calls.filter((c) => c.key === 'POST /analytics/post')).toHaveLength(1);
+    const row = snaps()[0];
+    expect(row).toMatchObject({ impressions: 2000, reach: 1500 });
+    // التفاعلات ٢٥ من الحيّ + التعليقات ٤ من السجلّ + المشاركة ٢ — والإعجاب داخل التفاعلات
+    expect(row.engagement).toBe(31);
+    const types = JSON.parse(row.metrics_json).map((m: any) => m.type).sort();
+    expect(types).toEqual(['comments', 'impressions', 'reach', 'reactions', 'shares', 'views']);
+  });
+
+  it('إنستغرام: الحفظ والمشاركة والوصول من الحيّ تبقى، والإعجاب والتعليق من السجلّ أحدث', async () => {
+    routes['GET /history/instagram'] = () => ({ body: { status: 'success', posts: [{ id: 'ig_1', post: 'x', created: RECENT, likeCount: 40, commentsCount: 5 }] } });
+    routes['POST /analytics/post'] = (_u, body) => ({
+      body: { instagram: body.postIds.map((id: string) => ({ id, analytics: { reachCount: 500, viewsCount: 800, likeCount: 40, commentsCount: 5, sharesCount: 2, savedCount: 3 } })) },
+    });
+    await pullAnalytics(env);
+    routes['GET /history/instagram'] = () => ({ body: { status: 'success', posts: [{ id: 'ig_1', post: 'x', created: RECENT, likeCount: 41, commentsCount: 6 }] } });
+    await pullAnalytics(env);
+    expect(snaps()[0]).toMatchObject({ reach: 500, impressions: 800, engagement: 41 + 6 + 2 + 3 });
+  });
+});
+
+describe('سناب بمعرّف Ayrshare', () => {
+  it('أرقام منشور سناب تُطلب بمعرّف Ayrshare وتُجمع وسائطه', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'sc', platform: 'snapchat', displayName: 'ناف' }] } });
+    routes['GET /history'] = () => ({
+      body: { history: [{ id: 'AYR_S', created: RECENT, post: 'قصة', postIds: [{ platform: 'snapchat', id: 'snap_1', status: 'success' }] }] },
+    });
+    routes['GET /history/snapchat'] = () => ({ body: { status: 'success', posts: [] } });
+    routes['POST /analytics/post'] = (_u, body) => {
+      expect(body).toEqual({ id: 'AYR_S', platforms: ['snapchat'] });
+      return {
+        body: {
+          snapchat: {
+            id: 'snap_1',
+            analytics: [
+              { views: 700, viewers: 600, storyFavorites: 20, replies: 3, shares: 2, viewTime: 120000 },
+              { views: 100, viewers: 90, storyFavorites: 5, replies: 1, shares: 0, viewTime: 60000 },
+            ],
+          },
+        },
+      };
+    };
+    await pullAnalytics(env);
+    const [row] = snaps();
+    expect(row).toMatchObject({ provider_post_id: 'snap_1', platform: 'snapchat', reach: 690, impressions: 800, engagement: 25 + 4 + 2 });
+    const watch = JSON.parse(row.metrics_json).find((m: any) => m.type === 'totaltimewatched');
+    expect(watch).toMatchObject({ value: 3, unit: 'minutes' });
+  });
+});
+
+describe('ما يخصّ الحساب لا يُختم ولا يوقف غيره', () => {
+  it('تمهّل صفحة فيسبوك (444) يُقال لها وحدها، وإنستغرام يُسحب، ومنشورات فيسبوك تُطلب في السحب التالي', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'fb', platform: 'facebook', pageName: 'ناف' }, { id: 'ig1', platform: 'instagram', username: 'naf' }] } });
+    routes['GET /history/facebook'] = () => ({ body: { status: 'success', posts: [{ id: 'fb_1', post: 'منشور', created: RECENT, likeCount: 1 }] } });
+    routes['GET /history/instagram'] = () => ({ body: { status: 'success', posts: [{ id: 'ig_1', post: 'x', created: RECENT, likeCount: 1 }] } });
+    let throttle = true;
+    routes['POST /analytics/post'] = (_u, body) => {
+      if (body.platforms[0] === 'facebook' && throttle) {
+        return { status: 429, body: { status: 'error', facebook: { action: 'rate limit', status: 'error', code: 444, errCode: 80001 }, httpErrorCode: 444 } };
+      }
+      return { body: { [body.platforms[0]]: body.postIds.map((id: string) => ({ id, analytics: { reachCount: 9, mediaView: 9 } })) } };
+    };
+
+    await pullAnalytics(env);
+    const report = await readAnalyticsReport(env);
+    expect(report?.errors).toEqual(['فيسبوك: طلبت المنصة التمهّل. يُستأنف في السحب التالي']);
+    expect(report?.stoppedBy ?? null).toBeNull();
+    expect(snaps().find((s) => s.provider_post_id === 'ig_1')).toMatchObject({ reach: 9 });
+
+    throttle = false;
+    await pullAnalytics(env);
+    expect(snaps().find((s) => s.provider_post_id === 'fb_1')).toMatchObject({ impressions: 9 });
+  });
+
+  it('لينكدإن يحتاج إعادة ربط (475) — يُقال سببه لا «رفض المفتاح»', async () => {
+    routes['POST /analytics/post'] = (_u, body) => (body.platforms[0] === 'linkedin'
+      ? { status: 403, body: { action: 'authorization', status: 'error', code: 475, message: 'Your LinkedIn profile is missing the analytics permissions.' } }
+      : { body: { instagram: [] } });
+    routes['GET /history/linkedin'] = () => ({ body: { status: 'success', posts: [{ id: 'li_1', post: 'x', created: RECENT, likeCount: 1 }] } });
+    await pullAnalytics(env);
+    expect((await readAnalyticsReport(env))?.errors[0]).toMatch(/إعادة ربط/);
+  });
+});
+
+describe('أرقامٌ كانت تُترك', () => {
+  it('مشاهدات مقطع إكس من وسائطه في السجلّ', () => {
+    const m = ayrshareMapped('twitter', { publicMetrics: { likeCount: 2 }, media: [{ type: 'video', publicMetrics: { viewCount: 27 } }] });
+    expect(m.raw).toContainEqual({ type: 'views', name: 'media.viewCount', value: 27, unit: 'count' });
+  });
+
+  it('يوتيوب: المشاهدات بتعريفها الجديد، والقديمة محفوظة معها', () => {
+    const m = ayrshareMetrics('youtube', { views: 300, engagedViews: 148 });
+    expect(m).toContainEqual({ type: 'views', name: 'views', value: 300, unit: 'count' });
+    expect(m).toContainEqual({ type: 'engagedviews', name: 'engagedViews', value: 148, unit: 'count' });
+  });
+
+  it('المدّة تُحفظ بالدقائق وباسم المنصة لا «count»', () => {
+    const m = ayrshareMapped('tiktok', { totalTimeWatched: 600 });
+    expect(m.raw).toContainEqual({ type: 'totaltimewatched', name: 'totalTimeWatched', value: 10, unit: 'minutes' });
+  });
+});
