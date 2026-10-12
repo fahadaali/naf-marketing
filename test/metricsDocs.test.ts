@@ -83,7 +83,7 @@ describe('أعداد المؤشرات في الوثائق', () => {
       Object.values(byLayer).reduce((a, b) => a + b, 0),
     );
     // مكتوبٌ بالحروف، فيُفحص وجودُ العدد لا صيغتُه
-    expect(readme, `المجموع الحقيقي ${total}`).toContain('مئةٌ واثنان وعشرون مؤشراً');
-    expect(total).toBe(122);
+    expect(readme, `المجموع الحقيقي ${total}`).toContain('مئةٌ وواحدٌ وثلاثون مؤشراً');
+    expect(total).toBe(131);
   });
 });

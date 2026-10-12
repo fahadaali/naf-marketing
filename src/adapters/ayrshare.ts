@@ -1098,17 +1098,12 @@ export async function ayrshareAnalyticsByAyrId(
 
 /* ═══ أرقام الحساب: المتابعون والمراجعات ═══ */
 
-/** عدد المتابعين لكل منصةٍ مربوطة — من `POST /analytics/social`. */
-export async function ayrshareAudience(
-  auth: AyrshareAuth,
-  accounts: AyrshareAccount[],
-): Promise<{ platform: string; followers: number | null }[]> {
-  // الملف التجاري لا متابعين له، ومراجعاته من `/reviews`
-  const wanted = accounts.filter((a) => a.platform !== 'google');
-  if (!wanted.length) return [];
-  const platforms = [...new Set(wanted.map((a) => ayrsharePlatform(a.platform)))];
-  const data = await ayrshareCall<any>(auth, 'POST', '/analytics/social', { platforms });
-  return wanted.map((a) => {
+/**
+ * عدد المتابعين لكل حسابٍ من ردّ `/analytics/social` المجموع. والملف التجاري
+ * لا متابعين له — مراجعاته من `/reviews` — فلا يُطلب له.
+ */
+export function ayrshareFollowers(accounts: AyrshareAccount[], data: any): { platform: string; followers: number | null }[] {
+  return accounts.map((a) => {
     const p = ayrsharePlatform(a.platform);
     const an = data?.[p]?.analytics;
     const o = Array.isArray(an) ? an[0] : an;
@@ -1116,6 +1111,213 @@ export async function ayrshareAudience(
     const followers = at(o, 'followersCount', 'followerCount', 'followers.totalFollowerCount', 'subscriberCount', 'subscribers');
     return { platform: a.platform, followers };
   });
+}
+
+/* ═══ أرقام الحساب كاملةً — `POST /analytics/social` ═══
+
+   كان يُقرأ منه عددُ المتابعين وحده ويُرمى الباقي. وفيه لكل منصةٍ أرقامُ
+   الحساب نفسه لا منشوراته: مشاهداتُ محتواه ووصولُه وزياراتُ ملفّه والمتابعون
+   الجدد ومن ألغى المتابعة ووقتُ المشاهدة والنقرُ إلى الموقع، وتوزيعُ الجمهور
+   على البلد والعمر والجنس، وأداءُ الملف التجاري.
+
+   وبطريقتين: مجموعاً بنوافذ تختلف من حقلٍ إلى حقل (مدى الحياة، ١٨٠ يوماً،
+   ٩٠ يوماً…) لا تطابق فتراتنا، أو يوماً بيوم (`daily: true`) لفيسبوك
+   والملف التجاري وإنستغرام وسناب وتيك توك ويوتيوب. فأرقام الفترة من اليومي
+   تُجمع أيامُها التي في الفترة؛ والمجموعُ للّقطات وحدها — المتابعون وتوزيعهم
+   اليوم. والأسماء من صفحة «Analytics on a Social Network» في توثيقه. */
+
+/** نقطةٌ لمؤشرٍ في السجلّ — بشكل `MetricPoint` في `adapters/sources.ts`. */
+export type AccountPoint = { metricKey: string; dimKey?: string; dimValue?: string; value: number };
+
+/** نداءٌ واحد للمنصات كلّها — مجموعاً، أو يوماً بيوم بعدد الأرباع. */
+export async function ayrshareSocialAnalytics(
+  auth: AyrshareAuth,
+  platforms: string[],
+  opts: { daily?: boolean; quarters?: number } = {},
+  budget?: CallBudget,
+): Promise<any> {
+  const body: Record<string, unknown> = { platforms };
+  if (opts.daily) body.daily = true;
+  if (opts.quarters) body.quarters = opts.quarters;
+  return ayrshareCall<any>(auth, 'POST', '/analytics/social', body, budget);
+}
+
+/**
+ * اليوم الذي تخصّه قيمةٌ يومية. ميتا تُعلن نهاية اليوم — منتصف الليل بتوقيت
+ * المحيط الهادئ، `T07:00:00Z` — فالقيمة لليوم الذي قبله. وما سواها يُعلن اليوم
+ * نفسه منتصفَ ليله بتوقيت غرينتش، `T00:00:00Z`.
+ */
+export function dailyDay(endTime: unknown): string | null {
+  const t = Date.parse(String(endTime ?? ''));
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  const midnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+  return new Date(midnight ? t : t - 86_400_000).toISOString().slice(0, 10);
+}
+
+/** قيم سلسلةٍ يومية `{period, values: [{value, endTime}]}` — `null` إن لم تكن سلسلة. */
+export function dailySeries(v: any): { day: string; value: number }[] | null {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.values)) return null;
+  const out: { day: string; value: number }[] = [];
+  for (const it of v.values) {
+    const day = dailyDay(it?.endTime);
+    const value = num(it?.value);
+    if (day && value !== null) out.push({ day, value });
+  }
+  return out;
+}
+
+/**
+ * كم يوماً إلى الوراء يردّ Ayrshare يوماً بيوم. تيك توك ستون يوماً أبداً،
+ * وسناب ربعٌ واحد، وربعُ فيسبوك ٨٥ يوماً وربعُ غيره تسعون.
+ */
+export function dailyWindowDays(platform: string, quarters: number): number {
+  if (platform === 'tiktok') return 60;
+  if (platform === 'snapchat') return 90;
+  return (platform === 'facebook' ? 85 : 90) * quarters;
+}
+
+/** ما يُجمع من اليومي إلى مؤشرٍ في السجلّ — بأسماء Ayrshare، ومعامل الوحدة. */
+const DAILY_POINTS: { platform: string; fields: string[]; metricKey: string; perPlatform: boolean; scale?: number }[] = [
+  { platform: 'facebook', fields: ['pageMediaView'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'instagram', fields: ['reach'], metricKey: 'account_reach', perPlatform: true },
+  { platform: 'youtube', fields: ['views'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'youtube', fields: ['subscribersGained'], metricKey: 'new_followers', perPlatform: true },
+  { platform: 'youtube', fields: ['subscribersLost'], metricKey: 'unfollows', perPlatform: true },
+  { platform: 'youtube', fields: ['estimatedMinutesWatched'], metricKey: 'watch_time', perPlatform: true },
+  { platform: 'tiktok', fields: ['viewCountTotal'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'tiktok', fields: ['profileViews'], metricKey: 'profile_views', perPlatform: true },
+  { platform: 'tiktok', fields: ['bioLinkClicks'], metricKey: 'profile_website_clicks', perPlatform: true },
+  { platform: 'snapchat', fields: ['views'], metricKey: 'account_views', perPlatform: true },
+  { platform: 'snapchat', fields: ['viewers'], metricKey: 'account_reach', perPlatform: true },
+  { platform: 'snapchat', fields: ['profileViews'], metricKey: 'profile_views', perPlatform: true },
+  { platform: 'snapchat', fields: ['subscribes'], metricKey: 'new_followers', perPlatform: true },
+  { platform: 'snapchat', fields: ['unsubscribes'], metricKey: 'unfollows', perPlatform: true },
+  // سناب يُعلن المدّة بالأجزاء من الألف من الثانية، والمؤشر بالدقائق
+  { platform: 'snapchat', fields: ['viewTime'], metricKey: 'watch_time', perPlatform: true, scale: 1 / 60_000 },
+  { platform: 'gmb', fields: ['websiteClicks'], metricKey: 'profile_website_clicks', perPlatform: true },
+  /* الملف التجاري رقمٌ واحد لا موزَّع: الظهور الأربعة مؤشرٌ واحد كما يطلب الدليل
+     «ظهور الملف التجاري» لا أربعةَ أرقامٍ يجمعها القارئ في رأسه. */
+  {
+    platform: 'gmb',
+    fields: ['businessImpressionsDesktopMaps', 'businessImpressionsDesktopSearch', 'businessImpressionsMobileMaps', 'businessImpressionsMobileSearch'],
+    metricKey: 'gbp_views',
+    perPlatform: false,
+  },
+  { platform: 'gmb', fields: ['callClicks'], metricKey: 'gbp_calls', perPlatform: false },
+  { platform: 'gmb', fields: ['businessDirectionRequests'], metricKey: 'gbp_directions', perPlatform: false },
+];
+
+/**
+ * أرقام الفترة من الردّ اليومي لمنصةٍ واحدة. `analytics` كائنُها (وسناب
+ * مصفوفةٌ تُجمع عناصرها)، و`internal` مفتاحها عندنا للبُعد.
+ *
+ * ولا يُكتب رقمٌ لفترةٍ لا تغطّي النافذةُ أوّلَها: رقمٌ ناقص يُقرأ هبوطاً.
+ * وسلسلةٌ لم تُعلَن لا تُكتب صفراً؛ وأيامٌ بلا قيمة في سلسلةٍ معلنة صفرٌ صادق
+ * — يوتيوب يُسقط اليوم الذي لا مشاهدة فيه.
+ */
+export function ayrshareDailyPoints(
+  platform: string,
+  internal: string,
+  analytics: any,
+  range: { start: string; end: string },
+  windowStart: string,
+): AccountPoint[] {
+  if (windowStart > range.start) return [];
+  const blocks: any[] = Array.isArray(analytics) ? analytics : analytics && typeof analytics === 'object' ? [analytics] : [];
+  const out: AccountPoint[] = [];
+  for (const spec of DAILY_POINTS) {
+    if (spec.platform !== platform) continue;
+    let total: number | null = null;
+    for (const block of blocks) {
+      for (const field of spec.fields) {
+        const series = dailySeries(block?.[field]);
+        if (!series) continue;
+        total = (total ?? 0) + series.filter((v) => v.day >= range.start && v.day <= range.end).reduce((s, v) => s + v.value, 0);
+      }
+    }
+    if (total === null) continue;
+    const value = Math.round(total * (spec.scale ?? 1) * 100) / 100;
+    out.push(spec.perPlatform ? { metricKey: spec.metricKey, dimKey: 'platform', dimValue: internal, value } : { metricKey: spec.metricKey, value });
+  }
+  return out;
+}
+
+/** الفئات العمرية بأوسعها المشترك: إنستغرام يفصل ٥٥–٦٤ و٦٥+، وتيك توك يجمعهما «55+». */
+function ageBucket(age: string): string | null {
+  const a = age.trim();
+  if (/^(55-64|65\+|55\+)$/.test(a)) return '55+';
+  return /^\d{2}-\d{2}$/.test(a) ? a : null;
+}
+
+function genderKey(g: string): string {
+  const v = g.trim().toLowerCase();
+  if (v === 'f' || v === 'female') return 'female';
+  if (v === 'm' || v === 'male') return 'male';
+  return 'unknown';
+}
+
+/**
+ * توزيع المتابعين على البلد والعمر والجنس — لقطةُ اليوم من الردّ المجموع.
+ * إنستغرام يُعلن أعداداً (`audienceCountry` و`audienceGenderAge` «F.25-34»)،
+ * وتيك توك نسباً من متابعيه (`audienceCountries` و`audienceAges`
+ * و`audienceGenders`) فتُضرب في عدد متابعيه. فيُجمع الاثنان أعداداً تُقارن.
+ * وكلاهما لا يُعلن التوزيع لحسابٍ دون مئة متابع — فلا يُكتب شيء.
+ */
+export function ayrshareAudiencePoints(data: any): AccountPoint[] {
+  const country = new Map<string, number>();
+  const age = new Map<string, number>();
+  const gender = new Map<string, number>();
+  const add = (m: Map<string, number>, k: string | null, v: number) => {
+    if (!k || !Number.isFinite(v) || v <= 0) return;
+    m.set(k, (m.get(k) ?? 0) + v);
+  };
+
+  const ig = data?.instagram?.analytics;
+  if (ig && typeof ig === 'object') {
+    for (const [k, v] of Object.entries(ig.audienceCountry ?? {})) add(country, k.toUpperCase(), Number(v));
+    for (const [k, v] of Object.entries(ig.audienceGenderAge ?? {})) {
+      const [g, a] = k.split('.');
+      add(gender, genderKey(g ?? ''), Number(v));
+      add(age, ageBucket(a ?? ''), Number(v));
+    }
+  }
+
+  const ttRaw = data?.tiktok?.analytics;
+  const tt = Array.isArray(ttRaw) ? ttRaw[0] : ttRaw;
+  const followers = at(tt, 'followerCount');
+  if (tt && typeof tt === 'object' && followers) {
+    const share = (p: unknown) => Math.round(Number(p) * followers);
+    for (const r of Array.isArray(tt.audienceCountries) ? tt.audienceCountries : []) add(country, String(r?.country ?? '').toUpperCase() || null, share(r?.percentage));
+    for (const r of Array.isArray(tt.audienceAges) ? tt.audienceAges : []) add(age, ageBucket(String(r?.age ?? '')), share(r?.percentage));
+    for (const r of Array.isArray(tt.audienceGenders) ? tt.audienceGenders : []) add(gender, genderKey(String(r?.gender ?? '')), share(r?.percentage));
+  }
+
+  const out: AccountPoint[] = [];
+  for (const [k, v] of country) if (/^[A-Z]{2}$/.test(k)) out.push({ metricKey: 'followers_country', dimKey: 'country', dimValue: k, value: v });
+  for (const [k, v] of age) out.push({ metricKey: 'followers_age', dimKey: 'age_range', dimValue: k, value: v });
+  for (const [k, v] of gender) out.push({ metricKey: 'followers_gender', dimKey: 'gender', dimValue: k, value: v });
+  return out;
+}
+
+/**
+ * المتابعون الجدد في لينكدإن الشخصي — `followersDaily` في الردّ المجموع،
+ * ثلاثون يوماً بأيامها (`dateRange.start`). وصفحة لينكدإن لا يوميَّ لها.
+ */
+export function linkedInNewFollowers(analytics: any, range: { start: string; end: string }, today: string): number | null {
+  const list: any[] = Array.isArray(analytics?.followersDaily) ? analytics.followersDaily : [];
+  if (!list.length) return null;
+  // ثلاثون يوماً إلى الوراء — فترةٌ أوّلُها أقدم لا يُكتب لها رقم ناقص
+  const windowStart = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
+  if (windowStart > range.start) return null;
+  let total = 0;
+  for (const d of list) {
+    const s = d?.dateRange?.start;
+    const day = s?.year ? `${s.year}-${String(s.month).padStart(2, '0')}-${String(s.day).padStart(2, '0')}` : '';
+    const v = num(d?.memberFollowersCount);
+    if (day >= range.start && day <= range.end && v !== null) total += v;
+  }
+  return total;
 }
 
 /** عدد مراجعات الملف التجاري ومتوسّطها — من `GET /reviews?platform=gmb`. `null` = لا مراجعات. */

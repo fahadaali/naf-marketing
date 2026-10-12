@@ -286,6 +286,11 @@ describe('مصدر مزوّد النشر عبر Ayrshare', () => {
       body: { displayNames: [{ id: 'tt', platform: 'tiktok' }, { id: 'yt', platform: 'youtube' }, { id: 'li', platform: 'linkedin', type: 'corporate' }, { platform: 'gmb' }] },
     });
     routes['POST /analytics/social'] = (_u, body) => {
+      // اليومي يُطلب لما يردّه يوماً بيوم وحده — ولينكدإن ليس منه، والملف التجاري منه
+      if (body.daily) {
+        expect(body.platforms.sort()).toEqual(['gmb', 'tiktok', 'youtube']);
+        return { body: { status: 'success' } };
+      }
       expect(body.platforms.sort()).toEqual(['linkedin', 'tiktok', 'youtube']);
       return {
         body: {

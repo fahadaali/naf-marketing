@@ -43,16 +43,23 @@ async function markSync(env: Env, key: string, ok: boolean, error?: string): Pro
  *
  * والمفتاح غير المسجَّل يُطرح صامتاً: مصدرٌ يرسل مؤشراً لا نعرفه لا يُسقط
  * السحب كلَّه، ولا يُنشئ تعريفاً من نفسه — التعريف يمرّ من السجلّ أوّلاً.
+ *
+ * ومؤشرٌ مسجَّلٌ لمصدرٍ آخر يُطرح كذلك: أداءُ الملف التجاري نُقل إلى مزوّد
+ * النشر، و«الملف التجاري» إن بقي مربوطاً لا يكتبه بعدها — مصدران يتناوبان
+ * رقماً واحداً يُقرأ قفزاً لا يُعرف سببه.
  */
 async function writePoints(env: Env, p: Period, key: string, points: MetricPoint[]): Promise<number> {
   if (!points.length) return 0;
 
-  const { results: known } = await env.DB.prepare('SELECT key FROM metric_definitions').all<{ key: string }>();
-  const valid = new Set(known.map((r) => r.key));
+  const { results: known } = await env.DB.prepare('SELECT key, integration_key FROM metric_definitions')
+    .all<{ key: string; integration_key: string | null }>();
+  const owner = new Map(known.map((r) => [r.key, r.integration_key]));
 
   let written = 0;
   for (const pt of points) {
-    if (!valid.has(pt.metricKey)) continue;
+    if (!owner.has(pt.metricKey)) continue;
+    const registered = owner.get(pt.metricKey);
+    if (registered && registered !== key) continue;
     await upsertValue(env, p, {
       metricKey: pt.metricKey,
       dimKey: pt.dimKey ?? '',

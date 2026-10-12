@@ -139,6 +139,19 @@ export const DIMENSION_LABELS: Record<string, string> = {
   stage: 'المرحلة',
   time_slot: 'التوقيت',
   test: 'الاختبار',
+  country: 'البلد',
+  age_range: 'الفئة العمرية',
+  gender: 'الجنس',
+};
+
+/**
+ * قيم بُعد «الجنس» — naf-terms §١٣ «قيم بُعد الجنس». تُخزَّن رمزاً
+ * (`female`/`male`/`unknown`) كي لا يصير تغيير التسمية هجرةَ بيانات.
+ */
+export const GENDER_LABELS: Record<string, string> = {
+  female: 'إناث',
+  male: 'ذكور',
+  unknown: 'غير معلن',
 };
 
 /**
@@ -199,6 +212,17 @@ export function dimensionLabel(dimKey: string, dimValue: string): string {
   if (dimKey === 'stage') {
     return FUNNEL_STAGES.find((s) => s.key === dimValue)?.label ?? dimValue;
   }
+  // البلد رمزٌ من حرفين (ISO) — اسمُه العربي من المتصفح لا من قائمةٍ تُكتب هنا
+  if (dimKey === 'country') {
+    try {
+      return new Intl.DisplayNames(['ar'], { type: 'region' }).of(dimValue) ?? dimValue;
+    } catch {
+      return dimValue;
+    }
+  }
+  if (dimKey === 'gender') return GENDER_LABELS[dimValue] ?? dimValue;
+  // الفئة العمرية أرقامٌ وشرطة — معزولةٌ اتجاهياً كي لا تنقلب «18-24» في سطرٍ عربي
+  if (dimKey === 'age_range') return `⁨${dimValue}⁩`;
   return dimValue;
 }
 

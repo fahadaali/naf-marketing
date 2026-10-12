@@ -27,7 +27,10 @@ import type { Env } from '../types';
 import { getAccessToken, googleJson, parseServiceAccount, GoogleAuthError } from './googleAuth';
 import { ayrshareAuth, providerKey } from './index';
 import { socialApiAudience, socialApiReviewSummary } from './socialapi';
-import { ayrshareAudience, ayrshareReviewSummary, ayrshareUser } from './ayrshare';
+import {
+  ayrshareAudiencePoints, ayrshareDailyPoints, ayrshareFollowers, ayrsharePlatform, ayrshareReviewSummary, ayrshareSocialAnalytics,
+  ayrshareUser, dailyWindowDays, linkedInNewFollowers,
+} from './ayrshare';
 import { riyadhToday } from '../services/period';
 
 export type MetricPoint = {
@@ -402,12 +405,83 @@ export async function socialSecretName(env: Env): Promise<string> {
   return (await activeProvider(env)) === 'ayrshare' ? 'AYRSHARE_API_KEY' : 'SOCIALAPI_API_KEY';
 }
 
+/** الأيام بين تاريخين (YYYY-MM-DD) شاملاً الطرفين. */
+function daysBetween(start: string, end: string): number {
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+function shiftDay(day: string, days: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** المنصات التي يردّها Ayrshare يوماً بيوم. */
+const AYRSHARE_DAILY = new Set(['facebook', 'gmb', 'instagram', 'snapchat', 'tiktok', 'youtube']);
+
+/* ═══ Ayrshare: أرقام الحساب كاملةً ═══
+
+   كان يُقرأ منه المتابعون والمراجعات وحدها. وفيه — بالمفتاح نفسه — مشاهداتُ
+   محتوى كل حساب ووصولُه وزياراتُ ملفّه والمتابعون الجدد ومن ألغى المتابعة
+   ووقتُ المشاهدة والنقرُ إلى الموقع، وأداءُ الملف التجاري (الظهور والاتصال
+   والاتجاهات) بقرار المالك بدل الاعتماد المستقلّ في جوجل، وتوزيعُ الجمهور.
+
+   وأرقام الفترة من اليومي تُكتب للفترة المنقضية أيضاً — هي مجموعُ أيامها
+   لا لقطةُ اليوم — ما دامت نافذة Ayrshare تغطّي أوّلها (أربعة أرباعٍ على
+   الأكثر). واللقطات للفترة الجارية وحدها كما كانت. */
+async function fetchAyrshareSocial(env: Env, range: SourceRange): Promise<MetricPoint[]> {
+  const auth = ayrshareAuth(env);
+  if (!auth) throw new SourceError('مفتاح مزوّد النشر غير مضبوط. اضبط AYRSHARE_API_KEY.');
+  const today = riyadhToday();
+  const out: MetricPoint[] = [];
+
+  // إكس بلا مفتاحَي التطبيق يُرفض كل طلبٍ له — فلا يُطلب، كي لا يُسقط غيره
+  const hasX = !!(auth.x?.key && auth.x.secret);
+  const accounts = (await ayrshareUser(auth)).accounts.filter((a) => a.platform !== 'x' || hasX);
+  const internalOf = (p: string) => accounts.find((a) => ayrsharePlatform(a.platform) === p)?.platform ?? p;
+
+  if (range.end >= today) {
+    /* المتابعون لقطةٌ لا مجموع فترة: العدد اليوم هو العدد، ولا يُجمع على أيام
+       الشهر. والنموّ يُحتسب بمقارنة الفترتين في `services/metrics.ts`. */
+    const wanted = accounts.filter((a) => a.platform !== 'google');
+    const platforms = [...new Set(wanted.map((a) => ayrsharePlatform(a.platform)))];
+    const aggregate = platforms.length ? await ayrshareSocialAnalytics(auth, platforms) : null;
+    if (aggregate) {
+      for (const acc of ayrshareFollowers(wanted, aggregate)) {
+        if (acc.followers === null) continue; // منصّة لا تُعلن العدد — يبقى تسجيلها باليد
+        out.push({ metricKey: 'followers_total', dimKey: 'platform', dimValue: acc.platform, value: acc.followers });
+      }
+      out.push(...ayrshareAudiencePoints(aggregate));
+    }
+
+    const ayrReviews = await ayrshareReviewSummary(auth);
+    if (ayrReviews) {
+      out.push({ metricKey: 'gbp_reviews', value: ayrReviews.count });
+      if (ayrReviews.average !== null) out.push({ metricKey: 'gbp_rating', value: ayrReviews.average, sample: ayrReviews.count });
+    }
+
+    // لينكدإن الشخصي: متابعوه الجدد يوماً بيوم في الردّ المجموع (ثلاثون يوماً)
+    const li = aggregate?.linkedin?.analytics;
+    const liNew = li ? linkedInNewFollowers(li, range, today) : null;
+    if (liNew !== null) out.push({ metricKey: 'new_followers', dimKey: 'platform', dimValue: internalOf('linkedin'), value: liNew });
+  }
+
+  // أرقام الفترة يوماً بيوم — الأرباعُ بقدر ما يغطّي أوّلَها، وفوق أربعةٍ لا يُطلب
+  const daily = [...new Set(accounts.map((a) => ayrsharePlatform(a.platform)).filter((p) => AYRSHARE_DAILY.has(p)))];
+  const quarters = Math.max(1, Math.ceil(daysBetween(range.start, today) / 85));
+  if (daily.length && quarters <= 4) {
+    const data = await ayrshareSocialAnalytics(auth, daily, { daily: true, quarters });
+    for (const p of daily) {
+      const windowStart = shiftDay(today, -(dailyWindowDays(p, quarters) - 1));
+      out.push(...ayrshareDailyPoints(p, internalOf(p), data?.[p]?.analytics, range, windowStart));
+    }
+  }
+  return out;
+}
+
 async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Promise<MetricPoint[]> {
   const ayrshare = (await activeProvider(env)) === 'ayrshare';
-  const key = providerKey(env, ayrshare ? 'ayrshare' : 'socialapi');
-  if (!key) {
-    throw new SourceError(`مفتاح مزوّد النشر غير مضبوط. اضبط ${ayrshare ? 'AYRSHARE_API_KEY' : 'SOCIALAPI_API_KEY'}.`);
-  }
+  if (ayrshare) return fetchAyrshareSocial(env, range);
+  const key = providerKey(env, 'socialapi');
+  if (!key) throw new SourceError('مفتاح مزوّد النشر غير مضبوط. اضبط SOCIALAPI_API_KEY.');
 
   /* ═══ الثلاثة لقطاتٌ لا مجاميع، فلا تُكتب في فترةٍ منقضية ═══
 
@@ -426,11 +500,7 @@ async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Pr
   /* المتابعون لقطةٌ لا مجموع فترة: العدد اليوم هو العدد، ولا يُجمع على أيام
      الشهر. والنموّ يُحتسب بمقارنة الفترتين في `services/metrics.ts` كما كان
      يُحتسب حين كان يُسجَّل باليد. */
-  const auth = ayrshare ? ayrshareAuth(env) : null;
-  const audience = auth
-    ? await ayrshareAudience(auth, (await ayrshareUser(auth)).accounts)
-    : await socialApiAudience(key);
-  for (const acc of audience) {
+  for (const acc of await socialApiAudience(key)) {
     if (acc.followers === null) continue; // منصّة لا تُعلن العدد — يبقى تسجيله باليد
     out.push({ metricKey: 'followers_total', dimKey: 'platform', dimValue: acc.platform, value: acc.followers });
   }
@@ -438,9 +508,7 @@ async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Pr
   let reviewCount = 0;
   let weighted = 0;
   let sawAverage = false;
-  const ayrReviews = auth ? await ayrshareReviewSummary(auth) : null;
-  const reviews = auth ? (ayrReviews ? [ayrReviews] : []) : await socialApiReviewSummary(key);
-  for (const r of reviews) {
+  for (const r of await socialApiReviewSummary(key)) {
     if (r.count !== null) reviewCount += r.count;
     if (r.average !== null && r.count) {
       weighted += r.average * r.count;
