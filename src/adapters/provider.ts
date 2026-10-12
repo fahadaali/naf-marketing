@@ -144,6 +144,8 @@ export interface PublishingProvider {
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
    */
   getPublishStatus?(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null>;
+  /** وقتُ منشورٍ بالنصّ نفسه في سجلّ المنصة بعد `since` — أو `null`. اختيارية. */
+  findOnPlatform?(ctx: { platform: string; text: string; since: string }): Promise<string | null>;
   /**
    * فحصٌ مسبق بلا نشر: ما سترفضه المنصة من هذا المحتوى — بنصٍّ يُعرض كما هو.
    * اختيارية؛ ومن لا يُعلن حدود منصاته يردّ قائمةً فارغة.
