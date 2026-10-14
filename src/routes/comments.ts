@@ -10,6 +10,7 @@ import { diagnoseInbox } from '../adapters/socialapi';
 import { suggestReplies } from '../services/claude';
 import { htmlToText } from '../util';
 import { parseThread } from '../services/inboxThread';
+import { commentsCoverage } from '../services/commentsCoverage';
 
 export const commentRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -147,6 +148,12 @@ commentRoutes.get('/diagnose', requirePermission('settings.manage'), async (c) =
   if (!key) return c.json({ error: 'مفتاح SocialAPI غير مضبوط' }, 400);
   // يُفتح في المتصفح لا في الواجهة، وبعض متصفحات الجوال تقرأ JSON بلا ترميزٍ معلَن لاتينياً
   return c.json(await diagnoseInbox(key), 200, { 'Content-Type': 'application/json; charset=utf-8' });
+});
+
+/* تغطية الصندوق لكل منصة — لماذا لا تظهر تعليقات منشورٍ قديم أو منشورٍ من
+   خارج المنصة. قراءةٌ من قاعدة البيانات وحدها، تُفتح في المتصفح بالجلسة نفسها. */
+commentRoutes.get('/coverage', requirePermission('settings.manage'), async (c) => {
+  return c.json(await commentsCoverage(c.env), 200, { 'Content-Type': 'application/json; charset=utf-8' });
 });
 
 // تشخيص مؤقت: يُظهر الاستجابات الخام من SocialAPI لتحديد أسماء الحقول الفعلية
