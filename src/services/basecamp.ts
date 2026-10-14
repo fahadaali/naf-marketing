@@ -189,6 +189,20 @@ export async function moveCard(env: Env, projectId: string, cardId: string, colu
   });
   if (!res.ok) throw new Error(`تعذّر نقل البطاقة (${res.status})`);
 }
+// بطاقات عمودٍ واحد — بصفحاته كلها (بيسكامب يردّ خمسين في الصفحة)
+export type BcCard = { id: string; title: string; app_url: string; created_at: string };
+export async function listCards(env: Env, projectId: string, columnId: string): Promise<BcCard[]> {
+  const out: BcCard[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const items = await bcJson<any[]>(env, `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json?page=${page}`);
+    if (!items?.length) break;
+    for (const it of items) {
+      out.push({ id: String(it.id), title: it.title || '', app_url: it.app_url || '', created_at: it.created_at || '' });
+    }
+    if (items.length < 50) break;
+  }
+  return out;
+}
 export async function trashRecording(env: Env, projectId: string, recordingId: string): Promise<void> {
   await bcFetch(env, `/buckets/${projectId}/recordings/${recordingId}/status/trashed.json`, { method: 'PUT' });
 }
