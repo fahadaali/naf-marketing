@@ -3,7 +3,9 @@ import { newId } from '../util';
 import {
   isConfigured, setting, getMgmtProjectId, getCardTableId, getColumns, createColumn,
   getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment, getComments, listCards,
+  getProjectPeople, createComment,
 } from './basecamp';
+import { escapeHtml } from './inline';
 import { notifyUsers, usersWithPermission } from './notify';
 import { isIdeaRow } from './planning';
 
@@ -114,7 +116,11 @@ async function ensureStageColumn(env: Env, projectId: string, stage: string): Pr
 }
 
 // المزامنة الأساسية — تُستدعى بعد أي إنشاء/انتقال/جدولة
-export async function syncPost(env: Env, postId: string): Promise<void> {
+/** `announce: false` في إعادة المزامنة الشاملة: مئات البطاقات تُنشأ من جديد، وذكرُ
+ *  الأعضاء في كلٍّ منها مئاتُ إشعارٍ لا خبر فيها. */
+export type SyncOpts = { announce?: boolean };
+
+export async function syncPost(env: Env, postId: string, opts: SyncOpts = {}): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
 
@@ -140,7 +146,7 @@ export async function syncPost(env: Env, postId: string): Promise<void> {
   if (!map || !map.todo_id) {
     if (!(await claimCard(env, postId, !!map))) return;
     try {
-      await createTrackedCard(env, projectId, post);
+      await createTrackedCard(env, projectId, post, opts);
     } catch (err) {
       await env.DB.prepare('DELETE FROM basecamp_tasks WHERE post_id = ? AND todo_id IS NULL').bind(postId).run();
       throw err;
@@ -156,6 +162,7 @@ export async function syncPost(env: Env, postId: string): Promise<void> {
     await env.DB.prepare(
       "UPDATE basecamp_tasks SET list_id = ?, stage = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?",
     ).bind(columnId, post.status, postId).run();
+    if (opts.announce !== false) await announceStage(env, projectId, map.todo_id, postId, post.status, false);
   }
   // حدّث محتوى البطاقة وتاريخها ومسؤوليها
   await updateCard(env, projectId, map.todo_id, input);
@@ -194,7 +201,7 @@ async function claimCard(env: Env, postId: string, held: boolean): Promise<boole
 /* تُنشأ البطاقة في عمود مرحلتها، ثم يُعاد قراءة المنشور: ما تغيّر أثناء الإنشاء —
    إرسالٌ للمراجعة لحق الحفظ، أو نصٌّ عُدّل — تركته المزامنة الأخرى لمن حجز،
    فيُطبَّق هنا. */
-async function createTrackedCard(env: Env, projectId: string, post: SyncRow): Promise<void> {
+async function createTrackedCard(env: Env, projectId: string, post: SyncRow, opts: SyncOpts): Promise<void> {
   const columnId = await ensureStageColumn(env, projectId, post.status);
   const input = await cardInput(env, projectId, post);
   const cardId = await createCard(env, projectId, columnId, input);
@@ -204,7 +211,13 @@ async function createTrackedCard(env: Env, projectId: string, post: SyncRow): Pr
 
   const now = await env.DB.prepare('SELECT id, title, body, status, planned_on, updated_at FROM content_posts WHERE id = ?')
     .bind(post.id).first<SyncRow>();
-  if (!now || !STAGE_LIST[now.status]) return;
+  const announce = opts.announce !== false;
+  if (!now || !STAGE_LIST[now.status]) {
+    if (announce) await announceStage(env, projectId, cardId, post.id, post.status, true);
+    return;
+  }
+  // يُعلن مرةً واحدة بالمرحلة التي استقرت عليها البطاقة
+  if (announce) await announceStage(env, projectId, cardId, post.id, now.status, now.status === post.status);
   if (now.status !== post.status) {
     const col = await ensureStageColumn(env, projectId, now.status);
     await moveCard(env, projectId, cardId, col);
@@ -215,6 +228,30 @@ async function createTrackedCard(env: Env, projectId: string, post: SyncRow): Pr
   if (now.updated_at !== post.updated_at || now.title !== post.title || now.body !== post.body) {
     await updateCard(env, projectId, cardId, await cardInput(env, projectId, now));
   }
+}
+
+/* إعلان المرحلة في البطاقة. نقلُ البطاقة بين الأعمدة لا يُشعر أحداً في بيسكامب،
+   وإنشاؤها كان بلا إشعار — فلم يكن يصل أحداً خبرُ مسودةٍ ولا اعتمادٍ ولا جدولة.
+   فيُكتب تعليقٌ يذكر كل أعضاء المشروع وقت كتابته (يتغيّرون، فلا قائمة ثابتة)،
+   والذكر يصل كلاً منهم إشعاراً. إلا صاحب الحساب المربوط: بيسكامب لا يُشعر
+   أحداً بما كتبه هو. والتعليق يُحفظ معرّفه ليُستثنى من سحب التعليقات العكسي. */
+async function announceStage(env: Env, projectId: string, cardId: string, postId: string, status: string, created: boolean): Promise<void> {
+  try {
+    const label = STAGE_LIST[status] || status;
+    const row = await env.DB.prepare(
+      created
+        ? 'SELECT u.name FROM content_posts p JOIN users u ON u.id = p.author_id WHERE p.id = ?'
+        : `SELECT u.name FROM approvals a JOIN users u ON u.id = a.actor_id
+           WHERE a.post_id = ? AND a.to_status = ? ORDER BY a.created_at DESC LIMIT 1`,
+    ).bind(...(created ? [postId] : [postId, status])).first<{ name: string }>();
+    const people = await getProjectPeople(env, projectId);
+    const what = created ? `أُنشئ في «${label}»` : `انتقل إلى «${label}»`;
+    const by = row?.name ? ` — بواسطة ${escapeHtml(row.name)}` : '';
+    const mentions = people.map((p) => `<bc-attachment sgid="${escapeHtml(p.sgid)}"></bc-attachment>`).join(' ');
+    const id = await createComment(env, projectId, cardId, `<div>${what}${by}</div>${mentions ? `<div>${mentions}</div>` : ''}`);
+    await env.DB.prepare('INSERT INTO basecamp_own_comments (comment_id, post_id) VALUES (?, ?) ON CONFLICT(comment_id) DO NOTHING')
+      .bind(id, postId).run();
+  } catch { /* الإعلان زيادة: تعذّره لا يعطّل نقل البطاقة */ }
 }
 
 /* تصحيحٌ دوري: بطاقةٌ مرحلتُها غير حالة منشورها تُزامَن. فالنشر في موعده يجعل
@@ -240,7 +277,7 @@ export async function resyncAll(env: Env): Promise<void> {
   const posts = (await env.DB.prepare(
     "SELECT id FROM content_posts WHERE status != 'archived' ORDER BY created_at ASC LIMIT 300",
   ).all<{ id: string }>()).results;
-  for (const p of posts) await syncPostSafe(env, p.id);
+  for (const p of posts) await syncPostSafe(env, p.id, { announce: false });
 }
 
 /* البطاقات اليتيمة: بطاقةٌ في جدول البطاقات لا يربطها النظام بمنشور، فلا تتحرك
@@ -309,8 +346,12 @@ async function syncCommentsForCard(env: Env, projectId: string, postId: string, 
     return 0;
   }
   let added = 0;
+  const own = new Set(
+    (await env.DB.prepare('SELECT comment_id FROM basecamp_own_comments WHERE post_id = ?').bind(postId).all<{ comment_id: string }>())
+      .results.map((r) => String(r.comment_id)),
+  );
   for (const cm of comments) {
-    if (!cm.content) continue;
+    if (!cm.content || own.has(String(cm.id))) continue;
     const res = await env.DB.prepare(
       `INSERT INTO post_notes (id, post_id, source, external_id, author_name, body, created_at)
        VALUES (?, ?, 'basecamp', ?, ?, ?, ?)
@@ -357,9 +398,9 @@ export async function syncCardCommentsForPost(env: Env, postId: string): Promise
 }
 
 // غلاف آمن للتشغيل في الخلفية (لا يعطّل عملية المستخدم مهما حدث)
-export async function syncPostSafe(env: Env, postId: string): Promise<void> {
+export async function syncPostSafe(env: Env, postId: string, opts: SyncOpts = {}): Promise<void> {
   try {
-    if (await isConfigured(env)) await syncPost(env, postId);
+    if (await isConfigured(env)) await syncPost(env, postId, opts);
   } catch { /* تُتجاهل أخطاء المزامنة */ }
 }
 export async function trashPostTaskSafe(env: Env, postId: string): Promise<void> {

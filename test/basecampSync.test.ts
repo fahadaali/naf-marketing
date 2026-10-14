@@ -31,10 +31,12 @@ vi.mock('../src/services/basecamp', () => ({
   createAttachment: vi.fn(),
   getComments: vi.fn(async () => []),
   listCards: vi.fn(async () => []),
+  getProjectPeople: vi.fn(async () => [{ id: 11, sgid: 'sg_11', name: 'أ' }, { id: 12, sgid: 'sg_12', name: 'ب' }]),
+  createComment: vi.fn(async () => 'cm_1'),
 }));
 vi.mock('../src/services/notify', () => ({ notifyUsers: vi.fn(), usersWithPermission: vi.fn(async () => []) }));
 
-import { syncPost, reconcileStages, findOrphanCards } from '../src/services/basecampSync';
+import { syncPost, reconcileStages, findOrphanCards, resyncAll, syncCardCommentsForPost } from '../src/services/basecampSync';
 import * as basecamp from '../src/services/basecamp';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -182,5 +184,54 @@ describe('تقرير البطاقات اليتيمة', () => {
       { id: 'card_2', title: 'عنوان', column: 'المسودات', url: 'https://3.basecamp.com/c/2', created_at: '2026-10-01', post_id: 'p1' },
     ]);
     expect(basecamp.trashRecording).not.toHaveBeenCalled();
+  });
+});
+
+describe('إشعار المرحلة في بيسكامب', () => {
+  it('إنشاءُ البطاقة يُعلَن بتعليقٍ يذكر كل أعضاء المشروع', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await syncPost(env, 'p1');
+    expect(basecamp.createComment).toHaveBeenCalledTimes(1);
+    const [, , card, html] = vi.mocked(basecamp.createComment).mock.calls[0];
+    expect(card).toBe('card_new');
+    expect(html).toContain('أُنشئ في «المسودات» — بواسطة فهد');
+    expect(html).toContain('<bc-attachment sgid="sg_11"></bc-attachment>');
+    expect(html).toContain('<bc-attachment sgid="sg_12"></bc-attachment>');
+  });
+
+  it('انتقالُ المرحلة يُعلَن باسم من نقلها، والتحديثُ بلا انتقال لا يُعلَن', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage) VALUES ('p1','card_1','col_pending_gm','pending_gm')").run();
+    db.prepare("UPDATE content_posts SET status = 'approved' WHERE id = 'p1'").run();
+    db.prepare("INSERT INTO approvals (id,post_id,from_status,to_status,actor_id) VALUES ('a1','p1','pending_gm','approved','usr_1')").run();
+    await syncPost(env, 'p1');
+    expect(vi.mocked(basecamp.createComment).mock.calls[0][3]).toContain('انتقل إلى «معتمد» — بواسطة فهد');
+    await syncPost(env, 'p1');
+    expect(basecamp.createComment).toHaveBeenCalledTimes(1);
+  });
+
+  it('تعليقُ المنصة لا يعود ملاحظةً على المنشور', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await syncPost(env, 'p1');
+    vi.mocked(basecamp.getComments).mockResolvedValueOnce([
+      { id: 'cm_1' as any, content: 'أُنشئ في «المسودات»', created_at: '', creator_name: 'ناف' },
+      { id: 'cm_2' as any, content: 'راجعوا العنوان', created_at: '', creator_name: 'سارة' },
+    ]);
+    expect(await syncCardCommentsForPost(env, 'p1')).toBe(1);
+    expect(db.prepare("SELECT body FROM post_notes WHERE post_id = 'p1'").all().map((r: any) => r.body)).toEqual(['راجعوا العنوان']);
+  });
+
+  it('إعادة المزامنة الشاملة لا تُعلن شيئاً', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await resyncAll(env);
+    expect(basecamp.createCard).toHaveBeenCalledTimes(1);
+    expect(basecamp.createComment).not.toHaveBeenCalled();
+  });
+
+  it('تعذّرُ الإعلان لا يعطّل نقل البطاقة', async () => {
+    seedPost('p1', '<p>نص</p>');
+    vi.mocked(basecamp.createComment).mockRejectedValueOnce(new Error('422'));
+    await syncPost(env, 'p1');
+    expect(db.prepare("SELECT todo_id FROM basecamp_tasks WHERE post_id = 'p1'").get().todo_id).toBe('card_new');
   });
 });
