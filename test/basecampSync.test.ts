@@ -36,7 +36,7 @@ vi.mock('../src/services/basecamp', () => ({
 }));
 vi.mock('../src/services/notify', () => ({ notifyUsers: vi.fn(), usersWithPermission: vi.fn(async () => []) }));
 
-import { syncPost, reconcileStages, findOrphanCards, resyncAll, syncCardCommentsForPost } from '../src/services/basecampSync';
+import { syncPost, reconcileStages, findOrphanCards, resyncAll, syncCardCommentsForPost, trashOrphanCards } from '../src/services/basecampSync';
 import * as basecamp from '../src/services/basecamp';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -233,5 +233,23 @@ describe('إشعار المرحلة في بيسكامب', () => {
     vi.mocked(basecamp.createComment).mockRejectedValueOnce(new Error('422'));
     await syncPost(env, 'p1');
     expect(db.prepare("SELECT todo_id FROM basecamp_tasks WHERE post_id = 'p1'").get().todo_id).toBe('card_new');
+  });
+});
+
+describe('نقل البطاقات اليتيمة إلى السلّة', () => {
+  it('ما سمّاه المدير ويكون الآن يتيماً مكرّراً وحده — وما سواه يُترك', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage) VALUES ('p1','card_1','col_published','published')").run();
+    vi.mocked(basecamp.getCardTableId).mockResolvedValueOnce('ct_1');
+    vi.mocked(basecamp.getColumns).mockResolvedValueOnce([{ id: 'col_draft', title: 'المسودات' }]);
+    vi.mocked(basecamp.listCards).mockResolvedValueOnce([
+      { id: 'card_1', title: 'عنوان', app_url: '', created_at: '' }, // مربوطة
+      { id: 'card_2', title: 'عنوان', app_url: '', created_at: '' }, // نسخة مكرّرة
+      { id: 'card_3', title: 'بطاقة يدوية', app_url: '', created_at: '' }, // يتيمة بلا منشور
+    ]);
+    const res = await trashOrphanCards(env, ['card_1', 'card_2', 'card_3', 'card_9']);
+    expect(res).toEqual({ trashed: ['card_2'], skipped: ['card_1', 'card_3', 'card_9'] });
+    expect(basecamp.trashRecording).toHaveBeenCalledTimes(1);
+    expect(basecamp.trashRecording).toHaveBeenCalledWith(env, 'proj_1', 'card_2');
   });
 });

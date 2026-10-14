@@ -308,6 +308,25 @@ export async function findOrphanCards(env: Env): Promise<OrphanCard[]> {
   return out;
 }
 
+/* نقلُ البطاقات اليتيمة إلى سلّة بيسكامب — بمعرّفاتٍ يسمّيها المدير من التقرير،
+   لا بقرارٍ من النظام. ويُعاد التحقق من كلٍّ منها: ما ليس يتيماً الآن، أو لا
+   منشور له بعنوانه نفسه وبطاقةٌ مربوطة (فليس نسخةً مكرّرة)، يُترك. والسلّة
+   تُسترجع منها البطاقة ثلاثين يوماً. */
+export async function trashOrphanCards(env: Env, ids: string[]): Promise<{ trashed: string[]; skipped: string[] }> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return { trashed: [], skipped: ids };
+  const orphans = new Map((await findOrphanCards(env)).map((o) => [o.id, o]));
+  const trashed: string[] = [];
+  const skipped: string[] = [];
+  for (const id of [...new Set(ids.map(String))]) {
+    const o = orphans.get(id);
+    if (!o || !o.post_id) { skipped.push(id); continue; }
+    await trashRecording(env, projectId, id);
+    trashed.push(id);
+  }
+  return { trashed, skipped };
+}
+
 export async function trashPostTask(env: Env, postId: string): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
