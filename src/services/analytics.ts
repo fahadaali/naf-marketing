@@ -15,6 +15,7 @@ import {
 import { ayrshareAuth } from '../adapters';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 import { newId, nowIso } from '../util';
+import { normalizePlatformKey } from '../platformLabels';
 
 /* ============================================================
    سحب لقطات المنشورات — ومنها تُحتسب الطبقتان الأولى والثانية.
@@ -93,7 +94,8 @@ function upsertStmt(env: Env, row: MetricRow): D1PreparedStatement {
        captured_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
   )
     .bind(
-      newId('an'), row.providerPostId, row.platform, row.title, row.postId, row.viaPlatform,
+      // باسم منصتنا لا باسم المزوّد (`twitter` من Buffer) — وإلا لم تُطلب تعليقاتها (0046)
+      newId('an'), row.providerPostId, normalizePlatformKey(row.platform), row.title, row.postId, row.viaPlatform,
       // بلا أرقام: غيابٌ يُكتب `NULL` لا صفراً — ولو أعاد المحوّل أصفاره
       row.metricsAt ? row.reach : null, row.metricsAt ? row.impressions : null, row.metricsAt ? row.engagement : null,
       row.sentAt, row.metricsAt ? row.metricsJson : null, row.externalUrl, row.source ?? null, row.providerUuid ?? null, row.metricsAt,

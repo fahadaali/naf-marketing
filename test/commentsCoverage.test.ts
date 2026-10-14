@@ -72,3 +72,22 @@ describe('تغطية الصندوق', () => {
     expect(out.history).toEqual([{ account: 'acc_x', state: '{"cursor":null,"doneAt":"2026-09-20T00:00:00Z"}' }]);
   });
 });
+
+describe('أسماء المنصات القديمة في اللقطات (0046)', () => {
+  it('تُردّ إلى مفاتيحنا بالخريطة المسجّلة، ولا يُمسّ لينكدإن', () => {
+    const fresh = new DatabaseSync(':memory:');
+    fresh.exec('PRAGMA foreign_keys = OFF');
+    const files = readdirSync(MIGRATIONS).filter((f) => /^0\d+.*\.sql$/.test(f)).sort();
+    const at = files.indexOf('0046_snapshot_platform_keys.sql');
+    for (const f of files.slice(0, at)) fresh.exec(readFileSync(join(MIGRATIONS, f), 'utf8'));
+    const ins = fresh.prepare('INSERT INTO analytics_snapshots (id, provider_post_id, platform) VALUES (?, ?, ?)');
+    ins.run('a', 'p_a', 'twitter');
+    ins.run('b', 'p_b', 'Instagram');
+    ins.run('c', 'p_c', 'linkedin');
+    ins.run('d', 'p_d', 'googlebusiness');
+    ins.run('e', 'p_e', 'unknown');
+    fresh.exec(readFileSync(join(MIGRATIONS, files[at]), 'utf8'));
+    const got = Object.fromEntries(fresh.prepare('SELECT id, platform FROM analytics_snapshots').all().map((r: any) => [r.id, r.platform]));
+    expect(got).toEqual({ a: 'x', b: 'instagram', c: 'linkedin', d: 'google', e: 'unknown' });
+  });
+});
