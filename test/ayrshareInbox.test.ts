@@ -278,6 +278,18 @@ describe('ردود لينكدإن', () => {
     await syncComments(env);
     expect(rows()[0]).toMatchObject({ platform: 'linkedin_page', reply_body: 'نعم، راسلنا', reply_source: 'external' });
   });
+
+  it('لقطةٌ باسم linkedin والمربوطُ صفحة: هي منشور الصفحة فتُطلب تعليقاتها', async () => {
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'urn:li:share:8', 'linkedin', ?, '[]')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: '107440355', platform: 'linkedin', type: 'corporate', displayName: 'شركة ناف القانونية' }] } });
+    routes['GET /comments/urn:li:share:8'] = () => ({ body: { status: 'success', linkedin: [
+      { comment: 'شكراً', commentId: 'c1', commentUrn: 'urn:li:comment:(urn:li:activity:8,1)', created: RECENT, from: { name: 'سالم' } },
+    ] } });
+    await syncComments(env);
+    expect(rows()[0]).toMatchObject({ platform: 'linkedin_page', author_name: 'سالم' });
+  });
 });
 
 describe('ما سُحب أيام SocialAPI', () => {

@@ -1410,7 +1410,11 @@ async function syncAyrshareComments(
   if (!byInternal.size) return;
   report.kinds.comment.ok = true;
 
-  const platforms = [...byInternal.keys()];
+  /* لينكدإن المربوط صفحةٌ لا حساب: لقطةٌ كُتبت `linkedin` (من جدولةٍ بمفتاح
+     الحساب أو من مزوّدٍ سابق) هي منشور الصفحة، فتُطلب تعليقاتها باسمها. */
+  const asPage = byInternal.has('linkedin_page') && !byInternal.has('linkedin');
+  const internalOf = (platform: string) => (asPage && platform === 'linkedin' ? 'linkedin_page' : platform);
+  const platforms = [...byInternal.keys(), ...(asPage ? ['linkedin'] : [])];
   const cutoff = new Date(Date.now() - AYRSHARE_RECENT_DAYS * DAY).toISOString();
   /* السجلّ كان يقف عند أحدث أربعمئةٍ من المنشورات القديمة، فما بعدها لا يُقرأ
      أبداً ولا يُختم السجلّ مكتملاً. والقراءة تدور بموعد آخر قراءة لا بتاريخ
@@ -1454,7 +1458,8 @@ async function syncAyrshareComments(
   const now = Date.now();
   type Queued = { postId: string; internal: string; ayr: string; signature: string; rank: number; age: number };
   const queue: Queued[] = [];
-  for (const p of posts) {
+  for (const row of posts) {
+    const p = { ...row, platform: internalOf(row.platform) };
     const ayr = ayrsharePlatform(p.platform);
     const st = stateOf.get(`ayrshare:${ayr}|${p.provider_post_id}`);
     const signature = commentsOf(p.metrics_json);
