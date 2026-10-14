@@ -90,6 +90,9 @@ export type InboxSyncReport = {
   fallback?: boolean;
   /** وقفت الدورة قبل حصّتها: المزوّد طلب التمهّل، أو بلغ الاستدعاء حدّ طلباته. */
   stoppedBy?: 'rate_limit' | 'platform_cap' | null;
+  /** منشوراتٌ ردّها المزوّد «غير موجود» لكل منصة — حُذفت، أو مفتاحها لا يعرفه.
+   *  ليس عطلاً فلا يُكتب في `errors`، لكنه يُعدّ: كان يُبتلع فيغيب السبب. */
+  notFound?: Record<string, number>;
 };
 
 const REPORT_KEY = 'inbox_sync_report';
@@ -1509,6 +1512,10 @@ async function syncAyrshareComments(
          واحد منه، ولا سطرٌ يقول لماذا. فيُحفظ الرفض لكل منصة بسببه، إلا
          «لا يوجد» (404 و186): منشورٌ حُذف لا عطلَ فيه. */
       const notFound = err.status === 404 || errorCodes(err.body).includes(186);
+      if (notFound) {
+        report.notFound ??= {};
+        report.notFound[q.internal] = (report.notFound[q.internal] ?? 0) + 1;
+      }
       if (!notFound && !refused.has(q.internal)) refused.set(q.internal, err.message);
       if (!postSpecificRejection(err)) {
         blocked.add(q.internal);

@@ -1392,6 +1392,9 @@ export type PlatformHistoryPage = {
   partial: boolean;
 };
 
+/** بادئة مؤشّرٍ نصنعه لفيسبوك: ما بعدها وقتٌ يُرسل في `until`. */
+const UNTIL = 'until:';
+
 /**
  * صفحةٌ من سجلّ منصة. `platform` باسم Ayrshare، و`internal` مفتاحها عندنا.
  * والمؤشّر `meta.pagination.next` لا يُعلنه التوثيق إلا لإكس وثريدز، فيُقرأ
@@ -1404,7 +1407,9 @@ export async function ayrsharePlatformHistory(
   opts: { limit: number; next?: string | null; budget?: CallBudget },
 ): Promise<PlatformHistoryPage> {
   const q = new URLSearchParams({ limit: String(opts.limit) });
-  if (opts.next) q.set('next', opts.next);
+  // مؤشّرنا لفيسبوك (`until:…`) — انظر آخر الدالة
+  if (opts.next?.startsWith(UNTIL)) q.set('until', opts.next.slice(UNTIL.length));
+  else if (opts.next) q.set('next', opts.next);
   // فيسبوك: ما نشرته الصفحة لا كلّ ما في خلاصتها من منشورات غيرها
   if (platform === 'facebook') q.set('pagePublished', 'true');
   /* ٤٠٠ مع `posts` ليس رفضاً: «When some of the data is not available from the
@@ -1437,7 +1442,16 @@ export async function ayrsharePlatformHistory(
     });
   }
   const pg = data?.meta?.pagination;
-  const next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+  let next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+  /* فيسبوك بلا مؤشّر، فكان لا يُقرأ منه إلا أحدث صفحة — ومنشورات الصفحة قبلها لا
+     تُكتشف فلا تُطلب تعليقاتها أبداً. وتوثيقه يقبل `until` (ما نُشر قبل وقتٍ أو
+     فيه): فالصفحة الممتلئة يليها ما قبل أقدم منشورٍ فيها بثانية. وإن لم يتقدّم
+     الوقت — Ayrshare تجاهل `until` — يقف، فلا تُعاد الصفحة نفسها بلا نهاية. */
+  if (!next && platform === 'facebook' && list.length >= opts.limit) {
+    const oldest = Math.min(...posts.map((p) => (p.sentAt ? Date.parse(p.sentAt) : Infinity)));
+    const prev = opts.next?.startsWith(UNTIL) ? Date.parse(opts.next.slice(UNTIL.length)) : Infinity;
+    if (Number.isFinite(oldest) && oldest - 1000 < prev) next = UNTIL + new Date(oldest - 1000).toISOString();
+  }
   return { posts, next, partial: String(data?.status || '') === 'partial' };
 }
 

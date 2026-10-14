@@ -250,7 +250,10 @@ describe('رفض المنصة لطلب التعليقات', () => {
     db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'T9', 'x', ?, '[]')").run(RECENT);
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
     routes['GET /comments/T9'] = () => ({ status: 400, body: { status: 'error', code: 186, message: 'Post ID not found' } });
-    expect((await syncComments(env))?.errors).toEqual([]);
+    const report = await syncComments(env);
+    expect(report?.errors).toEqual([]);
+    // ليس عطلاً، لكنه يُعدّ — كان يُبتلع فيغيب سبب ما لا يظهر
+    expect(report?.notFound).toEqual({ x: 1 });
   });
 });
 

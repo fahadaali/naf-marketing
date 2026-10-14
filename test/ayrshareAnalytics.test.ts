@@ -173,6 +173,46 @@ describe('السحب من Ayrshare', () => {
     expect(calls.filter((c) => c.key === 'POST /analytics/post')).toHaveLength(1);
   });
 
+  it('فيسبوك بلا مؤشّر يمضي إلى ما قبل أقدم منشورٍ في الصفحة الممتلئة، ويقف حين لا يتقدّم', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'fb1', platform: 'facebook', pageName: 'ناف' }] } });
+    const seen: (string | null)[] = [];
+    routes['GET /history/facebook'] = (url) => {
+      const until = url.searchParams.get('until');
+      seen.push(until);
+      const limit = Number(url.searchParams.get('limit'));
+      // ثلاث صفحاتٍ ممتلئة، كلٌّ أقدم من سابقتها بسنة، ثم صفحةٌ ناقصة
+      const page = until ? 2025 - Number(until.slice(0, 4)) + 1 : 0;
+      const year = 2025 - page;
+      const count = page < 3 ? limit : 2;
+      return {
+        body: {
+          status: 'success',
+          posts: Array.from({ length: count }, (_, i) => ({
+            id: `fb_${year}_${i}`, post: `منشور ${year} ${i}`,
+            created: new Date(Date.UTC(year, 11, 28 - (i % 28), 12, 0, i % 60)).toISOString(),
+          })),
+        },
+      };
+    };
+    await pullAnalytics(env, { mode: 'history' });
+    expect(seen[0]).toBeNull();
+    expect(seen.slice(1).every((u) => /^\d{4}-\d\d-\d\dT/.test(String(u)))).toBe(true);
+    expect(seen).toHaveLength(4);
+    expect(snaps().filter((r) => r.platform === 'facebook').length).toBe(100 * 3 + 2);
+  });
+
+  it('فيسبوك يتجاهل until: لا تُعاد الصفحة نفسها بلا نهاية', async () => {
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'fb1', platform: 'facebook', pageName: 'ناف' }] } });
+    let n = 0;
+    routes['GET /history/facebook'] = (url) => {
+      n++;
+      const limit = Number(url.searchParams.get('limit'));
+      return { body: { status: 'success', posts: Array.from({ length: limit }, (_, i) => ({ id: `fb_${i}`, post: 'x', created: '2025-06-01T00:00:00Z' })) } };
+    };
+    await pullAnalytics(env, { mode: 'history' });
+    expect(n).toBe(2);
+  });
+
   it('السجلّ يمضي بمؤشّر إكس من دورةٍ إلى دورة ثم يُختم مقروءاً', async () => {
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
     routes['GET /history/twitter'] = (url) => {
