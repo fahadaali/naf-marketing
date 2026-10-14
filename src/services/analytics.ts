@@ -55,6 +55,8 @@ type MetricRow = {
   externalUrl: string | null; // رابط المنشور على منصته
   source?: string | null; // 'posts' | 'account' | 'export' | null
   providerUuid?: string | null; // معرّف المنشور عند SocialAPI — به تُطلب أرقامه الحيّة
+  /** معرّف المنشور على منصته — به تُطلب تعليقاته وإن بقي مفتاحه من مزوّدٍ سابق (0045). */
+  nativePostId?: string | null;
   /** وقت الأرقام إن حملها الصفّ — وإلا فلا أرقام فيه تُكتب. */
   metricsAt: string | null;
 };
@@ -70,8 +72,8 @@ function upsertStmt(env: Env, row: MetricRow): D1PreparedStatement {
   return env.DB.prepare(
     `INSERT INTO analytics_snapshots
        (id, provider_post_id, platform, title, post_id, via_platform, reach, impressions, engagement, sent_at,
-        metrics_json, external_url, source, provider_uuid, metrics_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        metrics_json, external_url, source, provider_uuid, metrics_at, native_post_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(provider_post_id) DO UPDATE SET
        platform = excluded.platform,
        title = COALESCE(excluded.title, analytics_snapshots.title),
@@ -81,6 +83,7 @@ function upsertStmt(env: Env, row: MetricRow): D1PreparedStatement {
        external_url = COALESCE(excluded.external_url, analytics_snapshots.external_url),
        source = COALESCE(analytics_snapshots.source, excluded.source),
        provider_uuid = COALESCE(excluded.provider_uuid, analytics_snapshots.provider_uuid),
+       native_post_id = COALESCE(excluded.native_post_id, analytics_snapshots.native_post_id),
        -- لقطةٌ بلا أرقام لا تمسّ ما قيس قبلها، ومقياسٌ لم يُعلَن هذه المرّة يبقى على آخر ما أُعلن
        reach = CASE WHEN excluded.metrics_at IS NULL THEN analytics_snapshots.reach ELSE COALESCE(excluded.reach, analytics_snapshots.reach) END,
        impressions = CASE WHEN excluded.metrics_at IS NULL THEN analytics_snapshots.impressions ELSE COALESCE(excluded.impressions, analytics_snapshots.impressions) END,
@@ -94,6 +97,7 @@ function upsertStmt(env: Env, row: MetricRow): D1PreparedStatement {
       // بلا أرقام: غيابٌ يُكتب `NULL` لا صفراً — ولو أعاد المحوّل أصفاره
       row.metricsAt ? row.reach : null, row.metricsAt ? row.impressions : null, row.metricsAt ? row.engagement : null,
       row.sentAt, row.metricsAt ? row.metricsJson : null, row.externalUrl, row.source ?? null, row.providerUuid ?? null, row.metricsAt,
+      row.nativePostId ?? null,
     );
 }
 
@@ -514,6 +518,8 @@ async function ingestAccountPosts(
       externalUrl: h.externalUrl,
       source: 'account',
       metricsAt,
+      // المفتاح قد يبقى من مزوّدٍ سابق، والمعرّف الأصلي يُحفظ بجانبه
+      nativePostId: h.id,
     }));
     if (!match) {
       report.newNative++;
@@ -875,6 +881,7 @@ async function pullAllAyrshare(
             source: 'posts',
             providerUuid: post.ayrId,
             metricsAt: null,
+            nativePostId: t.id,
           }));
           report.posts++;
           captured++;

@@ -151,6 +151,20 @@ describe('السحب من Ayrshare', () => {
     expect(report).toMatchObject({ ok: true, provider: 'ayrshare', posts: 1, newNative: 1, refreshed: 2 });
   });
 
+  it('لقطةٌ قديمة يطابقها سجلّ المنصة تبقى بمفتاحها، ويُحفظ معرّفها الأصلي بجانبه', async () => {
+    // من حقبة SocialAPI: مفتاحها نائبٌ لا يعرفه Ayrshare
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, external_url) VALUES ('old', 'uuid-1:instagram', 'instagram', ?, 'https://www.instagram.com/p/A/')",
+    ).run(RECENT);
+    routes['GET /history/instagram'] = () => ({
+      body: { status: 'success', posts: [{ id: 'ig_100', post: 'قديم', created: RECENT, postUrl: 'https://www.instagram.com/p/A/', likeCount: 1 }] },
+    });
+    routes['POST /analytics/post'] = (_u, body) => ({ body: { instagram: body.postIds.map((id: string) => ({ id, analytics: { reachCount: 5 } })) } });
+    await pullAnalytics(env);
+    expect(snaps()).toHaveLength(1);
+    expect(snaps()[0]).toMatchObject({ provider_post_id: 'uuid-1:instagram', native_post_id: 'ig_100' });
+  });
+
   it('لا يطلب أرقام منشورٍ طُلبت قبل ساعات', async () => {
     routes['GET /history/instagram'] = () => ({ body: { status: 'success', posts: [{ id: 'ig_1', post: 'x', created: RECENT, likeCount: 1 }] } });
     routes['POST /analytics/post'] = (_u, body) => ({ body: { instagram: body.postIds.map((id: string) => ({ id, analytics: { reachCount: 5 } })) } });

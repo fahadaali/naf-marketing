@@ -24,6 +24,8 @@ export type PlatformCoverage = {
   older_than_30d: number;
   /** معرّفٌ من مزوّدٍ سابق: نائبُ SocialAPI (`…:منصة`) أو معرّف Buffer (٢٤ خانة ست عشرية) */
   legacy_id: number;
+  /** منها ما عُرف معرّفه الأصلي فتُطلب به تعليقاته */
+  legacy_resolved: number;
   never_read: number;
   read_without_comments: number;
   with_comments: number;
@@ -46,6 +48,7 @@ export async function commentsCoverage(env: Env): Promise<{
                   OR (length(s.provider_post_id) = 24 AND s.provider_post_id NOT GLOB '*[^0-9a-f]*'
                       AND s.provider_post_id GLOB '*[a-f]*')
                 THEN 1 ELSE 0 END) AS legacy_id,
+       SUM(CASE WHEN s.native_post_id IS NOT NULL AND s.native_post_id <> s.provider_post_id THEN 1 ELSE 0 END) AS legacy_resolved,
        SUM(CASE WHEN st.inbox_post_id IS NULL THEN 1 ELSE 0 END) AS never_read,
        SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL THEN 1 ELSE 0 END) AS read_without_comments,
        SUM(CASE WHEN c.n IS NOT NULL THEN 1 ELSE 0 END) AS with_comments,
@@ -53,14 +56,14 @@ export async function commentsCoverage(env: Env): Promise<{
        MAX(s.sent_at) AS newest_post
      FROM analytics_snapshots s
      LEFT JOIN (SELECT DISTINCT inbox_post_id FROM inbox_post_state WHERE account_id LIKE 'ayrshare:%') st
-       ON st.inbox_post_id = s.provider_post_id
+       ON st.inbox_post_id = COALESCE(s.native_post_id, s.provider_post_id)
      LEFT JOIN (
        SELECT substr(rest, 1, instr(rest, '|') - 1) AS post, COUNT(*) AS n FROM (
          SELECT substr(after, instr(after, '|') + 1) AS rest FROM (
            SELECT substr(provider_comment_id, 5) AS after FROM platform_comments WHERE provider_comment_id LIKE 'ayc|%'
          )
        ) GROUP BY post
-     ) c ON c.post = s.provider_post_id
+     ) c ON c.post = COALESCE(s.native_post_id, s.provider_post_id)
      WHERE s.provider_post_id IS NOT NULL AND COALESCE(s.source, '') <> 'newsletter'
      GROUP BY s.platform
      ORDER BY posts DESC`,

@@ -1413,10 +1413,15 @@ async function syncAyrshareComments(
      أبداً ولا يُختم السجلّ مكتملاً. والقراءة تدور بموعد آخر قراءة لا بتاريخ
      النشر، فيكفي سقفٌ أوسع يحمل المنشورات كلّها. */
   const { results: posts } = await env.DB.prepare(
-    `SELECT provider_post_id, platform, metrics_json FROM analytics_snapshots
+    /* بالمعرّف الأصلي على المنصة إن عُرف (0045): مفتاحُ لقطةٍ من مزوّدٍ سابق يردّه
+       Ayrshare «غير موجود». ولقطتان لمنشورٍ واحد — بالمفتاح القديم وبالأصلي —
+       تُطلبان مرّةً واحدة. */
+    `SELECT COALESCE(native_post_id, provider_post_id) AS provider_post_id, platform, MAX(metrics_json) AS metrics_json
+     FROM analytics_snapshots
      WHERE platform IN (${platforms.map(() => '?').join(',')})
        AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
-     ORDER BY sent_at DESC
+     GROUP BY COALESCE(native_post_id, provider_post_id), platform
+     ORDER BY MAX(sent_at) DESC
      LIMIT ${history ? 3000 : 400}`,
   )
     .bind(...platforms, cutoff)
