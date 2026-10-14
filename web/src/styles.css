@@ -195,6 +195,9 @@ h3, h4 { letter-spacing: -0.01em; }
 }
 .rte:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 15%, transparent); }
 .rte:empty:before { content: attr(data-placeholder); color: var(--muted-foreground); }
+/* الفقرة في المحرر سطرٌ كما تُنشر: هامشُها الافتراضي كان يُريها مفصولةً بسطرٍ
+   فارغ لا يُنشر، فيُرى في المحرر غيرُ ما يصل المنصة. */
+.rte p { margin: 0; }
 .rte h2 { font-size: var(--text-xl); }
 .rte blockquote { border-inline-start: 3px solid var(--primary); margin: var(--space-2) 0; padding-inline-start: var(--space-3); color: var(--muted-foreground); }
 

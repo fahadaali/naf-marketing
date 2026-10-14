@@ -10,7 +10,7 @@ import {
   exchangeCode,
 } from '../services/basecamp';
 import { buildReportWorkbook, uploadWeeklyReport, uploadMonthlyReport, sheetsToCsv, type ReportPeriod } from '../services/report';
-import { resyncAll, syncCardComments, syncCardCommentsForPost } from '../services/basecampSync';
+import { resyncAll, syncCardComments, syncCardCommentsForPost, findOrphanCards, trashOrphanCards } from '../services/basecampSync';
 import { logAudit } from '../services/audit';
 
 // أيقونة CircleCheck من Lucide حرفياً — الصفحة HTML خام من الخادم لا React،
@@ -75,6 +75,8 @@ basecampRoutes.use('/generate', requireAuth);
 basecampRoutes.use('/report/*', requireAuth);
 basecampRoutes.use('/resync', requireAuth);
 basecampRoutes.use('/sync-comments', requireAuth);
+basecampRoutes.use('/orphans', requireAuth);
+basecampRoutes.use('/orphans/*', requireAuth);
 
 basecampRoutes.get('/status', async (c) => {
   const configured = await isConfigured(c.env);
@@ -128,6 +130,34 @@ basecampRoutes.post('/resync', requirePermission('settings.manage'), async (c) =
   const actor = c.get('user');
   c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'basecamp_resync', 'basecamp', undefined, `${cnt} منشور`));
   return c.json({ ok: true, queued: cnt });
+});
+
+// البطاقات اليتيمة في جدول البطاقات — تقريرٌ للمدير العام، قراءةٌ فقط لا يحذف شيئاً
+basecampRoutes.get('/orphans', requirePermission('settings.manage'), async (c) => {
+  if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
+  try {
+    const cards = await findOrphanCards(c.env);
+    return c.json({ count: cards.length, cards });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
+});
+
+// نقل بطاقاتٍ يتيمة مكرّرة إلى سلّة بيسكامب — بمعرّفاتٍ من التقرير أعلاه، ويُسجَّل في سجلّ التدقيق
+basecampRoutes.post('/orphans/trash', requirePermission('settings.manage'), async (c) => {
+  if (!(await isConfigured(c.env))) return c.json({ error: 'لم يُضبط تكامل بيسكامب بعد' }, 400);
+  const { ids } = await c.req.json<{ ids?: unknown }>().catch(() => ({ ids: undefined }));
+  if (!Array.isArray(ids) || !ids.length) return c.json({ error: 'اختر البطاقات من تقرير البطاقات اليتيمة' }, 400);
+  try {
+    const res = await trashOrphanCards(c.env, ids.slice(0, 200).map(String));
+    const actor = c.get('user');
+    if (res.trashed.length) {
+      c.executionCtx.waitUntil(logAudit(c.env, { id: actor.id, name: actor.name }, 'basecamp_orphans_trash', 'basecamp', undefined, res.trashed.join(',')));
+    }
+    return c.json({ ok: true, ...res });
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e) }, 502);
+  }
 });
 
 // مزامنة يدوية فورية لتعليقات بيسكامب — لمنشور محدّد (post_id) أو للكل عند غيابه

@@ -159,20 +159,28 @@ const WEIGHT_FIELD: Record<string, string> = {
 export type PostWeight = { length: number; max: number; valid: boolean };
 
 /** طول النص وحدّه لكل منصةٍ لدى Ayrshare — باسمها عنده (`twitter`، `gmb`…). */
-export function mapPostWeight(data: any): Record<string, PostWeight> {
+/* حسابُ إكس المشترك في Premium ينشر حتى ٢٥ ألف حرف، وAyrshare يقبل منه المنشور
+   الطويل تلقائياً. وكان العدّاد والفحص عند الجدولة يقيسان بحدّ ٢٨٠ وحده، فيُنذَر
+   كاتبُ حسابٍ مشترك بأن نصّه «أطول من حدّ إكس» وهو ليس كذلك. فإن كان الحساب
+   مشتركاً قيس بالحدّ الطويل (`twitterLong`) وحكمه (`twitterLongValid`). */
+export function mapPostWeight(data: any, opts: { xPremium?: boolean } = {}): Record<string, PostWeight> {
   const out: Record<string, PostWeight> = {};
   for (const [ayr, field] of Object.entries(WEIGHT_FIELD)) {
+    const long = ayr === 'twitter' && opts.xPremium
+      && Number.isFinite(Number(data?.maxCharLimits?.twitterLong)) && typeof data?.twitterLongValid === 'boolean';
     const length = Number(data?.[`${field}WeightedLength`]);
-    const max = Number(data?.maxCharLimits?.[ayr]);
-    const valid = data?.[`${field}Valid`];
+    const max = Number(data?.maxCharLimits?.[long ? 'twitterLong' : ayr]);
+    const valid = data?.[long ? 'twitterLongValid' : `${field}Valid`];
     if (!Number.isFinite(length) || !Number.isFinite(max) || typeof valid !== 'boolean') continue;
     out[ayr] = { length, max, valid };
   }
   return out;
 }
 
-export async function ayrsharePostWeight(auth: AyrshareAuth, text: string): Promise<Record<string, PostWeight>> {
-  return mapPostWeight(await ayrshareCall<any>(auth, 'POST', '/post/checkPostWeight', { post: text }));
+export async function ayrsharePostWeight(
+  auth: AyrshareAuth, text: string, opts: { xPremium?: boolean } = {},
+): Promise<Record<string, PostWeight>> {
+  return mapPostWeight(await ayrshareCall<any>(auth, 'POST', '/post/checkPostWeight', { post: text }), opts);
 }
 
 /* ═══ وصفُ الوسائط لكل منصة: النص البديل ووسم الذكاء الاصطناعي ═══
@@ -574,7 +582,19 @@ export type AyrshareAccount = {
   ownerKeys: string[];
   /** معرّف قناة يوتيوب بحروفه (`UC…`) — به تُقرأ قائمة مقاطعها العامة. */
   channelId?: string;
+  /** حسابُ إكس مشتركٌ في Premium — ينشر المنشور الطويل. */
+  premium?: boolean;
 };
+
+/* اشتراك إكس كما في توثيق «Get User»: `subscriptionType` (Premium أو PremiumPlus)،
+   أو `verifiedType` (blue أو business — وكلاهما Premium عنده). والثاني لا يُحدَّث
+   إلا بعد منشورٍ عبر Ayrshare، فيُقبل أيٌّ منهما. */
+export function isXPremium(entry: any): boolean {
+  if (String(entry?.platform || '').toLowerCase() !== 'twitter') return false;
+  const sub = String(entry?.subscriptionType || '').toLowerCase();
+  const ver = String(entry?.verifiedType || '').toLowerCase();
+  return sub === 'premium' || sub === 'premiumplus' || ver === 'blue' || ver === 'business';
+}
 
 /** مفتاحٌ موحَّد للمقارنة: بحروفٍ صغيرة وبلا «@». */
 export function ownerKey(v: unknown): string {
@@ -609,6 +629,7 @@ export function mapAyrshareAccounts(user: any): AyrshareAccount[] {
         .map(ownerKey)
         .filter(Boolean),
       ...(typeof e.channelId === 'string' && e.channelId ? { channelId: e.channelId } : {}),
+      ...(isXPremium(e) ? { premium: true } : {}),
     }));
 }
 
@@ -618,6 +639,26 @@ export async function ayrshareUser(
 ): Promise<{ accounts: AyrshareAccount[]; messagingEnabled: boolean }> {
   const user = await ayrshareCall<any>(auth, 'GET', '/user', undefined, budget);
   return { accounts: mapAyrshareAccounts(user), messagingEnabled: user?.messagingEnabled === true };
+}
+
+/* اشتراك إكس يُسأل عنه مرةً في الساعة لكل عامل: العدّاد يطلب الطول كلما هدأت
+   الكتابة، والاشتراك لا يتغيّر بينها. وتعذّرُ السؤال يُعدّ «غير مشترك» —
+   الحدّ القصير إنذارٌ لا منع. */
+let premiumCache: { key: string; value: boolean; exp: number } = { key: '', value: false, exp: 0 };
+/** للاختبارات: يُنسى ما حُفظ من الاشتراك. */
+export function forgetXPremium(): void {
+  premiumCache = { key: '', value: false, exp: 0 };
+}
+export async function ayrshareXPremium(auth: AyrshareAuth): Promise<boolean> {
+  if (premiumCache.key === auth.key && premiumCache.exp > Date.now()) return premiumCache.value;
+  try {
+    const { accounts } = await ayrshareUser(auth);
+    const value = accounts.some((a) => a.platform === 'x' && a.premium);
+    premiumCache = { key: auth.key, value, exp: Date.now() + 60 * 60_000 };
+    return value;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -725,7 +766,8 @@ export class AyrshareProvider implements PublishingProvider {
     const targets = [...new Set(input.platforms)];
     if (input.text) {
       try {
-        const weight = await ayrsharePostWeight(auth, input.text);
+        const xPremium = targets.includes('x') && (await ayrshareXPremium(auth));
+        const weight = await ayrsharePostWeight(auth, input.text, { xPremium });
         // سلسلة إكس تقسم نصّها، والقصة لا نصّ لها — فلا يُعدّ طولها عيباً
         const exempt = (p: string) =>
           (p === 'x' && input.options?.thread) || ((p === 'instagram' || p === 'facebook') && input.options?.story);
@@ -1350,6 +1392,9 @@ export type PlatformHistoryPage = {
   partial: boolean;
 };
 
+/** بادئة مؤشّرٍ نصنعه لفيسبوك: ما بعدها وقتٌ يُرسل في `until`. */
+const UNTIL = 'until:';
+
 /**
  * صفحةٌ من سجلّ منصة. `platform` باسم Ayrshare، و`internal` مفتاحها عندنا.
  * والمؤشّر `meta.pagination.next` لا يُعلنه التوثيق إلا لإكس وثريدز، فيُقرأ
@@ -1362,7 +1407,9 @@ export async function ayrsharePlatformHistory(
   opts: { limit: number; next?: string | null; budget?: CallBudget },
 ): Promise<PlatformHistoryPage> {
   const q = new URLSearchParams({ limit: String(opts.limit) });
-  if (opts.next) q.set('next', opts.next);
+  // مؤشّرنا لفيسبوك (`until:…`) — انظر آخر الدالة
+  if (opts.next?.startsWith(UNTIL)) q.set('until', opts.next.slice(UNTIL.length));
+  else if (opts.next) q.set('next', opts.next);
   // فيسبوك: ما نشرته الصفحة لا كلّ ما في خلاصتها من منشورات غيرها
   if (platform === 'facebook') q.set('pagePublished', 'true');
   /* ٤٠٠ مع `posts` ليس رفضاً: «When some of the data is not available from the
@@ -1395,7 +1442,16 @@ export async function ayrsharePlatformHistory(
     });
   }
   const pg = data?.meta?.pagination;
-  const next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+  let next = pg?.hasMore && pg?.next ? String(pg.next) : null;
+  /* فيسبوك بلا مؤشّر، فكان لا يُقرأ منه إلا أحدث صفحة — ومنشورات الصفحة قبلها لا
+     تُكتشف فلا تُطلب تعليقاتها أبداً. وتوثيقه يقبل `until` (ما نُشر قبل وقتٍ أو
+     فيه): فالصفحة الممتلئة يليها ما قبل أقدم منشورٍ فيها بثانية. وإن لم يتقدّم
+     الوقت — Ayrshare تجاهل `until` — يقف، فلا تُعاد الصفحة نفسها بلا نهاية. */
+  if (!next && platform === 'facebook' && list.length >= opts.limit) {
+    const oldest = Math.min(...posts.map((p) => (p.sentAt ? Date.parse(p.sentAt) : Infinity)));
+    const prev = opts.next?.startsWith(UNTIL) ? Date.parse(opts.next.slice(UNTIL.length)) : Infinity;
+    if (Number.isFinite(oldest) && oldest - 1000 < prev) next = UNTIL + new Date(oldest - 1000).toISOString();
+  }
   return { posts, next, partial: String(data?.status || '') === 'partial' };
 }
 

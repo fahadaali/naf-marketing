@@ -161,6 +161,24 @@ describe('مزامنة صندوق Ayrshare', () => {
     expect(calls.some((c) => c.key === 'GET /comments/P1')).toBe(true);
   });
 
+  it('لقطةٌ بمعرّف مزوّدٍ سابق تُطلب تعليقاتها بمعرّفها الأصلي، ولقطتا المنشور الواحد مرّةً', async () => {
+    // منشورٌ من حقبة Buffer: مفتاحه معرّف Buffer، وعرف سجلُّ المنصة معرّفه الأصلي
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, native_post_id, platform, sent_at) VALUES ('a2', '5f8d0d55b54764421b7156c9', 'P2', 'facebook', ?)",
+    ).run(RECENT);
+    // ولقطةٌ ثانية للمنشور نفسه بمفتاحه الأصلي
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, native_post_id, platform, sent_at) VALUES ('a3', 'P2', 'P2', 'facebook', ?)",
+    ).run(RECENT);
+    routes['GET /comments/P2'] = () => ({
+      body: { status: 'success', facebook: [{ comment: 'منشورٌ قديم', commentId: 'P2_1', created: RECENT, from: { name: 'نورة' } }] },
+    });
+    await syncComments(env);
+    expect(calls.some((c) => c.key === 'GET /comments/5f8d0d55b54764421b7156c9')).toBe(false);
+    expect(calls.filter((c) => c.key === 'GET /comments/P2')).toHaveLength(1);
+    expect(rows().map((r) => r.author_name).sort()).toEqual(['سارة', 'نورة'].sort());
+  });
+
   it('مراجعات الملف التجاري بنجومها وردّها، وتنبيهٌ للسلبية الحديثة', async () => {
     routes['GET /reviews'] = (url) => (url.searchParams.get('platform') === 'gmb'
       ? { body: { gmb: [
@@ -232,7 +250,10 @@ describe('رفض المنصة لطلب التعليقات', () => {
     db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'T9', 'x', ?, '[]')").run(RECENT);
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'x1', platform: 'twitter', username: 'naf' }] } });
     routes['GET /comments/T9'] = () => ({ status: 400, body: { status: 'error', code: 186, message: 'Post ID not found' } });
-    expect((await syncComments(env))?.errors).toEqual([]);
+    const report = await syncComments(env);
+    expect(report?.errors).toEqual([]);
+    // ليس عطلاً، لكنه يُعدّ — كان يُبتلع فيغيب سبب ما لا يظهر
+    expect(report?.notFound).toEqual({ x: 1 });
   });
 });
 
@@ -256,6 +277,18 @@ describe('ردود لينكدإن', () => {
     };
     await syncComments(env);
     expect(rows()[0]).toMatchObject({ platform: 'linkedin_page', reply_body: 'نعم، راسلنا', reply_source: 'external' });
+  });
+
+  it('لقطةٌ باسم linkedin والمربوطُ صفحة: هي منشور الصفحة فتُطلب تعليقاتها', async () => {
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES ('a1', 'urn:li:share:8', 'linkedin', ?, '[]')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: '107440355', platform: 'linkedin', type: 'corporate', displayName: 'شركة ناف القانونية' }] } });
+    routes['GET /comments/urn:li:share:8'] = () => ({ body: { status: 'success', linkedin: [
+      { comment: 'شكراً', commentId: 'c1', commentUrn: 'urn:li:comment:(urn:li:activity:8,1)', created: RECENT, from: { name: 'سالم' } },
+    ] } });
+    await syncComments(env);
+    expect(rows()[0]).toMatchObject({ platform: 'linkedin_page', author_name: 'سالم' });
   });
 });
 

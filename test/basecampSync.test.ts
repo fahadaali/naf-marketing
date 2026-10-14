@@ -30,10 +30,13 @@ vi.mock('../src/services/basecamp', () => ({
   trashRecording: vi.fn(async () => {}),
   createAttachment: vi.fn(),
   getComments: vi.fn(async () => []),
+  listCards: vi.fn(async () => []),
+  getProjectPeople: vi.fn(async () => [{ id: 11, sgid: 'sg_11', name: 'أ' }, { id: 12, sgid: 'sg_12', name: 'ب' }]),
+  createComment: vi.fn(async () => 'cm_1'),
 }));
 vi.mock('../src/services/notify', () => ({ notifyUsers: vi.fn(), usersWithPermission: vi.fn(async () => []) }));
 
-import { syncPost } from '../src/services/basecampSync';
+import { syncPost, reconcileStages, findOrphanCards, resyncAll, syncCardCommentsForPost, trashOrphanCards } from '../src/services/basecampSync';
 import * as basecamp from '../src/services/basecamp';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -47,7 +50,7 @@ function d1(db: any) {
         bind(...a: unknown[]) { args = a.map(norm); return stmt; },
         async first<T>() { return (db.prepare(sql).get(...args) ?? null) as T; },
         async all<T>() { return { results: db.prepare(sql).all(...args) as T[] }; },
-        async run() { db.prepare(sql).run(...args); return { success: true }; },
+        async run() { const r = db.prepare(sql).run(...args); return { success: true, meta: { changes: Number(r.changes) } }; },
       };
       return stmt;
     },
@@ -111,5 +114,142 @@ describe('الفكرة وبطاقة بيسكامب', () => {
     seedPost('p1', '<p>نص</p>', null);
     await syncPost(env, 'p1');
     expect(vi.mocked(basecamp.createCard).mock.calls[0][3]).toMatchObject({ due_on: null });
+  });
+});
+
+describe('بطاقةٌ واحدة لكل منشور', () => {
+  it('مزامنتان معاً — حفظٌ ثم إرسالٌ للمراجعة — تُنشئان بطاقةً واحدة في مرحلتها الأخيرة', async () => {
+    seedPost('p1', '<p>نص</p>');
+    // الإنشاء يتأخّر، وفي أثنائه يُرسل المنشور للمراجعة وتبدأ المزامنة الثانية
+    let release!: () => void;
+    vi.mocked(basecamp.createCard).mockImplementationOnce(
+      () => new Promise((r) => { release = () => r('card_1'); }),
+    );
+    const first = syncPost(env, 'p1');
+    await new Promise((r) => setTimeout(r, 0));
+    db.prepare("UPDATE content_posts SET status = 'pending_marketing' WHERE id = 'p1'").run();
+    await syncPost(env, 'p1');
+    release();
+    await first;
+
+    expect(basecamp.createCard).toHaveBeenCalledTimes(1);
+    const row = db.prepare("SELECT todo_id, stage FROM basecamp_tasks WHERE post_id = 'p1'").get();
+    expect(row).toMatchObject({ todo_id: 'card_1', stage: 'pending_marketing' });
+    expect(basecamp.moveCard).toHaveBeenCalledWith(env, 'proj_1', 'card_1', 'col_pending_marketing');
+  });
+
+  it('فشلُ الإنشاء يُفلت الحجز فتُنشئها المزامنة التالية', async () => {
+    seedPost('p1', '<p>نص</p>');
+    vi.mocked(basecamp.createCard).mockRejectedValueOnce(new Error('503'));
+    await expect(syncPost(env, 'p1')).rejects.toThrow('503');
+    expect(db.prepare('SELECT COUNT(*) n FROM basecamp_tasks').get().n).toBe(0);
+    await syncPost(env, 'p1');
+    expect(db.prepare("SELECT todo_id FROM basecamp_tasks WHERE post_id = 'p1'").get().todo_id).toBe('card_new');
+  });
+
+  it('حجزٌ قديمٌ لم يتمّ يُؤخذ، والحديثُ يُترك لصاحبه', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,stage,updated_at) VALUES ('p1',NULL,'creating',strftime('%Y-%m-%dT%H:%M:%SZ','now'))").run();
+    await syncPost(env, 'p1');
+    expect(basecamp.createCard).not.toHaveBeenCalled();
+
+    db.prepare("UPDATE basecamp_tasks SET updated_at = '2026-01-01T00:00:00Z' WHERE post_id = 'p1'").run();
+    await syncPost(env, 'p1');
+    expect(basecamp.createCard).toHaveBeenCalledTimes(1);
+  });
+
+  it('النشر في موعده يُدرَك دورياً فتنتقل البطاقة إلى «منشور»', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage,updated_at) VALUES ('p1','card_1','col_scheduled','scheduled','2026-10-01T00:00:00Z')").run();
+    db.prepare("UPDATE content_posts SET status = 'published' WHERE id = 'p1'").run();
+    expect(await reconcileStages(env)).toBe(1);
+    expect(basecamp.moveCard).toHaveBeenCalledWith(env, 'proj_1', 'card_1', 'col_published');
+    expect(await reconcileStages(env)).toBe(0);
+  });
+});
+
+describe('تقرير البطاقات اليتيمة', () => {
+  it('يسرد ما لا يربطه النظام بمنشور، ويدلّ على المنشور الذي تبدو نسخةً منه', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage) VALUES ('p1','card_1','col_published','published')").run();
+    vi.mocked(basecamp.getCardTableId).mockResolvedValueOnce('ct_1');
+    vi.mocked(basecamp.getColumns).mockResolvedValueOnce([
+      { id: 'col_draft', title: 'المسودات' }, { id: 'col_published', title: 'منشور' },
+    ]);
+    vi.mocked(basecamp.listCards).mockImplementation(async (_e, _p, col) => (col === 'col_draft'
+      ? [{ id: 'card_2', title: 'عنوان', app_url: 'https://3.basecamp.com/c/2', created_at: '2026-10-01' }]
+      : [{ id: 'card_1', title: 'عنوان', app_url: 'https://3.basecamp.com/c/1', created_at: '2026-10-01' }]));
+    const orphans = await findOrphanCards(env);
+    expect(orphans).toEqual([
+      { id: 'card_2', title: 'عنوان', column: 'المسودات', url: 'https://3.basecamp.com/c/2', created_at: '2026-10-01', post_id: 'p1' },
+    ]);
+    expect(basecamp.trashRecording).not.toHaveBeenCalled();
+  });
+});
+
+describe('إشعار المرحلة في بيسكامب', () => {
+  it('إنشاءُ البطاقة يُعلَن بتعليقٍ يذكر كل أعضاء المشروع', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await syncPost(env, 'p1');
+    expect(basecamp.createComment).toHaveBeenCalledTimes(1);
+    const [, , card, html] = vi.mocked(basecamp.createComment).mock.calls[0];
+    expect(card).toBe('card_new');
+    expect(html).toContain('أُنشئ في «المسودات» — بواسطة فهد');
+    expect(html).toContain('<bc-attachment sgid="sg_11"></bc-attachment>');
+    expect(html).toContain('<bc-attachment sgid="sg_12"></bc-attachment>');
+  });
+
+  it('انتقالُ المرحلة يُعلَن باسم من نقلها، والتحديثُ بلا انتقال لا يُعلَن', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage) VALUES ('p1','card_1','col_pending_gm','pending_gm')").run();
+    db.prepare("UPDATE content_posts SET status = 'approved' WHERE id = 'p1'").run();
+    db.prepare("INSERT INTO approvals (id,post_id,from_status,to_status,actor_id) VALUES ('a1','p1','pending_gm','approved','usr_1')").run();
+    await syncPost(env, 'p1');
+    expect(vi.mocked(basecamp.createComment).mock.calls[0][3]).toContain('انتقل إلى «معتمد» — بواسطة فهد');
+    await syncPost(env, 'p1');
+    expect(basecamp.createComment).toHaveBeenCalledTimes(1);
+  });
+
+  it('تعليقُ المنصة لا يعود ملاحظةً على المنشور', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await syncPost(env, 'p1');
+    vi.mocked(basecamp.getComments).mockResolvedValueOnce([
+      { id: 'cm_1' as any, content: 'أُنشئ في «المسودات»', created_at: '', creator_name: 'ناف' },
+      { id: 'cm_2' as any, content: 'راجعوا العنوان', created_at: '', creator_name: 'سارة' },
+    ]);
+    expect(await syncCardCommentsForPost(env, 'p1')).toBe(1);
+    expect(db.prepare("SELECT body FROM post_notes WHERE post_id = 'p1'").all().map((r: any) => r.body)).toEqual(['راجعوا العنوان']);
+  });
+
+  it('إعادة المزامنة الشاملة لا تُعلن شيئاً', async () => {
+    seedPost('p1', '<p>نص</p>');
+    await resyncAll(env);
+    expect(basecamp.createCard).toHaveBeenCalledTimes(1);
+    expect(basecamp.createComment).not.toHaveBeenCalled();
+  });
+
+  it('تعذّرُ الإعلان لا يعطّل نقل البطاقة', async () => {
+    seedPost('p1', '<p>نص</p>');
+    vi.mocked(basecamp.createComment).mockRejectedValueOnce(new Error('422'));
+    await syncPost(env, 'p1');
+    expect(db.prepare("SELECT todo_id FROM basecamp_tasks WHERE post_id = 'p1'").get().todo_id).toBe('card_new');
+  });
+});
+
+describe('نقل البطاقات اليتيمة إلى السلّة', () => {
+  it('ما سمّاه المدير ويكون الآن يتيماً مكرّراً وحده — وما سواه يُترك', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage) VALUES ('p1','card_1','col_published','published')").run();
+    vi.mocked(basecamp.getCardTableId).mockResolvedValueOnce('ct_1');
+    vi.mocked(basecamp.getColumns).mockResolvedValueOnce([{ id: 'col_draft', title: 'المسودات' }]);
+    vi.mocked(basecamp.listCards).mockResolvedValueOnce([
+      { id: 'card_1', title: 'عنوان', app_url: '', created_at: '' }, // مربوطة
+      { id: 'card_2', title: 'عنوان', app_url: '', created_at: '' }, // نسخة مكرّرة
+      { id: 'card_3', title: 'بطاقة يدوية', app_url: '', created_at: '' }, // يتيمة بلا منشور
+    ]);
+    const res = await trashOrphanCards(env, ['card_1', 'card_2', 'card_3', 'card_9']);
+    expect(res).toEqual({ trashed: ['card_2'], skipped: ['card_1', 'card_3', 'card_9'] });
+    expect(basecamp.trashRecording).toHaveBeenCalledTimes(1);
+    expect(basecamp.trashRecording).toHaveBeenCalledWith(env, 'proj_1', 'card_2');
   });
 });

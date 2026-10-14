@@ -90,6 +90,9 @@ export type InboxSyncReport = {
   fallback?: boolean;
   /** وقفت الدورة قبل حصّتها: المزوّد طلب التمهّل، أو بلغ الاستدعاء حدّ طلباته. */
   stoppedBy?: 'rate_limit' | 'platform_cap' | null;
+  /** منشوراتٌ ردّها المزوّد «غير موجود» لكل منصة — حُذفت، أو مفتاحها لا يعرفه.
+   *  ليس عطلاً فلا يُكتب في `errors`، لكنه يُعدّ: كان يُبتلع فيغيب السبب. */
+  notFound?: Record<string, number>;
 };
 
 const REPORT_KEY = 'inbox_sync_report';
@@ -1407,16 +1410,25 @@ async function syncAyrshareComments(
   if (!byInternal.size) return;
   report.kinds.comment.ok = true;
 
-  const platforms = [...byInternal.keys()];
+  /* لينكدإن المربوط صفحةٌ لا حساب: لقطةٌ كُتبت `linkedin` (من جدولةٍ بمفتاح
+     الحساب أو من مزوّدٍ سابق) هي منشور الصفحة، فتُطلب تعليقاتها باسمها. */
+  const asPage = byInternal.has('linkedin_page') && !byInternal.has('linkedin');
+  const internalOf = (platform: string) => (asPage && platform === 'linkedin' ? 'linkedin_page' : platform);
+  const platforms = [...byInternal.keys(), ...(asPage ? ['linkedin'] : [])];
   const cutoff = new Date(Date.now() - AYRSHARE_RECENT_DAYS * DAY).toISOString();
   /* السجلّ كان يقف عند أحدث أربعمئةٍ من المنشورات القديمة، فما بعدها لا يُقرأ
      أبداً ولا يُختم السجلّ مكتملاً. والقراءة تدور بموعد آخر قراءة لا بتاريخ
      النشر، فيكفي سقفٌ أوسع يحمل المنشورات كلّها. */
   const { results: posts } = await env.DB.prepare(
-    `SELECT provider_post_id, platform, metrics_json FROM analytics_snapshots
+    /* بالمعرّف الأصلي على المنصة إن عُرف (0045): مفتاحُ لقطةٍ من مزوّدٍ سابق يردّه
+       Ayrshare «غير موجود». ولقطتان لمنشورٍ واحد — بالمفتاح القديم وبالأصلي —
+       تُطلبان مرّةً واحدة. */
+    `SELECT COALESCE(native_post_id, provider_post_id) AS provider_post_id, platform, MAX(metrics_json) AS metrics_json
+     FROM analytics_snapshots
      WHERE platform IN (${platforms.map(() => '?').join(',')})
        AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
-     ORDER BY sent_at DESC
+     GROUP BY COALESCE(native_post_id, provider_post_id), platform
+     ORDER BY MAX(sent_at) DESC
      LIMIT ${history ? 3000 : 400}`,
   )
     .bind(...platforms, cutoff)
@@ -1446,7 +1458,8 @@ async function syncAyrshareComments(
   const now = Date.now();
   type Queued = { postId: string; internal: string; ayr: string; signature: string; rank: number; age: number };
   const queue: Queued[] = [];
-  for (const p of posts) {
+  for (const row of posts) {
+    const p = { ...row, platform: internalOf(row.platform) };
     const ayr = ayrsharePlatform(p.platform);
     const st = stateOf.get(`ayrshare:${ayr}|${p.provider_post_id}`);
     const signature = commentsOf(p.metrics_json);
@@ -1504,6 +1517,10 @@ async function syncAyrshareComments(
          واحد منه، ولا سطرٌ يقول لماذا. فيُحفظ الرفض لكل منصة بسببه، إلا
          «لا يوجد» (404 و186): منشورٌ حُذف لا عطلَ فيه. */
       const notFound = err.status === 404 || errorCodes(err.body).includes(186);
+      if (notFound) {
+        report.notFound ??= {};
+        report.notFound[q.internal] = (report.notFound[q.internal] ?? 0) + 1;
+      }
       if (!notFound && !refused.has(q.internal)) refused.set(q.internal, err.message);
       if (!postSpecificRejection(err)) {
         blocked.add(q.internal);
