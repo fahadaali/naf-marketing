@@ -27,8 +27,36 @@ describe('htmlToText', () => {
     expect(htmlToText('<p>نص</p><script>alert(1)</script>')).toBe('نص');
   });
 
-  it('يمنع تراكم الأسطر الفارغة', () => {
-    expect(htmlToText('<p>أ</p><p></p><p></p><p>ب</p>')).toBe('أ\n\nب');
+  it('الأسطر الفارغة تبقى بعددها كما كُتبت', () => {
+    expect(htmlToText('<p>أ</p><p></p><p></p><p>ب</p>')).toBe('أ\n\n\nب');
+    expect(htmlToText('أ<div><br></div><div><br></div><div>ب</div>')).toBe('أ\n\n\nب');
+  });
+
+  // ما يكتبه المتصفح في المحرر: أول سطرٍ نصٌّ مجرّد، وكل Enter بعده <div>
+  it('السطر الأول لا يلتصق بالثاني', () => {
+    expect(htmlToText('سطر١<div>سطر٢</div><div>سطر٣</div>')).toBe('سطر١\nسطر٢\nسطر٣');
+    expect(htmlToText('سطر١<div><br></div><div>سطر٢</div>')).toBe('سطر١\n\nسطر٢');
+  });
+
+  it('<br> الأخير في الكتلة لا يزيد سطراً، وما قبله يبقى', () => {
+    expect(htmlToText('<div>أ<br></div><div>ب</div>')).toBe('أ\nب');
+    expect(htmlToText('<div>أ<br><br></div><div>ب</div>')).toBe('أ\n\nب');
+    expect(htmlToText('<p>أ<br/><br/>ب</p><p><br/></p><p>ج</p>')).toBe('أ\n\nب\n\nج');
+  });
+
+  it('المسافات تبقى كما كُتبت، و&nbsp; لا يُنشر حرفياً', () => {
+    expect(htmlToText('ناف&nbsp; &nbsp;للمحاماة')).toBe('ناف   للمحاماة');
+    expect(htmlToText('<div>أ&#160;ب &#xa0;ج</div>')).toBe('أ ب  ج');
+    expect(htmlToText('<div>&amp;lt;</div>')).toBe('&lt;');
+  });
+
+  it('القائمة المرقّمة تبقى بأرقامها', () => {
+    expect(htmlToText('<ol><li>أ</li><li>ب</li></ol>')).toBe('1. أ\n2. ب');
+    expect(htmlToText('مقدمة<ol><li>أ</li></ol><ul><li>ب</li></ul>')).toBe('مقدمة\n1. أ\n• ب');
+  });
+
+  it('فراغُ الشيفرة بين الكتل ليس سطراً', () => {
+    expect(htmlToText('<ul>\n  <li>أ</li>\n  <li>ب</li>\n</ul>')).toBe('• أ\n• ب');
   });
 
   it('يحذف اسم الوسيط ووصفه من بطاقة المحرر — المقطع والصورة', () => {
@@ -43,7 +71,9 @@ describe('htmlToText', () => {
       '<img class="media-thumb" src="/api/media/media_2" alt="CD29D019.png" loading="lazy"/>' +
       '<div class="media-cap">CD29D019.png</div></div>';
     expect(htmlToText(`<p>هذا المحتوى تجريبي ٢</p>${video}`)).toBe('هذا المحتوى تجريبي ٢');
-    expect(htmlToText(`<p>نص</p>${image}<p>بعدها</p>`)).toBe('نص\n\nبعدها');
+    // البطاقة تفصل ما قبلها عمّا بعدها ولا تزيد سطراً — والسطر الفارغ الذي يتركه الإدراج بعدها يبقى
+    expect(htmlToText(`<p>نص</p>${image}<p>بعدها</p>`)).toBe('نص\nبعدها');
+    expect(htmlToText(`<p>نص</p>${image}<p><br/></p><p>بعدها</p>`)).toBe('نص\n\nبعدها');
     // والوسيط ما زال يُعرف من معرّفه
     expect(extractMediaIds(video)).toEqual(['media_1']);
   });
