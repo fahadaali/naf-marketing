@@ -15,7 +15,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 };
 
 import { preflightSchedules } from '../src/services/publish';
-import { mapPostWeight } from '../src/adapters/ayrshare';
+import { mapPostWeight, isXPremium, forgetXPremium } from '../src/adapters/ayrshare';
 import { ayrshareRoutes } from '../src/routes/ayrshare';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
@@ -51,6 +51,7 @@ let replies: Record<string, (body: any) => { status?: number; body: unknown }>;
 let calls: { key: string; body: any }[];
 
 beforeEach(() => {
+  forgetXPremium();
   db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = OFF');
   for (const f of readdirSync(MIGRATIONS).filter((f) => /^0\d+.*\.sql$/.test(f)).sort()) {
@@ -88,6 +89,23 @@ describe('طول النص كما تعدّه المنصات', () => {
   });
 });
 
+describe('حساب إكس المشترك في Premium', () => {
+  it('يُقاس بالحدّ الطويل وحكمه، وغيرُ المشترك بحدّ ٢٨٠', () => {
+    expect(mapPostWeight(DOC_EXAMPLE, { xPremium: true }).twitter).toEqual({ length: 2932, max: 25000, valid: true });
+    expect(mapPostWeight(DOC_EXAMPLE, { xPremium: false }).twitter).toEqual({ length: 2932, max: 280, valid: false });
+    // ولينكدإن لا يمسّه اشتراك إكس
+    expect(mapPostWeight(DOC_EXAMPLE, { xPremium: true }).linkedin).toEqual({ length: 3015, max: 3000, valid: false });
+  });
+
+  it('الاشتراك من subscriptionType أو verifiedType كما في توثيق Get User', () => {
+    expect(isXPremium({ platform: 'twitter', subscriptionType: 'Premium' })).toBe(true);
+    expect(isXPremium({ platform: 'twitter', subscriptionType: 'PremiumPlus' })).toBe(true);
+    expect(isXPremium({ platform: 'twitter', subscriptionType: 'None', verifiedType: 'business' })).toBe(true);
+    expect(isXPremium({ platform: 'twitter', subscriptionType: 'None', verifiedType: 'none' })).toBe(false);
+    expect(isXPremium({ platform: 'linkedin', subscriptionType: 'Premium' })).toBe(false);
+  });
+});
+
 describe('الفحص عند الجدولة', () => {
   function post(id: string, text: string, platforms: string[]): void {
     db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'ع', ?, 'scheduled', 'gm')").run(id, `<p>${text}</p>`);
@@ -111,6 +129,16 @@ describe('الفحص عند الجدولة', () => {
     expect(error('sch_p1_x')).toBe('النص أطول من حدّ إكس (\u2068312\u2069 من \u2068280\u2069). اكتب له نصّاً أقصر في «نسخة كل منصة»');
     expect(error('sch_p1_linkedin')).toBeNull();
     expect(calls.find((c) => c.key === 'POST /post/checkPostWeight')!.body).toEqual({ post: 'نص' });
+  });
+
+  it('نصٌّ أطول من ٢٨٠ على حسابٍ مشتركٍ في Premium ليس عيباً', async () => {
+    post('p4', 'نص', ['x']);
+    replies['POST /post/checkPostWeight'] = () => ({
+      body: { twitterWeightedLength: 312, twitterValid: false, twitterLongValid: true, maxCharLimits: { twitter: 280, twitterLong: 25000 } },
+    });
+    replies['GET /user'] = () => ({ body: { displayNames: [{ platform: 'twitter', id: 'x_1', displayName: 'ناف', subscriptionType: 'Premium' }] } });
+    await preflightSchedules(env, 'p4', ['x']);
+    expect(error('sch_p4_x')).toBeNull();
   });
 
   it('منصةٌ غير مربوطة في Ayrshare تُقال قبل الموعد', async () => {
@@ -158,7 +186,8 @@ describe('عدّاد الطول في «نسخة كل منصة»', () => {
       platforms: ['x', 'linkedin', 'facebook', 'snapchat'],
     });
     // المتن مجرّداً من الوسوم يُسأل مرّةً للينكدإن وفيسبوك، ونسخة إكس مرّة
-    expect(calls.map((c) => c.body.post).sort()).toEqual(['متن المنشور', 'نسخة إكس القصيرة'].sort());
+    // (واشتراكُ إكس يُسأل عنه مرةً من «/user» — ليس طلبَ طول)
+    expect(calls.filter((c) => c.key === 'POST /post/checkPostWeight').map((c) => c.body.post).sort()).toEqual(['متن المنشور', 'نسخة إكس القصيرة'].sort());
     expect(d.lengths).toEqual({
       x: { length: 16, max: 280, valid: true },
       linkedin: { length: 11, max: 3000, valid: true },

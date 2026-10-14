@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import {
-  AyrshareError, ayrshareAutoResponse, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, isOwnAyrshareComment,
+  AyrshareError, ayrshareAutoResponse, ayrshareCall, ayrsharePlatform, ayrsharePostWeight, ayrshareUser, ayrshareXPremium, isOwnAyrshareComment,
   ownerKey, setAyrshareAutoResponse, youtubeChannelVideos, listAyrshareWebhooks, type AyrshareAuth, type PostWeight,
 } from '../adapters/ayrshare';
 import { logAudit } from '../services/audit';
@@ -115,8 +115,9 @@ ayrshareRoutes.post('/post-length', requirePermission('draft.edit'), async (c) =
   }
   const lengths: Record<string, PostWeight> = {};
   try {
+    const xPremium = platforms.includes('x') && (await ayrshareXPremium(auth));
     for (const [text, list] of [...byText].slice(0, 5)) {
-      const weight = await ayrsharePostWeight(auth, text);
+      const weight = await ayrsharePostWeight(auth, text, { xPremium });
       for (const p of list) {
         const w = weight[ayrsharePlatform(p)];
         if (w) lengths[p] = w;
