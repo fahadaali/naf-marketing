@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
 import { newId, nowIso } from '../util';
-import { publishPostNow, preflightSchedules } from '../services/publish';
+import { publishPostNow, preflightSchedules, settlePostStatus } from '../services/publish';
 import { syncPostSafe } from '../services/basecampSync';
 import { logAudit } from '../services/audit';
 import { getProvider } from '../adapters';
@@ -14,8 +14,10 @@ scheduleRoutes.use('*', requireAuth);
 
 // النشر الفوري لمنشور معيّن (نشر يدوي) — ولو قبل موعده المجدول أو بعده. للمدير العام. idempotent.
 scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), async (c) => {
-  const { post_id } = await c.req.json<{ post_id: string }>();
+  const { post_id, platforms } = await c.req.json<{ post_id: string; platforms?: unknown }>();
   if (!post_id) return c.json({ error: 'المنشور مطلوب' }, 400);
+  // منصاتٌ بعينها إن سُمّيت — «نشر الآن» لمنصةٍ متعثّرة وحدها
+  const only = Array.isArray(platforms) ? platforms.map(String).filter(Boolean).slice(0, 20) : undefined;
   const post = await c.env.DB.prepare('SELECT status FROM content_posts WHERE id = ?')
     .bind(post_id)
     .first<{ status: string }>();
@@ -23,7 +25,7 @@ scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), 
   if (!['scheduled', 'approved'].includes(post.status)) {
     return c.json({ error: 'لا يمكن النشر الآن إلا لمحتوى معتمد أو مجدول' }, 400);
   }
-  const result = await publishPostNow(c.env, post_id);
+  const result = await publishPostNow(c.env, post_id, only);
   if (result.published === 0 && result.failed === 0 && result.pending === 0) {
     return c.json({ error: 'لا توجد جداول قابلة للنشر لهذا المنشور' }, 400);
   }
@@ -175,11 +177,39 @@ scheduleRoutes.post('/:id/delete-post', requirePermission('content.approve_final
   return c.json({ ok: true });
 });
 
-// إلغاء جدولة معلّقة
+/* ═══ إلغاء الجدولة ═══
+
+   ما لم يُنشر بعد (معلّقٌ أو فاشل) يُلغى، وما نُشر أو يُنشر الآن لا يُمسّ. ثم
+   تُسوّى حالة المنشور (`settlePostStatus`): منصةٌ متعثّرة أُلغيت والبقية منشورة
+   ← «منشور». وتتبعها بطاقة بيسكامب. */
+async function cancelSchedules(c: any, postId: string, where: string, binds: unknown[]) {
+  const res = await c.env.DB.prepare(
+    `DELETE FROM schedules WHERE post_id = ? AND status IN ('pending','failed') AND ${where}`,
+  )
+    .bind(postId, ...binds)
+    .run();
+  const cancelled = Number(res.meta?.changes ?? 0);
+  if (!cancelled) return { cancelled, status: null as string | null };
+  const status = await settlePostStatus(c.env, postId, c.get('user')?.id ?? null);
+  c.executionCtx.waitUntil(syncPostSafe(c.env, postId));
+  return { cancelled, status };
+}
+
+// إلغاء الجدولة على منصاتٍ بعينها — من رقائق «منصات التواصل»
+scheduleRoutes.post('/cancel', requirePermission('content.schedule'), async (c) => {
+  const { post_id, platforms } = await c.req.json<{ post_id?: string; platforms?: unknown }>().catch(() => ({} as any));
+  const list = Array.isArray(platforms) ? [...new Set(platforms.map(String).filter(Boolean))].slice(0, 20) : [];
+  if (!post_id || !list.length) return c.json({ error: 'المنشور والمنصات مطلوبة' }, 400);
+  const out = await cancelSchedules(c, post_id, `platform IN (${list.map(() => '?').join(',')})`, list);
+  if (!out.cancelled) return c.json({ error: 'لا موعد يُلغى على هذه المنصات: نُشر عليها أو لم يُجدوَل' }, 404);
+  return c.json({ ok: true, ...out });
+});
+
+// إلغاء جدولة موعدٍ واحد
 scheduleRoutes.delete('/:id', requirePermission('content.schedule'), async (c) => {
   const id = c.req.param('id');
-  await c.env.DB.prepare("DELETE FROM schedules WHERE id = ? AND status IN ('pending','failed')")
-    .bind(id)
-    .run();
-  return c.json({ ok: true });
+  const row = await c.env.DB.prepare('SELECT post_id FROM schedules WHERE id = ?').bind(id).first<{ post_id: string }>();
+  const out = row ? await cancelSchedules(c, row.post_id, 'id = ?', [id]) : { cancelled: 0, status: null };
+  if (!out.cancelled) return c.json({ error: 'لا موعد يُلغى: نُشر أو لم يعد موجوداً' }, 404);
+  return c.json({ ok: true, ...out });
 });

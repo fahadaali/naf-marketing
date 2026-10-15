@@ -276,6 +276,35 @@ export async function loadMedia(env: Env, assetIds: string[]): Promise<PublishMe
   return out;
 }
 
+/* ═══ حالة المنشور بعد إلغاء الجدولة ═══
+
+   كان إلغاءُ موعد المنصة المتعثّرة يحذف الصفّ ولا يمسّ المنشور، فيبقى «مجدولاً»
+   ويظهر «منشوراً جزئياً» وقد نُشر على كل ما بقي له — ولا يصير «منشوراً» إلا
+   صدفةً حين تجري دورة نشرٍ بعدها. فيُسوّى هنا عند الإلغاء:
+   - مجدولٌ لم يبقَ له موعدٌ ينتظر وله ما نُشر ← «منشور».
+   - مجدولٌ لم يبقَ له موعدٌ أصلاً ← «معتمد»، يُجدوَل من جديد متى شاء الفريق.
+   ويُكتب الانتقال في `approvals` كأيّ انتقال (به يُقاس زمن النشر). */
+export async function settlePostStatus(env: Env, postId: string, actorId: string | null): Promise<string | null> {
+  const post = await env.DB.prepare('SELECT status FROM content_posts WHERE id = ?').bind(postId).first<{ status: string }>();
+  if (!post) return null;
+  if (post.status !== 'scheduled') return post.status;
+  const counts = await env.DB.prepare(
+    `SELECT SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS done,
+            SUM(CASE WHEN status <> 'published' THEN 1 ELSE 0 END) AS open
+     FROM schedules WHERE post_id = ?`,
+  ).bind(postId).first<{ done: number | null; open: number | null }>();
+  if (Number(counts?.open ?? 0) > 0) return post.status;
+  const to = Number(counts?.done ?? 0) > 0 ? 'published' : 'approved';
+  const moved = await env.DB.prepare(
+    "UPDATE content_posts SET status = ?, updated_at = ? WHERE id = ? AND status = 'scheduled'",
+  ).bind(to, nowIso(), postId).run();
+  if (!moved.meta?.changes) return post.status;
+  await env.DB.prepare(
+    `INSERT INTO approvals (id, post_id, from_status, to_status, actor_id, note) VALUES (?, ?, 'scheduled', ?, ?, ?)`,
+  ).bind(newId('appr'), postId, to, actorId, 'إلغاء الجدولة').run();
+  return to;
+}
+
 // يحوّل المنشور إلى published عندما تُنشر كل جداوله
 async function markFullyPublishedPosts(env: Env): Promise<void> {
   await env.DB.prepare(
@@ -310,24 +339,27 @@ export async function runDuePublishes(env: Env): Promise<{ published: number; fa
 export type PublishError = { platform: string; error: string };
 
 // النشر الفوري لكل جداول منشور معيّن — يتجاوز الموعد المحدد (زر «نشر الآن»).
+/** `platforms`: منصاتٌ بعينها — «نشر الآن» لمنصةٍ متعثّرة لا يُعجّل مواعيد البقية. */
 export async function publishPostNow(
   env: Env,
   postId: string,
+  platforms?: string[],
 ): Promise<{ published: number; failed: number; pending: number; early: boolean; errors: PublishError[] }> {
+  const only = platforms?.length ? ` AND s.platform IN (${platforms.map(() => '?').join(',')})` : '';
   const { results } = await env.DB.prepare(
     `SELECT s.id, s.post_id, s.platform, p.body, p.title
      FROM schedules s JOIN content_posts p ON p.id = s.post_id
-     WHERE s.post_id = ? AND s.status IN ('pending','failed')
+     WHERE s.post_id = ? AND s.status IN ('pending','failed')${only}
      ORDER BY s.scheduled_at ASC`,
   )
-    .bind(postId)
+    .bind(postId, ...(platforms ?? []))
     .all<Job>();
 
   // هل يوجد جدول لم يحن موعده بعد؟ (لغرض رسالة التنبيه)
   const earliest = await env.DB.prepare(
-    "SELECT MIN(scheduled_at) AS mn FROM schedules WHERE post_id = ? AND status IN ('pending','failed')",
+    `SELECT MIN(s.scheduled_at) AS mn FROM schedules s WHERE s.post_id = ? AND s.status IN ('pending','failed')${only}`,
   )
-    .bind(postId)
+    .bind(postId, ...(platforms ?? []))
     .first<{ mn: string | null }>();
   const early = !!earliest?.mn && new Date(earliest.mn).getTime() > Date.now();
 
