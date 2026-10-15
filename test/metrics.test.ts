@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapMetrics } from '../src/adapters/socialapi';
+import { mapMetrics } from '../src/adapters/metrics';
 import { mapPostMetrics } from '../src/adapters/buffer';
 
 // تخريط مقاييس SocialAPI — هنا وقعت أخطاء فعلية سابقاً (المقاييس المتداخلة داخل extra)

@@ -13,7 +13,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 
 import { ayrshareAuth, getProvider } from '../src/adapters';
 import { AYRSHARE_RATE_KEY, ayrshareCall, RATE_LIMIT_ERROR } from '../src/adapters/ayrshare';
-import { BudgetExhausted, CallBudget } from '../src/adapters/socialapi';
+import { BudgetExhausted, CallBudget } from '../src/adapters/budget';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 

@@ -14,7 +14,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 };
 
 import { runLimits, beginScheduledRun, endScheduledRun, declaredPlan } from '../src/services/limits';
-import { BudgetExhausted, CallBudget } from '../src/adapters/socialapi';
+import { BudgetExhausted, CallBudget } from '../src/adapters/budget';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 

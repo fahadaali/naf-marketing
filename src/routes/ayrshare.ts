@@ -9,7 +9,31 @@ import { logAudit } from '../services/audit';
 import { ayrshareAuth, providerKey } from '../adapters';
 import { htmlToText } from '../util';
 import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
-import { localSyncHealth } from './socialapi';
+
+/** آخر نشاطٍ فعلي مسجّل لدينا (لا لدى المزوّد) — من قاعدة البيانات وحدها. */
+export async function localSyncHealth(env: Env): Promise<Record<string, unknown>> {
+  const lastAnalytics = await env.DB.prepare(
+    'SELECT MAX(captured_at) AS t, COUNT(*) AS n FROM analytics_snapshots',
+  ).first<{ t: string | null; n: number }>();
+  const lastComment = await env.DB.prepare(
+    'SELECT MAX(created_at) AS t, COUNT(*) AS n FROM platform_comments',
+  ).first<{ t: string | null; n: number }>();
+  const pending = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'pending'",
+  ).first<{ n: number }>();
+  const failed = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'failed'",
+  ).first<{ n: number }>();
+
+  return {
+    analytics_last: lastAnalytics?.t || null,
+    analytics_count: lastAnalytics?.n || 0,
+    inbox_last: lastComment?.t || null,
+    inbox_count: lastComment?.n || 0,
+    schedules_pending: pending?.n || 0,
+    schedules_failed: failed?.n || 0,
+  };
+}
 
 export const ayrshareRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 

@@ -3,7 +3,12 @@ import type {
   ModerateAction,
 } from './provider';
 import { platformNames } from '../platformLabels';
-import type { ThreadEntry } from '../services/inboxThread';
+import { BudgetExhausted, CallBudget } from './budget';
+import { canonicalMetric, mapMetrics } from './metrics';
+import { constraintIssues, fixedLengthBody, instagramContentType, mediaKind, youtubeTitle } from './media';
+import type { AccountPost, InboxItem } from './inbox';
+export { BudgetExhausted, CallBudget, mapMetrics, constraintIssues, fixedLengthBody, instagramContentType, youtubeTitle };
+export type { AccountPost, InboxItem };
 
 // مزوّد SocialAPI.ai — واجهة REST موحّدة (نشر + تحليلات + تعليقات/رسائل/مراجعات).
 // المصادقة: Authorization: Bearer sapi_key_...
@@ -71,48 +76,6 @@ function toIso(v: unknown): string {
 }
 
 export type SocialApiAccount = { id: string; platform: string; name: string };
-
-/* ═══ ميزانيةُ النداءات ═══
-
-   عاملُ كلاودفلير يُحدّ بعدد الطلبات الخارجية في الاستدعاء الواحد: خمسون
-   في الخطة المجانية. والمزامنة كانت تنادي منشوراً منشوراً بلا حدّ، فإذا
-   بلغ الاستدعاء حدّه سقط كل نداءٍ بعده بخطأ «Too many subrequests» —
-   وكلُّها محاطةٌ بـ`catch` صامت. فيصل من الصندوق ما سبق الحدّ ويغيب ما بعده،
-   ويتبدّل الغائب من ساعةٍ إلى ساعة بحسب ما سبقه من مهام: تعليقاتٌ لا تظهر
-   أبداً، وأرقامٌ تظهر مرّةً وتغيب أخرى.
-
-   فكل دورة تحمل ميزانيةً معلومة، وتقف عندها واقفةً لا ساقطة: تحفظ ما جمعت
-   وتقول إنها لم تكمل، وتُكمل الدورةُ التالية من حيث بلغت. */
-
-/** نفدت ميزانية الدورة — ليس عطلاً في المزوّد، فلا يُعرض خطأً. */
-export class BudgetExhausted extends Error {
-  constructor() {
-    super('budget_exhausted');
-    this.name = 'BudgetExhausted';
-  }
-}
-
-/**
- * عدّادُ نداءات الدورة الواحدة، ومعه سقفُ وقتها. وتقف كذلك حين يطلب المزوّد
- * التمهّل أو يبلغ الاستدعاء حدّ طلباته — وقفاً تُكمله الدورة التالية، لا عطلاً.
- */
-export class CallBudget {
-  used = 0;
-  /** سببُ الوقف قبل الحصّة — `null` ما دامت الحصّة وحدها تحكم. */
-  stoppedBy: 'rate_limit' | 'platform_cap' | null = null;
-  constructor(readonly max: number, private readonly deadline: number = Number.POSITIVE_INFINITY) {}
-  get left(): number {
-    if (this.stoppedBy || Date.now() >= this.deadline) return 0;
-    return Math.max(this.max - this.used, 0);
-  }
-  spend(): void {
-    if (this.left <= 0) throw new BudgetExhausted();
-    this.used++;
-  }
-  stop(reason: 'rate_limit' | 'platform_cap'): void {
-    this.stoppedBy = reason;
-  }
-}
 
 /** حدُّ طلبات الاستدعاء في كلاودفلير — نصٌّ إنجليزي يرميه وقتُ التشغيل. */
 function isPlatformCap(err: unknown): boolean {
@@ -457,16 +420,6 @@ export async function fetchPostMetrics(
   }));
 }
 
-/** منشورٌ من سجلّ الحساب على منصّته — ومنه ما نُشر من خارج المنصة. */
-export type AccountPost = {
-  id: string;
-  platform: string;
-  accountId: string;
-  title: string;
-  sentAt: string | null;
-  externalUrl: string | null;
-  metrics: ReturnType<typeof mapMetrics>;
-};
 
 /** يخرّط منشوراً من `/accounts/{id}/posts` — الحقول بأسمائها المتعدّدة. */
 export function mapAccountPost(p: any, account: SocialApiAccount): AccountPost | null {
@@ -515,160 +468,12 @@ export async function listAccountPosts(
   return { posts, complete: r.complete, exhausted: r.exhausted, resume: r.resume };
 }
 
-/* ═══ تخريط المقاييس ═══
-
-   المزوّد يوحّد أربعةً في المستوى الأعلى — الإعجاب والتعليق والمشاركة
-   والحفظ — ويضع ما عداها في `extra` بأسماء المنصّة نفسها: `view_count`
-   لتيك توك، و`impressionCount` للينكدإن، و`reach` لإنستغرام. وقد يردّ
-   الأربعة بلاحقة (`like_count`، `comments_count`).
-
-   وثلاث قواعد:
-   ١) الاسم يُردّ إلى أصله قبل الجمع — `like_count` إعجابٌ كـ`likes`. وكان
-      التطابق حرفياً، فكل مقياسٍ بلاحقةٍ خارج التفاعل: صفر.
-   ٢) ما في `extra` لا يُضاف إلى ما في المستوى الأعلى باسمه الموحّد — وإلا
-      عُدّ الإعجاب مرّتين.
-   ٣) الغياب ليس صفراً: ما لم يُعلَن يعود `null`، ومنشورٌ لم تُعلَن له أرقام
-      أصلاً `present: false` — فلا يدخل مجموعاً ولا متوسّطاً. */
-
-const METRIC_ALIASES: Record<string, string> = {
-  like: 'likes', like_count: 'likes', likes_count: 'likes', likecount: 'likes', favorite_count: 'favorites',
-  favorites: 'favorites', favourites: 'favorites',
-  reaction_count: 'reactions', reactions_count: 'reactions', reactioncount: 'reactions',
-  comment: 'comments', comment_count: 'comments', comments_count: 'comments', commentcount: 'comments',
-  share: 'shares', share_count: 'shares', shares_count: 'shares', sharecount: 'shares',
-  repost_count: 'reposts', reposts_count: 'reposts', retweet_count: 'retweets', quote_count: 'quotes',
-  save: 'saves', saved: 'saves', save_count: 'saves', saves_count: 'saves', bookmark_count: 'bookmarks',
-  click: 'clicks', click_count: 'clicks', clicks_count: 'clicks', clickcount: 'clicks',
-  follow_count: 'follows',
-  view: 'views', view_count: 'views', views_count: 'views', viewcount: 'views', video_views: 'views', play_count: 'views', plays: 'views',
-  impression_count: 'impressions', impressioncount: 'impressions',
-  reach_count: 'reach',
-};
-
-/** مقاييس التفاعل — تُجمع في «التفاعل». */
-const ENGAGE = new Set(['reactions', 'comments', 'shares', 'reposts', 'saves', 'clicks', 'likes', 'quotes', 'follows', 'favorites', 'retweets', 'bookmarks']);
-
-/** الاسم الموحّد لمقياس — أو `null` لما ليس مقياساً معروفاً. */
-function canonicalMetric(key: string): string | null {
-  const k = METRIC_ALIASES[key] ?? key;
-  if (ENGAGE.has(k) || k === 'reach' || k === 'impressions' || k === 'views') return k;
-  return null;
-}
-
-/** أسماءٌ لا تُعدّ ظهوراً ولا وصولاً وإن حوت الكلمة: مدّةٌ ونسبةٌ ومتوسّط. */
-function isRatioLike(key: string): boolean {
-  return /rate|ratio|percent|avg|average|duration|time|_ms$|seconds/.test(key);
-}
-
-export function mapMetrics(metricsObj: any): {
-  reach: number | null;
-  impressions: number | null;
-  engagement: number | null;
-  raw: any[];
-  /** أعلن المزوّد أرقاماً أصلاً — لا صفراً افتراضياً عن غياب. */
-  present: boolean;
-  /** متى زامن المزوّد هذه الأرقام من المنصّة (`metrics_synced_at`) إن أعلنه. */
-  syncedAt: string | null;
-} {
-  const top = new Map<string, number>();
-  const nested = new Map<string, number>();
-  // الاسم كما أرسله المزوّد — يُحفظ مع الموحَّد فلا يضيع أصلُه
-  const original = new Map<string, string>();
-  /* ووحدةُ ما جاء مصفوفةً بوحداته — المدّة بالدقائق — تبقى كما هي. وكانت تُعاد
-     «count» لكل ما ليس نسبة، فتُكتب مدّة المشاهدة عدداً. */
-  const units = new Map<string, string>();
-  let syncedAt: unknown;
-
-  const put = (into: Map<string, number>, key: string, value: unknown, name?: unknown, unit?: unknown) => {
-    const n = typeof value === 'number' ? value : Number(value);
-    // معرّفٌ أو ترتيبٌ رقميّ ليس مقياساً — ولا يجعل منشوراً بلا أرقام «مقيساً»
-    if (!key || !Number.isFinite(n) || key === 'id' || /_id$|^index$|position|version/.test(key)) return;
-    const k = METRIC_ALIASES[key] ?? key;
-    if (!into.has(k)) into.set(k, n);
-    if (!original.has(k)) original.set(k, typeof name === 'string' && name ? name : key);
-    if (typeof unit === 'string' && unit && !units.has(k)) units.set(k, unit);
-  };
-
-  if (Array.isArray(metricsObj)) {
-    for (const m of metricsObj) put(top, String(m?.type || m?.name || '').toLowerCase(), m?.value, m?.name, m?.unit);
-  } else if (metricsObj && typeof metricsObj === 'object') {
-    if ('metrics_synced_at' in metricsObj) syncedAt = metricsObj.metrics_synced_at;
-    // نتعمّق في الكائنات المتداخلة (مثل extra:{view_count}) لتسطيح كل المقاييس الرقمية
-    const walk = (o: any) => {
-      for (const [k, v] of Object.entries(o)) {
-        if (v && typeof v === 'object' && !Array.isArray(v)) walk(v);
-        else if (typeof v === 'number') put(nested, k.toLowerCase(), v);
-      }
-    };
-    // المستوى الأعلى أوّلاً ثم المتداخل — فيُحفظ للاسم الموحَّد أصلُه من حيث أُخذت قيمته
-    for (const [k, v] of Object.entries(metricsObj)) if (typeof v === 'number') put(top, k.toLowerCase(), v);
-    for (const v of Object.values(metricsObj)) if (v && typeof v === 'object' && !Array.isArray(v)) walk(v);
-  }
-
-  // المستوى الأعلى يسبق: ما في `extra` يُكمل ولا يُكرّر
-  const entries = new Map(top);
-  for (const [k, v] of nested) if (!entries.has(k)) entries.set(k, v);
-
-  const raw: any[] = [];
-  for (const [key, value] of entries) {
-    raw.push({ type: key, name: original.get(key) ?? key, value, unit: units.get(key) ?? (key.includes('rate') ? 'percentage' : 'count') });
-  }
-
-  /* الوصول والظهور والمشاهدات: الاسم الصريح أوّلاً، وإلا أكبرُ ما حمل الكلمة.
-     الجمعُ على كل ما حوى «impression» كان يضمّ الظهور الكلّي والفريد
-     والمدفوع والعضوي في رقمٍ واحد — أضعافَ الحقيقة. */
-  const pick = (exact: string, word: string): number | null => {
-    if (entries.has(exact)) return entries.get(exact) as number;
-    let best: number | null = null;
-    for (const [k, v] of entries) {
-      // «reviews» تحوي «view» وليست مشاهدة
-      if (k.includes(word) && !isRatioLike(k) && !k.includes('review') && (best === null || v > best)) best = v;
-    }
-    return best;
-  };
-  const reach = pick('reach', 'reach');
-  const views = pick('views', 'view');
-  const impressions = pick('impressions', 'impression') ?? views ?? reach;
-
-  let engagement: number | null = null;
-  for (const [k, v] of entries) {
-    if (ENGAGE.has(k)) engagement = (engagement ?? 0) + v;
-  }
-
-  /* مزوّدٌ صرّح بأنه لم يُزامن أرقام هذا المنشور بعد (`metrics_synced_at: null`)
-     وأعاد أصفاراً: أصفارُه غيابٌ لا قياس. */
-  const allZero = raw.every((r) => r.value === 0);
-  const present = raw.length > 0 && !(syncedAt === null && allZero);
-  const stamp = typeof syncedAt === 'string' && syncedAt ? toIso(syncedAt) : null;
-
-  if (!present) return { reach: null, impressions: null, engagement: null, raw, present, syncedAt: stamp };
-  return { reach, impressions, engagement, raw, present, syncedAt: stamp };
-}
 
 /* ═══ صندوق الوارد ═══
 
    كل ما في الصندوق «تفاعل» عند المزوّد: معرّفٌ ثابت ونوعٌ ومنصّةٌ وكاتبٌ
    ونصٌّ ووقت. وهذه الدوال تقرأه صفحاتٍ بميزانية وتخرّطه — ولا تكتب شيئاً:
    الكتابة وتتبّع ما قُرئ في `services/commentsSync.ts`. */
-
-/** عنصر صندوق وارد موحّد (تعليق/رسالة/إشارة/مراجعة) مع منصّته */
-export type InboxItem = {
-  id: string;
-  platform: string;
-  kind: 'comment' | 'dm' | 'mention' | 'review';
-  authorName: string;
-  body: string;
-  createdAt: string;
-  capabilities?: Record<string, boolean>;
-  isHidden?: boolean;
-  repliedBody?: string | null; // ردٌّ موجود على المنصة كُتب من خارج هذه المنصة
-  repliedAt?: string | null; // ووقته إن أعلنه المزوّد
-  rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
-  /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
-  interactionId?: string | null;
-  /** السلسلة تحت التعليق كلُّها — من Ayrshare. غيابُها: لا سلسلة تُكتب ولا تُمسّ. */
-  thread?: ThreadEntry[];
-};
 
 /** منشورٌ عليه تعليقات كما يردّه `/inbox/comments`. */
 export type InboxPost = {
@@ -1539,17 +1344,6 @@ export async function multipartBody(
   return { stream: readable as ReadableStream<Uint8Array>, length, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-/** جسم PUT بطولٍ معلوم — التخزين الموقَّع يرفض جسماً مقطّعاً بلا طول. */
-export async function fixedLengthBody(m: PublishMedia, size: number): Promise<ArrayBuffer | ReadableStream<Uint8Array> | null> {
-  if (m.data) return m.data;
-  const source = m.open ? await m.open() : null;
-  if (!source) return null;
-  const Fixed = (globalThis as any).FixedLengthStream;
-  if (!Fixed) return source;
-  const { readable, writable } = new Fixed(size);
-  source.pipeTo(writable).catch(() => { /* يسقط الطلب نفسه بخطئه */ });
-  return readable as ReadableStream<Uint8Array>;
-}
 
 /* ═══ حدود المنصات ═══
 
@@ -1581,82 +1375,9 @@ export function constraintsByPlatform(res: any): Record<string, any> | null {
   return null;
 }
 
-function mb(bytes: number): string {
-  return (bytes / 1048576).toFixed(1);
-}
-
-/** طول النص بطريقة عدّ المنصة — `null` لطريقةٍ لا نعرفها فلا يُحكم بها. */
-function textLength(text: string, mode: unknown): number | null {
-  const m = String(mode || 'chars');
-  if (m === 'chars') return [...text].length;
-  if (m === 'utf16') return text.length;
-  if (m === 'bytes') return new TextEncoder().encode(text).length;
-  return null;
-}
-
-/** ما سترفضه المنصة من هذا المحتوى بحدودها المعلنة — بنصٍّ عربيٍّ يقول ما العمل. */
-export function constraintIssues(c: any, input: PublishInput): string[] {
-  const issues: string[] = [];
-  const media = input.media || [];
-  const mc = c?.media || {};
-  for (const m of media) {
-    const kind = mediaKind(m.mimeType);
-    if (kind !== 'image' && kind !== 'video') continue;
-    const types: unknown = kind === 'image' ? mc.supported_image_types : mc.supported_video_types;
-    const max: unknown = kind === 'image' ? mc.max_image_size_bytes : mc.max_video_size_bytes;
-    const size = m.data ? m.data.byteLength : m.size ?? 0;
-    const what = kind === 'image' ? 'الصورة' : 'المقطع';
-    if (max === 0) {
-      issues.push(`هذه المنصة لا تقبل ${kind === 'image' ? 'الصور' : 'المقاطع'}. احذف «${m.filename}» من نسخة المنصة أو لا تجدولها عليها`);
-      continue;
-    }
-    if (Array.isArray(types) && types.length && !types.includes(m.mimeType)) {
-      issues.push(`صيغة ${what} «${m.filename}» (${m.mimeType}) لا تقبلها هذه المنصة. المقبول: ${types.join('، ')}`);
-    }
-    if (typeof max === 'number' && max > 0 && size > max) {
-      issues.push(`حجم ${what} «${m.filename}» (${mb(size)} ميغابايت) أكبر من حدّ هذه المنصة (${mb(max)} ميغابايت). صغّره ثم ضعه مكان القديم`);
-    }
-  }
-  const car = c?.carousel;
-  if (media.length > 1 && car && typeof car === 'object') {
-    if (car.supported === false) issues.push('هذه المنصة لا تقبل أكثر من وسيطٍ واحد في المنشور');
-    else if (typeof car.max_items === 'number' && car.max_items > 0 && media.length > car.max_items) {
-      issues.push(`عدد الوسائط (${media.length}) أكثر مما تقبله هذه المنصة في المنشور الواحد (${car.max_items})`);
-    }
-  }
-  const max = c?.text?.max_length;
-  const len = textLength(input.text || '', c?.text?.counting_mode);
-  if (typeof max === 'number' && max > 0 && len !== null && len > max) {
-    issues.push(`النص أطول من حدّ هذه المنصة: ${len} من ${max}. اختصره في نسخة المنصة`);
-  }
-  return issues;
-}
-
 /** مستوى «عامّ للجميع» بتسمية تيك توك. */
 const TIKTOK_PUBLIC = 'PUBLIC_TO_EVERYONE';
 
-/**
- * عنوان مقطع يوتيوب: مئة حرفٍ أقصاه، ولا يقبل «<» ولا «>». والغائب يُؤخذ من
- * أوّل سطرٍ في النص، فإن غابا معاً فالفراغ — ويقول يوتيوب ما ينقص.
- */
-export function youtubeTitle(title: string | undefined, text: string): string {
-  const source = (title || '').trim() || (text || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
-  return [...source.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 100).join('');
-}
-
-/** نوع منشور إنستغرام من وسائطه: أكثر من وسيطٍ دوّارة، والمقطع الواحد ريلز، والصورة منشور. */
-export function instagramContentType(kinds: string[]): 'feed' | 'reel' | 'carousel' {
-  if (kinds.length > 1) return 'carousel';
-  return kinds[0] === 'video' ? 'reel' : 'feed';
-}
-
-/** نوع الوسيط كما يسمّيه SocialAPI. */
-function mediaKind(mime: string): 'image' | 'video' | 'audio' | 'file' {
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('video/')) return 'video';
-  if (mime.startsWith('audio/')) return 'audio';
-  return 'file';
-}
 
 /* ═══ حالُ النشر ═══
 
