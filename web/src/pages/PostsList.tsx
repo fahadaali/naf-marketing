@@ -16,6 +16,8 @@ import { KANBAN_COLS } from '../contentFlow';
 import { dayDate, exportDay, pivotWeeks } from '../planning';
 import PlanImportModal, { exportPlanFile, importSummary } from '../components/PlanImport';
 import PostKanban, { moveAction, opensScheduling } from '../components/PostKanban';
+import PostPlatformsModal from '../components/PostPlatformsModal';
+import { SCHEDULING_STATUSES } from '../postPlatforms';
 import { useAuth } from '../auth';
 import Modal from '../components/Modal';
 import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
@@ -75,6 +77,8 @@ export default function ContentManagement() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  // نافذة «منصات التواصل» لمحتوى معتمد أو مجدول أو منشور
+  const [platformsFor, setPlatformsFor] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showAddIdea, setShowAddIdea] = useState(false);
@@ -374,12 +378,24 @@ export default function ContentManagement() {
           rows={filtered} sel={sel} toggleSel={toggleSel} allSelected={allSelected} selectAll={selectAllFiltered}
           sortKey={sortKey} sortDir={sortDir} toggleSort={toggleSort} navigate={navigate} canDelete={canDelete}
           onDelete={(id: string) => setConfirmDelete({ ids: [id] })}
+          onPlatforms={can('content.schedule') ? (p: any) => setPlatformsFor(p.id) : undefined}
         />
       )}
-      {view === 'kanban' && <PostKanban rows={filtered} onOpen={(p) => navigate(`/editor/${p.id}`)} onMove={onMove} />}
+      {view === 'kanban' && (
+        <PostKanban
+          rows={filtered}
+          onOpen={(p) => navigate(`/editor/${p.id}`)}
+          onMove={onMove}
+          onPlatforms={can('content.schedule') ? (p) => setPlatformsFor(p.id) : undefined}
+        />
+      )}
       {view === 'gantt' && <GanttView rows={filtered} navigate={navigate} />}
       {view === 'workload' && (
         <WorkloadView rows={filtered} range={fBasis === 'planned' ? { from: fFrom || undefined, to: fTo || undefined } : {}} />
+      )}
+
+      {platformsFor && (
+        <PostPlatformsModal postId={platformsFor} onClose={() => setPlatformsFor(null)} onChanged={load} />
       )}
 
       {showAddIdea && (
@@ -450,7 +466,7 @@ export default function ContentManagement() {
 }
 
 /* ===== عرض الجدول ===== */
-function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sortDir, toggleSort, navigate, canDelete, onDelete }: any) {
+function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sortDir, toggleSort, navigate, canDelete, onDelete, onPlatforms }: any) {
   const Sort = ({ k, label }: { k: string; label: string }) => (
     <th style={{ cursor: 'pointer' }} onClick={() => toggleSort(k)}>
       <span className="row" style={{ gap: 4, display: 'inline-flex' }}>
@@ -485,7 +501,13 @@ function TableView({ rows, sel, toggleSel, allSelected, selectAll, sortKey, sort
             <tr key={p.id}>
               <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk" checked={sel.has(p.id)} onChange={() => toggleSel(p.id)} /></td>
               <td style={{ fontWeight: 500 }}>
-                <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                {onPlatforms && SCHEDULING_STATUSES.includes(p.status) ? (
+                  <button type="button" className="row-link platforms-above" title="منصات التواصل" aria-label="منصات التواصل" onClick={() => onPlatforms(p)}>
+                    <PlatformIcons platforms={platformsOf(p)} />
+                  </button>
+                ) : (
+                  <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                )}
                 <button type="button" className="row-link" onClick={() => navigate(`/editor/${p.id}`)}>{p.title}</button>
               </td>
               <td><StatusBadge status={displayStatus(p)} /></td>

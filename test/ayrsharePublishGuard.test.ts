@@ -237,6 +237,18 @@ describe('مفتاح محاولة النشر', () => {
   });
 });
 
+describe('«نشر الآن» لمنصةٍ بعينها', () => {
+  it('ينشر المسمّاة وحدها، ومواعيد البقية باقية', async () => {
+    post(db, 'pn', '<p>نص</p>', ['linkedin', 'x']);
+    replies['POST /post'] = () => OK('A_pn');
+    const res = await publishPostNow(env, 'pn', ['linkedin']);
+    expect(res.published).toBe(1);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].platforms).toEqual(['linkedin']);
+    expect(row(db, 'sch_pn_x').status).toBe('pending');
+  });
+});
+
 describe('حساب النشر المعطّل', () => {
   it('رفضُ ٤٠٣ يقول التعطيل وسببه وما يُفعّله — لا «رفض المفتاح»', async () => {
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(SUSPENSION_KEY, JSON.stringify({

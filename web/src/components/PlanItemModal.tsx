@@ -4,6 +4,19 @@ import Modal from './Modal';
 import { DayPicker } from './DatePicker';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { EMPTY_PLAN, pillarsFrom, planPayload, type PlanDraft } from '../planning';
+import { lockedState, type PlatformState } from '../postPlatforms';
+import { CalendarClock, CircleX, Loader, Send, TriangleAlert, type LucideIcon } from 'lucide-react';
+
+/* حال المنصة على رقاقتها — أيقونةٌ ولونٌ ونصٌّ للقارئ الآلي، لا لونٌ وحده. والأيقونات
+   من naf-icons: «مجدول» و«متأخر» و«منشور» من دورة حياة المحتوى، و«فاشل» من الإرسال،
+   و`Loader` لما يجري الآن كـ«قيد الإرسال». والنصوص هي شارات «مواعيد النشر». */
+const STATE_MARK: Record<Exclude<PlatformState, 'none'>, { icon: LucideIcon; label: string; tone: string }> = {
+  pending: { icon: CalendarClock, label: 'معلّق', tone: 'blue' },
+  late: { icon: TriangleAlert, label: 'متأخر', tone: 'red' },
+  processing: { icon: Loader, label: 'قيد النشر', tone: 'blue' },
+  published: { icon: Send, label: 'منشور', tone: 'green' },
+  failed: { icon: CircleX, label: 'فاشل', tone: 'red' },
+};
 
 /* حقول خطة المحتوى ونافذة «إضافة فكرة».
 
@@ -36,6 +49,47 @@ export function usePlanOptions(): PlanOptions {
   return opts;
 }
 
+/** رقائق منصات التواصل — في حقول الخطة وفي نافذة «منصات التواصل». */
+export function PlatformChips({
+  platforms, labels, selected, onChange, states = {}, disabled = false, labelledBy,
+}: {
+  platforms: string[];
+  labels: Record<string, string>;
+  selected: string[];
+  onChange: (v: string[]) => void;
+  states?: Record<string, PlatformState>;
+  disabled?: boolean;
+  labelledBy: string;
+}) {
+  return (
+    <div className="plan-platforms" role="group" aria-labelledby={labelledBy}>
+      {platforms.map((p) => {
+        const on = selected.includes(p);
+        const state = states[p];
+        const mark = state && state !== 'none' ? STATE_MARK[state] : null;
+        return (
+          <button
+            key={p}
+            type="button"
+            className={`btn sm ${on ? '' : 'ghost'}`}
+            aria-pressed={on}
+            disabled={disabled || lockedState(state)}
+            onClick={() => onChange(on ? selected.filter((x) => x !== p) : [...selected, p])}
+          >
+            <PlatformIcon platform={p} size={20} /> {platformLabel(p, labels)}
+            {mark && (
+              <span className={`badge ${mark.tone}`} title={mark.label}>
+                <mark.icon size={13} aria-hidden="true" />
+                <span className="sr-only">{mark.label}</span>
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PlanFields({
   draft,
   onChange,
@@ -43,6 +97,7 @@ export function PlanFields({
   disabled = false,
   idPrefix,
   assigneeName,
+  states = {},
 }: {
   draft: PlanDraft;
   onChange: (d: PlanDraft) => void;
@@ -52,6 +107,8 @@ export function PlanFields({
   idPrefix: string;
   /** اسم المسؤول الحالي إن لم يكن بين الخيارات — حسابٌ عُطّل بعد إسناده. */
   assigneeName?: string;
+  /** حال كل منصةٍ من مواعيدها — تظهر على رقاقتها، والمنشورة والتي تُنشر الآن مقفلة. */
+  states?: Record<string, PlatformState>;
 }) {
   const set = <K extends keyof PlanDraft>(key: K, value: PlanDraft[K]) => onChange({ ...draft, [key]: value });
   const id = (k: string) => `${idPrefix}-${k}`;
@@ -71,23 +128,15 @@ export function PlanFields({
 
       <div className="field">
         <label id={id('platforms')}>منصات التواصل</label>
-        <div className="plan-platforms" role="group" aria-labelledby={id('platforms')}>
-          {platforms.map((p) => {
-            const on = draft.planned_platforms.includes(p);
-            return (
-              <button
-                key={p}
-                type="button"
-                className={`btn sm ${on ? '' : 'ghost'}`}
-                aria-pressed={on}
-                disabled={disabled}
-                onClick={() => set('planned_platforms', on ? draft.planned_platforms.filter((x) => x !== p) : [...draft.planned_platforms, p])}
-              >
-                <PlatformIcon platform={p} size={20} /> {platformLabel(p, options.labels)}
-              </button>
-            );
-          })}
-        </div>
+        <PlatformChips
+          platforms={platforms}
+          labels={options.labels}
+          selected={draft.planned_platforms}
+          onChange={(v) => set('planned_platforms', v)}
+          states={states}
+          disabled={disabled}
+          labelledBy={id('platforms')}
+        />
       </div>
 
       <div className="field">

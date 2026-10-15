@@ -4,6 +4,7 @@ import { Lightbulb } from 'lucide-react';
 import { SOURCE_LABELS, displayStatus } from '../api';
 import StatusBadge from './StatusBadge';
 import { PlatformIcons, platformsOf } from '../platforms';
+import { SCHEDULING_STATUSES } from '../postPlatforms';
 import { KANBAN_COLS } from '../contentFlow';
 
 export { moveAction, opensScheduling } from '../contentFlow';
@@ -25,6 +26,7 @@ export default function PostKanban({
   onMove,
   showCampaign = true,
   cardAction,
+  onPlatforms,
 }: {
   rows: any[];
   onOpen: (post: any) => void;
@@ -32,6 +34,8 @@ export default function PostKanban({
   /** اسم الحملة على البطاقة — يُخفى داخل صفحة الحملة نفسها فهو مكرّر. */
   showCampaign?: boolean;
   cardAction?: (post: any) => ReactNode;
+  /** أيقونات المنصات زرٌّ يفتح نافذة «منصات التواصل» — للمعتمد والمجدول والمنشور. */
+  onPlatforms?: (post: any) => void;
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -76,7 +80,19 @@ export default function PostKanban({
                 onDragEnd={() => { setDragId(null); setOverCol(null); }}
                 onClick={() => onOpen(p)}
               >
-                <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                {onPlatforms && SCHEDULING_STATUSES.includes(p.status) ? (
+                  <button
+                    type="button"
+                    className="row-link platforms-above"
+                    title="منصات التواصل"
+                    aria-label="منصات التواصل"
+                    onClick={(e) => { e.stopPropagation(); onPlatforms(p); }}
+                  >
+                    <PlatformIcons platforms={platformsOf(p)} />
+                  </button>
+                ) : (
+                  <PlatformIcons platforms={platformsOf(p)} className="platforms-above" />
+                )}
                 <div className="kanban-card-title">{p.title}</div>
                 <div className="row kanban-card-meta">
                   <span className="muted">{SOURCE_LABELS[p.source] || p.source}</span>
