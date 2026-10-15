@@ -18,7 +18,7 @@ vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () =
 
 import { runDuePublishes, publishPostNow, reconcilePublishing } from '../src/services/publish';
 import {
-  DUPLICATE_KEY_ERROR, UNCERTAIN_ERROR, duplicateKeyRejection, retryableFailure, uncertainOutcome, AyrshareError,
+  DUPLICATE_KEY_ERROR, UNCERTAIN_ERROR, ALREADY_RETRIED_ERROR, ayrshareOutcome, duplicateKeyRejection, retryableFailure, uncertainOutcome, AyrshareError,
 } from '../src/adapters/ayrshare';
 import { SUSPENSION_KEY } from '../src/services/ayrshareAlerts';
 
@@ -286,5 +286,66 @@ describe('تصنيف الخطأ', () => {
     expect(retryableFailure({ errors: [{ retryAvailable: true }, { retryAvailable: true }] })).toBe(true);
     expect(retryableFailure({ errors: [{ retryAvailable: true }, { code: 156 }] })).toBe(false);
     expect(retryableFailure({ errors: [] })).toBe(false);
+  });
+});
+
+describe('مهلة المنصة انتهت — يُعاد المنشور نفسه', () => {
+  const TIMEOUT = 'One or more of the social networks timed out with your request. Please re-try the post. You may use the /retry endpoint: https://www.ayrshare.com/docs/apis/post/retry-post';
+
+  function failedTikTok(id: string, retryId: string | null) {
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES (?, 'ع', '<p>نص المنشور الطويل</p>', 'scheduled', 'u1')").run(id);
+    db.prepare(
+      `INSERT INTO schedules (id, post_id, platform, scheduled_at, status, provider_post_id, error, retry_id)
+       VALUES (?, ?, 'tiktok', ?, 'failed', ?, 'x', ?)`,
+    ).run(`sch_${id}`, id, PAST, `AYR_${id}`, retryId);
+  }
+
+  it('رسالة المهلة فشلٌ يُعاد', () => {
+    expect(ayrshareOutcome({ status: 'error', id: 'A', errors: [{ platform: 'tiktok', message: TIMEOUT }] }))
+      .toMatchObject({ state: 'failed', retryable: true });
+    expect(ayrshareOutcome({ status: 'error', id: 'A', errors: [{ platform: 'tiktok', message: 'Video too short' }] }))
+      .not.toHaveProperty('retryable');
+  });
+
+  it('المتابعة تكتبه فاشلاً بسببٍ يُفهم، ويبقى معرّفه للإعادة', async () => {
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    db.prepare("INSERT INTO content_posts (id, title, body, status, author_id) VALUES ('t1', 'ع', '<p>نص</p>', 'scheduled', 'u1')").run();
+    db.prepare(
+      `INSERT INTO schedules (id, post_id, platform, scheduled_at, status, provider_post_id, published_at, publish_key)
+       VALUES ('sch_t1', 't1', 'tiktok', ?, 'processing', 'AYR_t1', ?, 'pub_t1')`,
+    ).run(PAST, old);
+    replies['GET /post/AYR_t1'] = () => ({ body: { status: 'error', id: 'AYR_t1', errors: [{ platform: 'tiktok', message: TIMEOUT }] } });
+    replies['GET /history/tiktok'] = () => ({ body: { posts: [] } });
+    await reconcilePublishing(env);
+    const r = row(db, 'sch_t1');
+    expect(r).toMatchObject({ status: 'failed', retry_id: 'AYR_t1' });
+    expect(r.error).toMatch(/^انتهت مهلة تيك توك قبل أن تردّ، ولم يُرفض المحتوى/);
+  });
+
+  it('«نشر الآن» يعيد المنشور نفسه ولا يرسل منشوراً جديداً', async () => {
+    failedTikTok('t2', 'AYR_t2');
+    replies['GET /history/tiktok'] = () => ({ body: { posts: [] } });
+    replies['PUT /post/retry'] = () => ({ body: { status: 'pending', id: 'AYR_t2' } });
+    const res = await publishPostNow(env, 't2');
+    expect(res.pending).toBe(1);
+    expect(calls.find((c) => c.key === 'PUT /post/retry')!.body).toEqual({ id: 'AYR_t2' });
+    expect(sent()).toHaveLength(0);
+    expect(row(db, 'sch_t2')).toMatchObject({ status: 'processing', provider_post_id: 'AYR_t2', retry_id: null });
+  });
+
+  it('ما ظهر في سجلّ المنصة يُكتب منشوراً ولا يُعاد', async () => {
+    failedTikTok('t3', 'AYR_t3');
+    replies['GET /history/tiktok'] = () => ({ body: { posts: [{ id: 'tt_9', post: 'نص المنشور الطويل', created: new Date().toISOString() }] } });
+    await publishPostNow(env, 't3');
+    expect(calls.some((c) => c.key === 'PUT /post/retry')).toBe(false);
+    expect(row(db, 'sch_t3')).toMatchObject({ status: 'published', provider_post_id: 'AYR_t3', retry_id: null });
+  });
+
+  it('ما أُعيد قبلُ يُقال، ويُفلت معرّفه فتُرسله المحاولة التالية جديداً', async () => {
+    failedTikTok('t4', 'AYR_t4');
+    replies['GET /history/tiktok'] = () => ({ body: { posts: [] } });
+    replies['PUT /post/retry'] = () => ({ status: 400, body: { action: 'post', status: 'error', code: 329, message: 'This post was already retried and cannot be retried again.' } });
+    await publishPostNow(env, 't4');
+    expect(row(db, 'sch_t4')).toMatchObject({ status: 'failed', error: ALREADY_RETRIED_ERROR, retry_id: null });
   });
 });

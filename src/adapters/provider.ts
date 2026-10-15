@@ -105,6 +105,8 @@ export interface PublishStatusContext {
 export interface PublishCheck {
   state: PublishState;
   error?: string;
+  /** فشلٌ يقول المزوّد إنه يُعاد (مهلة المنصة انتهت) — يُعاد بـ `retryPost` لا بنشرٍ جديد. */
+  retryable?: boolean;
 }
 
 export interface AnalyticsResult {
@@ -144,6 +146,8 @@ export interface PublishingProvider {
    * يُعلن حالاً يُقرأ، فيُعدّ منشوراً كما كان قبلها.
    */
   getPublishStatus?(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null>;
+  /** يُعيد المزوّدُ المنشورَ نفسه بعد فشلٍ يُعاد — مرّةً واحدة، فلا يتكرّر على المنصة. */
+  retryPost?(providerPostId: string): Promise<PublishResult>;
   /** وقتُ منشورٍ بالنصّ نفسه في سجلّ المنصة بعد `since` — أو `null`. اختيارية. */
   findOnPlatform?(ctx: { platform: string; text: string; since: string }): Promise<string | null>;
   /**
