@@ -70,6 +70,49 @@ describe('تغطية الصندوق', () => {
     expect(by.twitter).toMatchObject({ recognised: false, posts: 1 });
     expect(out.comments).toEqual([{ platform: 'x', count: 1, oldest: expect.any(String) }]);
     expect(out.history).toEqual([{ account: 'acc_x', state: '{"cursor":null,"doneAt":"2026-09-20T00:00:00Z"}' }]);
+    // قُرئ قبل أن تُحفظ نتيجة الطلب
+    expect(by.x).toMatchObject({ outcome_unknown: 1, read_empty: 0, not_found: 0, rejected: 0 });
+    expect(out.last_sync).toBeNull();
+  });
+
+  it('يفرّق «قُرئ بلا تعليقات» بنتيجة الطلب، ويقابل ما وصل بما تعلنه التحليلات', async () => {
+    const recent = new Date().toISOString();
+    const add = db.prepare('INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json) VALUES (?, ?, ?, ?, ?)');
+    const comments = (n: number) => JSON.stringify([{ type: 'likes', name: 'likeCount', value: 4, unit: 'count' }, { type: 'comments', name: 'commentsCount', value: n, unit: 'count' }]);
+    add.run('an_1', 'I1', 'instagram', recent, comments(3)); // تعلن ثلاثاً، قُرئ فارغاً
+    add.run('an_2', 'I2', 'instagram', recent, comments(0)); // لا تعليق، قُرئ فارغاً
+    add.run('an_3', 'I3', 'instagram', recent, comments(2)); // تعلن اثنين، «غير موجود»
+    add.run('an_4', 'I4', 'instagram', recent, comments(1)); // تعلن واحداً، رُفض
+    add.run('an_5', 'I5', 'instagram', recent, comments(5)); // تعلن خمساً، ووصل منها
+    add.run('an_6', 'I6', 'instagram', recent, '{"comments":"x"}'); // صيغةٌ أخرى لا تُكسر القراءة
+    const state = db.prepare("INSERT INTO inbox_post_state (inbox_post_id, account_id, synced_at, outcome) VALUES (?, 'ayrshare:instagram', ?, ?)");
+    state.run('I1', recent, 'ok');
+    state.run('I2', recent, 'ok');
+    state.run('I3', recent, 'not_found');
+    state.run('I4', recent, 'rejected');
+    state.run('I5', recent, 'ok');
+    state.run('I6', null, null); // أُعيد للطلب بعد الهجرة
+    db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind) VALUES ('c1','instagram','ayc|instagram|I5|c9|','comment')").run();
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('inbox_sync_report', JSON.stringify({
+      at: recent, complete: true, errors: [], notFound: { instagram: 1 }, rejected: { instagram: 1 },
+    }));
+
+    const out = await commentsCoverage(env);
+    expect(out.platforms[0]).toMatchObject({
+      platform: 'instagram', posts: 6, never_read: 0,
+      read_without_comments: 5, read_empty: 2, not_found: 1, rejected: 1, outcome_unknown: 1, with_comments: 1,
+      analytics_with_comments: 4, analytics_comments_missing: 3,
+    });
+    expect(out.last_sync).toEqual({ at: recent, complete: true, not_found: { instagram: 1 }, rejected: { instagram: 1 }, errors: [] });
+  });
+
+  it('«عُرف معرّفه الأصلي» من لقطات المزوّد السابق وحدها', async () => {
+    db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, native_post_id) VALUES ('an_1', '7420000000000000001', 'tiktok', ?, '7420000000000000002')").run(new Date().toISOString());
+    db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, native_post_id) VALUES ('an_2', '5f8d0d55b54764421b7156c9', 'youtube', ?, 'dQw4w9WgXcQ')").run(new Date().toISOString());
+    const out = await commentsCoverage(env);
+    const by = Object.fromEntries(out.platforms.map((p) => [p.platform, p]));
+    expect(by.tiktok).toMatchObject({ legacy_id: 0, legacy_resolved: 0 });
+    expect(by.youtube).toMatchObject({ legacy_id: 1, legacy_resolved: 1 });
   });
 });
 

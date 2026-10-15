@@ -243,7 +243,15 @@ describe('رفض المنصة لطلب التعليقات', () => {
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'ig1', platform: 'instagram', username: 'naf' }] } });
     routes['GET /comments/I1'] = () => ({ status: 400, body: { status: 'error', code: 400, message: 'instagram: Error getting comments' } });
     routes['GET /comments/I2'] = () => ({ body: { status: 'success', instagram: [] } });
-    expect((await syncComments(env))?.errors).toEqual([]);
+    const report = await syncComments(env);
+    expect(report?.errors).toEqual([]);
+    // لا يُقال عطلاً، لكنه يُعدّ — ويُحفظ لكل منشورٍ أرُفض أم قُرئ (0049)
+    expect(report?.rejected).toEqual({ instagram: 1 });
+    const outcomes = Object.fromEntries(
+      db.prepare("SELECT inbox_post_id, outcome FROM inbox_post_state WHERE account_id = 'ayrshare:instagram'").all()
+        .map((r: any) => [r.inbox_post_id, r.outcome]),
+    );
+    expect(outcomes).toEqual({ I1: 'rejected', I2: 'ok' });
   });
 
   it('المنشور المحذوف لا يُعدّ عطلاً', async () => {
@@ -254,6 +262,8 @@ describe('رفض المنصة لطلب التعليقات', () => {
     expect(report?.errors).toEqual([]);
     // ليس عطلاً، لكنه يُعدّ — كان يُبتلع فيغيب سبب ما لا يظهر
     expect(report?.notFound).toEqual({ x: 1 });
+    expect(report?.rejected).toBeUndefined();
+    expect(db.prepare("SELECT outcome FROM inbox_post_state WHERE inbox_post_id = 'T9'").get()).toEqual({ outcome: 'not_found' });
   });
 });
 
