@@ -223,63 +223,13 @@ function Platforms() {
   const [customKey, setCustomKey] = useState('');
   const [customLabel, setCustomLabel] = useState('');
   const [err, setErr] = useState('');
-  // ربط حسابات المزوّد (Buffer / SocialAPI): خريطة (منصة → معرّف حساب) + قائمة الحسابات المجلوبة
-  const [savedMaps, setSavedMaps] = useState<Record<string, Record<string, string>>>({});
-  const [acctMap, setAcctMap] = useState<Record<string, string>>({});
-  const [acctList, setAcctList] = useState<{ id: string; service: string; username: string }[]>([]);
-  const [acctMsg, setAcctMsg] = useState('');
-  const [acctLoading, setAcctLoading] = useState(false);
-
-  const MAP_CFG: Record<string, { key: string; endpoint: string; label: string; hint: string }> = {
-    buffer: {
-      key: 'buffer_profiles', endpoint: '/buffer/profiles', label: 'Buffer',
-      hint: 'Buffer ينشر إلى «قنوات» مربوطة لديه. اجلب قنواتك واربط كل منصة بالقناة المقابلة. المفتاح الشخصي من publish.buffer.com/settings/api يُضبط في سرّ Cloudflare باسم BUFFER_API_KEY (أو PROVIDER_API_KEY العام). (النشر/الجدولة/التحليلات عبر الـ API؛ التعليقات تُدار من لوحة Buffer.)',
-    },
-    socialapi: {
-      key: 'socialapi_profiles', endpoint: '/socialapi/profiles', label: 'SocialAPI.ai',
-      hint: 'SocialAPI.ai ينشر إلى حسابات مربوطة لديه. اجلب حساباتك واربط كل منصة بالحساب المقابل. مفتاح API يُضبط في سرّ Cloudflare باسم SOCIALAPI_API_KEY (أو PROVIDER_API_KEY العام). (يدعم النشر والتحليلات والتعليقات والرسائل ومراجعات Google Business عبر الـ API.)',
-    },
-  };
-  const cfg = MAP_CFG[provider];
-
   useEffect(() => {
     api.get('/settings').then((d) => {
       setEnabled(d.settings?.enabled_platforms || []);
       setLabels(d.settings?.platform_labels || {});
-      const pv = d.settings?.provider_name || 'mock';
-      setProvider(pv);
-      const maps: Record<string, Record<string, string>> = {
-        buffer_profiles: d.settings?.buffer_profiles || {},
-        socialapi_profiles: d.settings?.socialapi_profiles || {},
-      };
-      setSavedMaps(maps);
-      const k = MAP_CFG[pv]?.key;
-      setAcctMap(k ? (maps[k] || {}) : {});
+      setProvider(d.settings?.provider_name || 'mock');
     });
   }, []);
-
-  function onProviderChange(pv: string) {
-    setProvider(pv);
-    setAcctList([]);
-    setAcctMsg('');
-    const k = MAP_CFG[pv]?.key;
-    setAcctMap(k ? (savedMaps[k] || {}) : {});
-  }
-
-  async function fetchAccounts() {
-    if (!cfg) return;
-    setAcctMsg('');
-    setAcctLoading(true);
-    try {
-      const d = await api.get(cfg.endpoint);
-      setAcctList(d.profiles || []);
-      if (!d.profiles?.length) setAcctMsg('لا حسابات مربوطة بعد. اربط حساباً من لوحة المزوّد.');
-    } catch (e: any) {
-      setAcctMsg(e.message || 'تعذّر جلب الحسابات');
-    } finally {
-      setAcctLoading(false);
-    }
-  }
 
   function toggle(key: string) {
     setEnabled((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key]));
@@ -307,9 +257,8 @@ function Platforms() {
 
   async function save() {
     setMsg('');
-    const body: Record<string, unknown> = { enabled_platforms: enabled, platform_labels: labels, provider_name: provider };
-    if (cfg) body[cfg.key] = acctMap;
-    await api.put('/settings', body);
+    // مزوّد النشر Ayrshare وحده — لا يُختار من هنا، فلا يُرسل
+    await api.put('/settings', { enabled_platforms: enabled, platform_labels: labels });
     setMsg('تم الحفظ');
   }
 
@@ -372,53 +321,13 @@ function Platforms() {
 
       <div className="field">
         <label>مزوّد النشر الموحّد</label>
-        <select className="select" style={{ maxWidth: 260 }} value={provider} onChange={(e) => onProviderChange(e.target.value)}>
-          <option value="mock">Mock (تجريبي)</option>
-          <option value="buffer">Buffer</option>
-          <option value="socialapi">SocialAPI.ai</option>
-          <option value="ayrshare">Ayrshare</option>
-        </select>
+        {/* Ayrshare وحده؛ والتجريبي للتطوير المحلي، لا يُختار من هنا */}
+        <p style={{ margin: 0, fontWeight: 600 }}>{provider === 'ayrshare' ? 'Ayrshare' : 'Mock (تجريبي)'}</p>
         <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>مفتاح المزوّد يُضبط عبر Cloudflare Secrets (PROVIDER_API_KEY) ولا يُدار من هنا.</p>
       </div>
 
-      {cfg && (
-        <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <strong style={{ fontSize: 'var(--text-sm)' }}>ربط حسابات {cfg.label}</strong>
-            <div className="spacer" />
-            <button className="btn ghost sm" onClick={fetchAccounts} disabled={acctLoading}>
-              {acctLoading ? 'جارٍ الجلب…' : `جلب حسابات ${cfg.label}`}
-            </button>
-          </div>
-          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>{cfg.hint}</p>
-          {acctMsg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{acctMsg}</p>}
-          {enabled.length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>فعّل منصةً واحدة على الأقل أعلاه أولاً.</p>}
-          {enabled.map((p) => (
-            <div key={p} className="row" style={{ gap: 10, marginBottom: 8, alignItems: 'center' }}>
-              <span style={{ minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <PlatformIcon platform={p} size={16} /> {platformLabel(p, labels)}
-              </span>
-              <select
-                className="select"
-                style={{ maxWidth: 320 }}
-                value={acctMap[p] || ''}
-                onChange={(e) => setAcctMap((m) => ({ ...m, [p]: e.target.value }))}
-              >
-                <option value="">— بدون ربط —</option>
-                {acctList.map((a) => (
-                  <option key={a.id} value={a.id}>{platformLabel(a.service)} — {a.username}</option>
-                ))}
-                {acctMap[p] && !acctList.some((a) => a.id === acctMap[p]) && (
-                  <option value={acctMap[p]}>{acctMap[p]} (محفوظ)</option>
-                )}
-              </select>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {(provider === 'socialapi' || provider === 'ayrshare') && <IntegrationHealth provider={provider} />}
-      {(provider === 'socialapi' || provider === 'ayrshare') && <ProviderWebhook provider={provider} />}
+      {provider === 'ayrshare' && <IntegrationHealth />}
+      {provider === 'ayrshare' && <ProviderWebhook />}
       {provider === 'ayrshare' && <AutoResponse />}
 
       {msg && <p className="ok">{msg}</p>}
@@ -428,10 +337,8 @@ function Platforms() {
 }
 
 /* ===== تسجيل الويب هوك (استقبال فوري للتعليقات/الرسائل/التقييمات) =====
-   المزوّدان بالمسارات نفسها تحت `/webhooks/{provider}/manage`. */
-const PROVIDER_NAMES = { socialapi: 'SocialAPI', ayrshare: 'Ayrshare' } as const;
-
-function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
+   تحت `/webhooks/ayrshare/manage`. */
+function ProviderWebhook() {
   const [hooks, setHooks] = useState<any[]>([]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -439,15 +346,15 @@ function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
   function refresh() {
     // الصمت قرار: قائمةُ خطّافاتٍ مسجَّلة لدى المزوّد — تعذّرُها لا يمنع
     // التسجيل، وزرُّه يُبلّغ بخطئه إن فشل
-    api.get(`/webhooks/${provider}/manage/list`).then((d) => setHooks(d.webhooks || [])).catch(() => {});
+    api.get('/webhooks/ayrshare/manage/list').then((d) => setHooks(d.webhooks || [])).catch(() => {});
   }
-  useEffect(refresh, [provider]);
+  useEffect(refresh, []);
 
   async function register() {
     setBusy(true);
     setMsg('جارٍ التسجيل…');
     try {
-      const d = await api.post(`/webhooks/${provider}/manage/register`);
+      const d = await api.post('/webhooks/ayrshare/manage/register');
       setMsg(`تم التسجيل: ${d.url}`);
       refresh();
     } catch (e: any) {
@@ -460,7 +367,7 @@ function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
   async function remove(id: string) {
     setBusy(true);
     try {
-      await api.del(`/webhooks/${provider}/manage/${id}`);
+      await api.del(`/webhooks/ayrshare/manage/${id}`);
       refresh();
     } catch (e: any) {
       setMsg(e.message);
@@ -477,8 +384,8 @@ function ProviderWebhook({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
         <button className="btn ghost sm" onClick={register} disabled={busy}>تسجيل نقطة الاستقبال</button>
       </div>
       <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
-        يسجّل نقطة استقبال لدى {PROVIDER_NAMES[provider]} لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
-        {provider === 'ayrshare' && ' ولتنبيه الفريق إن أُلغي ربط حسابٍ أو عُطّل حساب النشر — والتسجيل من جديد يضيف ما استجدّ من الأحداث.'}
+        يسجّل نقطة استقبال لدى Ayrshare لجلب التعليقات والرسائل والتقييمات فور وصولها (بدل الانتظار للدورة الآلية).
+        {' ولتنبيه الفريق إن أُلغي ربط حسابٍ أو عُطّل حساب النشر — والتسجيل من جديد يضيف ما استجدّ من الأحداث.'}
       </p>
       {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
       {hooks.map((h) => (
@@ -1068,24 +975,23 @@ function Integrations() {
   );
 }
 
-/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والحصة والمزامنة =====
-   المزوّدان يردّان الشكل نفسه من `/{provider}/health`، فالبطاقة واحدة. */
-function IntegrationHealth({ provider }: { provider: 'socialapi' | 'ayrshare' }) {
+/* ===== صحّة التكامل — نظرة واحدة على حالة الربط والمزامنة =====
+   من `/ayrshare/health`. */
+function IntegrationHealth() {
   const [h, setH] = useState<any>(null);
   const [busy, setBusy] = useState(false);
 
   function load() {
     setBusy(true);
-    api.get(`/${provider}/health`).then(setH).catch(() => setH(null)).finally(() => setBusy(false));
+    api.get('/ayrshare/health').then(setH).catch(() => setH(null)).finally(() => setBusy(false));
   }
-  useEffect(load, [provider]);
+  useEffect(load, []);
 
   if (!h?.configured) return null;
   const L = h.local || {};
   const mapping: Record<string, string> = h.mapping || {};
   const mappedIds = new Set(Object.values(mapping).filter(Boolean));
   const fmt = (t: string | null) => (t ? formatRiyadh(t) : '—');
-  const quota = (used: number, limit: number) => (limit === -1 ? `${used} / بلا حد` : `${used} / ${limit}`);
 
   return (
     <div className="card" style={{ background: 'color-mix(in oklab, var(--muted) 40%, transparent)', marginBottom: 12 }}>
@@ -1113,16 +1019,6 @@ function IntegrationHealth({ provider }: { provider: 'socialapi' | 'ayrshare' })
           {(h.accounts || []).length === 0 && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>لا حسابات مربوطة بعد.</p>}
         </div>
       )}
-
-      {/* الحصة */}
-      {h.usage && (
-        <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>
-          الحصة: منشورات {quota(h.usage.posts_used, h.usage.posts_limit)} ·
-          {' '}تفاعلات {quota(h.usage.interactions_used, h.usage.interactions_limit)} ·
-          {' '}علامات {quota(h.usage.brands_used, h.usage.brands_limit)}
-        </div>
-      )}
-      {h.usage_error && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>تعذّر جلب الحصة.</p>}
 
       {/* الويب هوك */}
       <div className="muted" style={{ fontSize: 'var(--text-xs)', marginBottom: 8 }}>

@@ -10,7 +10,7 @@ settingsRoutes.use('*', requireAuth);
 /* ═══ البادئة المحجوزة ═══
 
    `secret:` لا يخرج من هنا ولا يدخل من `PUT` أدناه. والحاجة إليها ثبتت
-   بعطلٍ وقع: مسار تسجيل خطّاف SocialAPI صار يكتب سرّ توقيع HMAC في هذا
+   بعطلٍ وقع: مسار تسجيل خطّاف مزوّدٍ سابق صار يكتب سرّ توقيع HMAC في هذا
    الجدول، وهذه القراءة تردّ الجدول كلَّه لأي عضوٍ مسجَّل — والدور
    الافتراضي لأول داخلٍ من المركز `writer`. فقرأ السرَّ من لا يملك شيئاً.
 
@@ -40,7 +40,7 @@ settingsRoutes.get('/', async (c) => {
 settingsRoutes.put('/', requirePermission('settings.manage'), async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   // `secret` و`token` مجرَّدين لا `auth_secret` وحدها: الاسم المركَّب
-  // يمرّ من مصفاة تفحص مركَّباً آخر — وهو ما مرّ به `socialapi_webhook_secret`.
+  // يمرّ من مصفاة تفحص مركَّباً آخر — وهو ما مرّ به سرُّ خطّافٍ سابق.
   const SECRET_KEYS = ['secret', 'token', 'api_key', 'password'];
   for (const [key, value] of Object.entries(body)) {
     const k = key.toLowerCase();

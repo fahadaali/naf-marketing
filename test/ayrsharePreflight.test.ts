@@ -196,7 +196,7 @@ describe('عدّاد الطول في «نسخة كل منصة»', () => {
   });
 
   it('بلا Ayrshare لا عدّاد', async () => {
-    db.prepare("UPDATE settings SET value = 'socialapi' WHERE key = 'provider_name'").run();
+    db.prepare("UPDATE settings SET value = 'mock' WHERE key = 'provider_name'").run();
     expect(await ask({ body: 'نص', platforms: ['x'] })).toEqual({ lengths: {} });
     expect(calls).toEqual([]);
   });

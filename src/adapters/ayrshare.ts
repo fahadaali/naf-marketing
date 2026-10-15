@@ -3,14 +3,16 @@ import {
   type PublishingProvider, type PublishInput, type PublishResult, type PublishCheck, type PublishMedia,
   type AnalyticsResult, type ModerateAction, type PublishStatusContext,
 } from './provider';
-import { BudgetExhausted, CallBudget, constraintIssues, fixedLengthBody, mapMetrics, youtubeTitle } from './socialapi';
+import { BudgetExhausted, CallBudget } from './budget';
+import { mapMetrics } from './metrics';
+import { constraintIssues, fixedLengthBody, youtubeTitle } from './media';
 import { platformNames } from '../platformLabels';
 import { facebookReel, isDocument, youtubeShort } from '../services/mediaSpecs';
 import { sortThread, threadAnswer, type ThreadEntry } from '../services/inboxThread';
 
 /* ═══ Ayrshare ═══
 
-   مزوّدٌ كاملٌ يُختار من الإعدادات كما يُختار SocialAPI. والحساب على خطة
+   مزوّد النشر الوحيد للمنصة. والحساب على خطة
    Launch، والحسابات كلها مربوطةٌ بالملف الرئيسي (Primary Profile) — فلا
    `Profile-Key` في أيّ طلب. والتوثيق: https://www.ayrshare.com/docs
 
@@ -289,7 +291,7 @@ function unsureFailure(data: any): PublishResult | null {
 
 /* ═══ حدُّ حجم الصورة لكل منصة ═══
 
-   Ayrshare لا يُعلن حدود المنصات في واجهته كما يُعلنها SocialAPI، فتُكتب هنا
+   Ayrshare لا يُعلن حدود المنصات في واجهته، فتُكتب هنا
    من صفحات «Media Guidelines» في توثيقه (https://www.ayrshare.com/docs/media-guidelines).
    وكانت الصورة الكبيرة تُرفع وتُرسل ثم تُرفض بعد الموعد: إنستغرام بـ «Media file
    too large»، وإكس بـ «Error accessing the media» الذي لا يدلّ على السبب.
@@ -314,7 +316,7 @@ export function ayrshareImageLimit(platforms: string[]): number | null {
 /** صيغٌ يضغطها `IMAGES` إلى JPEG. والمتحرّكة (GIF) تفقد حركتها، فلا تُضغط. */
 const COMPRESSIBLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 
-/** ما سترفضه المنصة من حجم الصور — بنصّ الفحص المسبق نفسه في SocialAPI.
+/** ما سترفضه المنصة من حجم الصور — بنصّ الفحص المسبق نفسه (`constraintIssues`).
     ومع الضغط (`canCompress`) لا يُعدّ إلا ما لا يُضغط. */
 export function ayrshareMediaIssues(input: PublishInput, canCompress = false): string[] {
   const max = ayrshareImageLimit(input.platforms);

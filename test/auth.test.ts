@@ -96,7 +96,7 @@ describe('قارئ المستخدم', () => {
   it('مسارٌ لم يمرّ بالحارس تُسأل عنه الحزمة بلا استثناءات', async () => {
     // إدارة الويب هوك تحت البادئة العامة، فلا سبق للحارس عليها.
     const { c, kvReads } = context(undefined, { id: 'sub-2', role_name: 'writer', is_active: 1 },
-      '/api/webhooks/socialapi/manage/list');
+      '/api/webhooks/ayrshare/manage/list');
     authenticate.mockResolvedValue({ claims: { sub: 'sub-2' } });
 
     await expect(getUser(c)).resolves.toMatchObject({ id: 'sub-2' });
@@ -109,7 +109,7 @@ describe('قارئ المستخدم', () => {
   });
 
   it('طلبٌ بلا جلسة لا يصل إلى الجدول', async () => {
-    const { c, bound } = context(undefined, null, '/api/webhooks/socialapi/manage/list');
+    const { c, bound } = context(undefined, null, '/api/webhooks/ayrshare/manage/list');
     authenticate.mockResolvedValue({ response: new Response(null, { status: 401 }) });
 
     await expect(getUser(c)).resolves.toBeNull();

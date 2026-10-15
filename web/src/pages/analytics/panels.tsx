@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, FileOutput, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ExternalLink, TriangleAlert } from 'lucide-react';
 import { api, formatRiyadh } from '../../api';
-import { formatNumber, isolate } from '../../lib/format';
+import { formatNumber } from '../../lib/format';
 import StatusBadge from '../../components/StatusBadge';
 import Bar from '../../components/Bar';
 import { RatingValue } from '../../components/Rating';
@@ -404,102 +404,6 @@ export function BestTimesCard({ platform }: { platform: string }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ===== تصدير تحليلات الفيديو (يوتيوب/تيك توك) عبر SocialAPI ===== */
-export function VideoAnalyticsExport({ onImported }: { onImported: () => void }) {
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [exports, setExports] = useState<any[]>([]);
-  const [account, setAccount] = useState('');
-  const [busy, setBusy] = useState('');
-  const [msg, setMsg] = useState('');
-  const [open, setOpen] = useState(false);
-
-  function load() {
-    /* هذه فتحها المستخدم بنفسه، فالصمت فيها ليس تخفّياً بل سؤالٌ بلا
-       جواب: لوحةٌ خاوية بعد نقرةٍ صريحة تُقرأ «لا حسابات» وقد يكون
-       المزوّد متعذّراً. والشاشة تملك `setMsg` أصلاً. */
-    api.get('/analytics/exports').then((d) => {
-      setAccounts(d.accounts || []);
-      setExports(d.exports || []);
-      if (!account && d.accounts?.[0]) setAccount(d.accounts[0].id);
-    }).catch((e: any) => setMsg(e.message));
-  }
-  useEffect(() => { if (open) load(); }, [open]);
-
-  async function create() {
-    if (!account) return;
-    setBusy('create'); setMsg('جارٍ إنشاء التصدير…');
-    try {
-      await api.post('/analytics/export', { account_id: account });
-      setMsg('تم إنشاء مهمة التصدير — قد تستغرق دقائق. حدّث الحالة ثم استورد عند الاكتمال.');
-      load();
-    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
-  }
-
-  async function ingest(id: string) {
-    setBusy(id); setMsg('');
-    try {
-      const d = await api.post(`/analytics/exports/${id}/ingest`);
-      if (d.pending) setMsg(`التصدير لم يكتمل بعد (${isolate(d.status)}). أعد المحاولة لاحقاً.`);
-      else { setMsg(`تم استيراد ${isolate(d.imported)} فيديو إلى اللوحة.`); onImported(); }
-      load();
-    } catch (e: any) { setMsg(e.message); } finally { setBusy(''); }
-  }
-
-  const done = (s: string) => ['completed', 'complete', 'done'].includes(s);
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <button type="button" className="row row-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <h4 style={{ margin: 0 }}>
-          <FileOutput size={16} style={{ verticalAlign: -3, marginInlineEnd: 6 }} /> تصدير تحليلات الفيديو
-        </h4>
-        <div className="spacer" />
-        <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>{open ? 'إخفاء' : 'عرض'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 12 }}>
-          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 0 }}>
-            تحليلات فيديو أعمق (مشاهدات وتفاعل لكل فيديو) عبر SocialAPI. خاضع لحدود خطتك.
-          </p>
-          {accounts.length === 0 ? (
-            <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>لا حسابات فيديو مربوطة. اربط يوتيوب أو تيك توك من الإعدادات.</p>
-          ) : (
-            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-              <select className="select" style={{ maxWidth: 280 }} value={account} onChange={(e) => setAccount(e.target.value)}>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{platformLabel(a.platform)} — {a.name}</option>)}
-              </select>
-              <button className="btn sm" disabled={busy === 'create'} onClick={create}><FileOutput size={20} /> إنشاء تصدير</button>
-              <button className="btn sm ghost" onClick={load}><RefreshCw size={20} /> تحديث الحالة</button>
-            </div>
-          )}
-          {msg && <p className="muted" style={{ fontSize: 'var(--text-xs)' }}>{msg}</p>}
-          {exports.length > 0 && (
-            <div className="table-scroll">
-              <table className="table">
-                <thead><tr><th>المعرّف</th><th>الحالة</th><th>فيديوهات</th><th /></tr></thead>
-                <tbody>
-                  {exports.map((x) => (
-                    <tr key={x.id}>
-                      <td className="muted" style={{ fontSize: 'var(--text-xs)' }}><bdi>{String(x.id).slice(0, 10)}…</bdi></td>
-                      <td>{x.status}</td>
-                      <td>{x.videoCount ?? '—'}</td>
-                      <td>
-                        <button className={`btn sm${done(x.status) ? '' : ' ghost'}`} disabled={busy === x.id} onClick={() => ingest(x.id)}>
-                          {done(x.status) ? 'استيراد' : 'فحص'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

@@ -9,14 +9,37 @@ import { logAudit } from '../services/audit';
 import { ayrshareAuth, providerKey } from '../adapters';
 import { htmlToText } from '../util';
 import { clearSuspension, suspensionNotice } from '../services/ayrshareAlerts';
-import { localSyncHealth } from './socialapi';
+
+/** آخر نشاطٍ فعلي مسجّل لدينا (لا لدى المزوّد) — من قاعدة البيانات وحدها. */
+export async function localSyncHealth(env: Env): Promise<Record<string, unknown>> {
+  const lastAnalytics = await env.DB.prepare(
+    'SELECT MAX(captured_at) AS t, COUNT(*) AS n FROM analytics_snapshots',
+  ).first<{ t: string | null; n: number }>();
+  const lastComment = await env.DB.prepare(
+    'SELECT MAX(created_at) AS t, COUNT(*) AS n FROM platform_comments',
+  ).first<{ t: string | null; n: number }>();
+  const pending = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'pending'",
+  ).first<{ n: number }>();
+  const failed = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM schedules WHERE status = 'failed'",
+  ).first<{ n: number }>();
+
+  return {
+    analytics_last: lastAnalytics?.t || null,
+    analytics_count: lastAnalytics?.n || 0,
+    inbox_last: lastComment?.t || null,
+    inbox_count: lastComment?.n || 0,
+    schedules_pending: pending?.n || 0,
+    schedules_failed: failed?.n || 0,
+  };
+}
 
 export const ayrshareRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 ayrshareRoutes.use('*', requireAuth);
 
-/* صحّة التكامل بالشكل الذي يقرؤه `IntegrationHealth` في الإعدادات — كما يردّه
-   `/socialapi/health`، فبطاقةٌ واحدة تعرض المزوّدَين ولا يُكتب لها نصٌّ جديد.
+/* صحّة التكامل بالشكل الذي يقرؤه `IntegrationHealth` في الإعدادات.
 
    ولا خريطة ربطٍ في Ayrshare: لكل منصةٍ حسابٌ واحد في الملف الرئيسي يُنشر
    إليه باسمها، فكل حسابٍ مربوطٍ لديه مربوطٌ عندنا. ولا حصّة تُعرض: خطة
@@ -57,12 +80,11 @@ ayrshareRoutes.get('/health', requirePermission('settings.manage'), async (c) =>
 
    ما يردّه Ayrshare فعلاً — لا ما يقوله توثيقه — في الموضعين اللذين لا يُعرف
    سببهما إلا بهذا: الردّ من تطبيق المنصة الذي لا يُكشف، ومقاطع يوتيوب القصيرة
-   التي لا تظهر. يردّ الشكل والمعرّفات، وأسماءُ الكتّاب مقنّعةٌ كما في تشخيص
-   SocialAPI ومع كلٍّ منها أهو حسابنا — ولا نصَّ تعليقٍ ولا رسالة. ونداءاته
+   التي لا تظهر. يردّ الشكل والمعرّفات، وأسماءُ الكتّاب مقنّعةٌ ومع كلٍّ منها
+   أهو حسابنا — ولا نصَّ تعليقٍ ولا رسالة. ونداءاته
    محدودة (سبعة على الأكثر). */
 
-/** أوّل ثلاثة أحرفٍ وطولُ الباقي — تكفي لمقارنة كاتبٍ بحسابنا، ولا تكشف اسم عميل.
-    كما في تشخيص SocialAPI (`maskKey`). */
+/** أوّل ثلاثة أحرفٍ وطولُ الباقي — تكفي لمقارنة كاتبٍ بحسابنا، ولا تكشف اسم عميل. */
 function mask(v: unknown): string {
   const s = ownerKey(v);
   return s.length <= 3 ? '•'.repeat(s.length) : `${s.slice(0, 3)}…(${s.length})`;
@@ -317,23 +339,6 @@ export async function diagnoseAyrshare(
       out.linkedinReplies = { commentId: li.waiting[0], error: String(e?.message || e) };
     }
   }
-
-  /* ١ج) ما بقي بلا ردّ من أيام SocialAPI — بلا نصّ: المنصة والنوع وشكل المعرّف
-     والتاريخ. فما لم يُضمّ يُعرف لماذا: منشورٌ لا يُقرأ، أو معرّفٌ لا يُطابَق. */
-  const { results: legacy } = await env.DB.prepare(
-    `SELECT platform, kind, provider_comment_id, created_at FROM platform_comments
-     WHERE reply_body IS NULL AND ignored_at IS NULL AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')
-     ORDER BY created_at DESC LIMIT 30`,
-  ).all<{ platform: string; kind: string; provider_comment_id: string; created_at: string }>();
-  out.legacyUnreplied = legacy.map((r) => ({
-    platform: r.platform,
-    kind: r.kind,
-    created: r.created_at,
-    // الشكل لا القيمة: عدد الأجزاء وبادئتها، وآخر جزءٍ (معرّف المنصة) بطوله
-    idShape: r.provider_comment_id.includes('|')
-      ? `${r.provider_comment_id.split('|').length} أجزاء بـ|، آخرها ${mask(r.provider_comment_id.split('|').pop())}`
-      : `${r.provider_comment_id.split(':')[0]}:… (${r.provider_comment_id.length})`,
-  }));
 
   // ٢أ) قائمة القناة العامة — ومنها المقاطع القصيرة التي لا يردّها سجلُّ Ayrshare
   if (channelId) {

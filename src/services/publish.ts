@@ -39,7 +39,7 @@ export function missingRequirement(platform: string, text: string, media: Publis
     return 'هذه المنصة لا تقبل منشوراً بلا صورة أو فيديو. أضف وسيطاً إلى المحتوى أو إلى نسخة المنصة ثم أعد النشر';
   }
   /* تيك توك: منشور الصور صورتان فأكثر — «photo posts require at least 2
-     images» كما ردّه تحقّق SocialAPI. والمقطع الواحد يكفي. */
+     images» كما ردّه تحقّق المزوّد. والمقطع الواحد يكفي. */
   if (platform === 'tiktok' && media.length && media.every((m) => m.mimeType.startsWith('image/')) && media.length < 2) {
     /* والصورة الواحدة يصنع منها المحرر مقطعاً حين يُضغط «جدولة النشر» أو
        «نشر الآن» (`web/src/tiktokVideo.ts`) — فلا يصل هنا إلا ما جُدول من

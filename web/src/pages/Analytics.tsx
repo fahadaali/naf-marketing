@@ -11,7 +11,7 @@ import Catalogue from './analytics/Catalogue';
 import Spend from './analytics/Spend';
 import {
   BestTimesCard, CampaignPerformance, DataSources, HeatmapLink, PipelineStatus, PlatformBreakdown,
-  ReputationCard, StaleAlerts, TeamPerformance, TopPosts, VideoAnalyticsExport,
+  ReputationCard, StaleAlerts, TeamPerformance, TopPosts,
   type DashboardData,
 } from './analytics/panels';
 
@@ -339,7 +339,6 @@ export default function Analytics() {
               {tab === 'engagement' && (
                 <div style={{ marginTop: 'var(--space-4)' }}>
                   <HeatmapLink />
-                  <VideoAnalyticsExport onImported={loadMetrics} />
                 </div>
               )}
 

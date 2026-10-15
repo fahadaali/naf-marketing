@@ -48,28 +48,28 @@ function snap(id: string, platform: string, sentAt: string | null) {
 }
 
 describe('تغطية الصندوق', () => {
-  it('يعدّ لكل منصة ما لم يُقرأ، وما قُرئ بلا تعليق، وما بمعرّف مزوّدٍ سابق، وما باسمٍ لا يعرفه السحب', async () => {
+  it('يعدّ لكل منصة ما لم يُقرأ، وما قُرئ بلا تعليق، وما باسمٍ لا يعرفه السحب', async () => {
     const recent = new Date().toISOString();
     snap('1790000000000000001', 'x', recent); // قُرئ وعليه تعليق
     snap('1790000000000000002', 'x', '2025-01-01T00:00:00Z'); // قديم، قُرئ بلا تعليق
-    snap('5f8d0d55b54764421b7156c9', 'x', '2024-06-01T00:00:00Z'); // معرّف Buffer، لم يُقرأ
-    snap('9b1c-uuid:linkedin_page', 'linkedin_page', null); // نائب SocialAPI بلا تاريخ
+    snap('1790000000000000003', 'x', '2024-06-01T00:00:00Z'); // لم يُقرأ
+    snap('urn:li:share:9', 'linkedin_page', null); // بلا تاريخ
     snap('1700', 'twitter', '2024-01-01T00:00:00Z'); // اسمٌ قديم
     db.prepare("INSERT INTO inbox_post_state (inbox_post_id, account_id, synced_at) VALUES ('1790000000000000001','ayrshare:twitter','2026-10-01')").run();
     db.prepare("INSERT INTO inbox_post_state (inbox_post_id, account_id, synced_at) VALUES ('1790000000000000002','ayrshare:twitter','2026-10-01')").run();
     db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind) VALUES ('c1','x','ayc|twitter|1790000000000000001|c9|','comment')").run();
-    db.prepare("INSERT INTO settings (key, value) VALUES ('account_history:acc_x', '{\"cursor\":null,\"doneAt\":\"2026-09-20T00:00:00Z\"}')").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('account_history:ayrshare:twitter', '{\"cursor\":null,\"doneAt\":\"2026-09-20T00:00:00Z\"}')").run();
 
     const out = await commentsCoverage(env);
     const by = Object.fromEntries(out.platforms.map((p) => [p.platform, p]));
     expect(by.x).toMatchObject({
-      recognised: true, posts: 3, no_date: 0, older_than_30d: 2, legacy_id: 1,
+      recognised: true, posts: 3, no_date: 0, older_than_30d: 2,
       never_read: 1, read_without_comments: 1, with_comments: 1,
     });
-    expect(by.linkedin_page).toMatchObject({ recognised: true, posts: 1, no_date: 1, legacy_id: 1, never_read: 1 });
+    expect(by.linkedin_page).toMatchObject({ recognised: true, posts: 1, no_date: 1, never_read: 1 });
     expect(by.twitter).toMatchObject({ recognised: false, posts: 1 });
     expect(out.comments).toEqual([{ platform: 'x', count: 1, oldest: expect.any(String) }]);
-    expect(out.history).toEqual([{ account: 'acc_x', state: '{"cursor":null,"doneAt":"2026-09-20T00:00:00Z"}' }]);
+    expect(out.history).toEqual([{ account: 'ayrshare:twitter', state: '{"cursor":null,"doneAt":"2026-09-20T00:00:00Z"}' }]);
     // قُرئ قبل أن تُحفظ نتيجة الطلب
     expect(by.x).toMatchObject({ outcome_unknown: 1, read_empty: 0, not_found: 0, rejected: 0 });
     expect(out.last_sync).toBeNull();
@@ -110,15 +110,6 @@ describe('تغطية الصندوق', () => {
       ['I3', 'not_found', 'not_found', 2],
       ['I4', 'rejected', 'rejected', 1],
     ]);
-  });
-
-  it('«عُرف معرّفه الأصلي» من لقطات المزوّد السابق وحدها', async () => {
-    db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, native_post_id) VALUES ('an_1', '7420000000000000001', 'tiktok', ?, '7420000000000000002')").run(new Date().toISOString());
-    db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, native_post_id) VALUES ('an_2', '5f8d0d55b54764421b7156c9', 'youtube', ?, 'dQw4w9WgXcQ')").run(new Date().toISOString());
-    const out = await commentsCoverage(env);
-    const by = Object.fromEntries(out.platforms.map((p) => [p.platform, p]));
-    expect(by.tiktok).toMatchObject({ legacy_id: 0, legacy_resolved: 0 });
-    expect(by.youtube).toMatchObject({ legacy_id: 1, legacy_resolved: 1 });
   });
 });
 

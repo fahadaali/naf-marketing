@@ -1,13 +1,11 @@
 import type { Env } from '../types';
 import { readInboxHistoryReport, readInboxReport, type InboxSyncReport } from './commentsSync';
-import { legacyKeySql } from './nativePostId';
 
 /* ═══ تغطية الصندوق: أيّ المنشورات تُقرأ تعليقاتها وأيّها لا ═══
 
    التعليقات تُسحب لكل منشورٍ على حدة، من لقطات التحليلات وحدها. فما لا يظهر
-   في الصندوق سببُه في هذه اللقطات: منشورٌ لم يُكتشف، أو اكتُشف بمعرّف مزوّدٍ
-   سابق (Buffer أو SocialAPI) فيردّه Ayrshare «غير موجود» بصمت، أو حُفظ باسم
-   منصةٍ لا يعرفه السحب (`twitter` لا `x`)، أو بلا تاريخ نشر فلا يُسأل عنه.
+   في الصندوق سببُه في هذه اللقطات: منشورٌ لم يُكتشف، أو حُفظ باسم منصةٍ لا
+   يعرفه السحب (`twitter` لا `x`)، أو بلا تاريخ نشر فلا يُسأل عنه.
 
    قراءةٌ من قاعدة البيانات وحدها — لا طلب إلى المزوّد ولا كتابة — تُعدّ هذه
    الأسباب لكل منصة، ليُبنى الإصلاح على أرقامٍ لا على ظنّ.
@@ -30,10 +28,6 @@ export type PlatformCoverage = {
   posts: number;
   no_date: number;
   older_than_30d: number;
-  /** معرّفٌ من مزوّدٍ سابق: نائبُ SocialAPI (`…:منصة`) أو معرّف Buffer (٢٤ خانة ست عشرية) */
-  legacy_id: number;
-  /** منها ما عُرف معرّفه الأصلي فتُطلب به تعليقاته */
-  legacy_resolved: number;
   never_read: number;
   /** مجموع الأربعة التالية — قُرئ ولم يُحفظ له تعليق */
   read_without_comments: number;
@@ -68,8 +62,7 @@ function summary(r: InboxSyncReport | null): SyncSummary {
   return { at: r.at, complete: r.complete, not_found: r.notFound ?? {}, rejected: r.rejected ?? {}, errors: r.errors };
 }
 
-/** منشورٌ يستحق النظر: رُفض، أو «غير موجود»، أو تعلن المنصة تعليقاته ولم يصل منها شيء،
-    أو مفتاحه من مزوّدٍ سابق لم يُعرف معرّفه الأصلي فلا تُطلب تعليقاته. */
+/** منشورٌ يستحق النظر: رُفض، أو «غير موجود»، أو تعلن المنصة تعليقاته ولم يصل منها شيء. */
 export type CoverageDetail = {
   platform: string;
   key: string;
@@ -79,7 +72,7 @@ export type CoverageDetail = {
   /** عدد التعليقات كما تعلنه تحليلات المنصة */
   announced: number | null;
   outcome: 'ok' | 'not_found' | 'rejected' | 'unknown' | 'never_read';
-  reason: 'rejected' | 'not_found' | 'comments_missing' | 'legacy_unresolved';
+  reason: 'rejected' | 'not_found' | 'comments_missing';
 };
 
 const DETAIL_LIMIT = 60;
@@ -93,10 +86,6 @@ export async function commentsCoverage(env: Env): Promise<{
   last_history_sync: SyncSummary;
 }> {
   const cutoff = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
-  /* المعرّف من مزوّدٍ سابق: نائب SocialAPI أو معرّف Buffer. و«عُرف معرّفه
-     الأصلي» منها وحدها — وكانت تُعدّ كل لقطةٍ اختلف معرّفها الأصلي عن مفتاحها،
-     فيظهر في تيك توك «عُرف» ما ليس من مزوّدٍ سابق أصلاً. */
-  const legacy = legacyKeySql('s.provider_post_id', 's.platform');
   /* عدد التعليقات كما تعلنه تحليلات المنصة: عنصر `comments` في `metrics_json`
      (انظر `ayrshareMetrics`)، كما يقرؤه السحب نفسه في `commentsOf`. */
   const announced = `(SELECT CAST(json_extract(j.value, '$.value') AS INTEGER)
@@ -107,8 +96,6 @@ export async function commentsCoverage(env: Env): Promise<{
        COUNT(*) AS posts,
        SUM(CASE WHEN s.sent_at IS NULL THEN 1 ELSE 0 END) AS no_date,
        SUM(CASE WHEN s.sent_at < ? THEN 1 ELSE 0 END) AS older_than_30d,
-       SUM(CASE WHEN ${legacy} THEN 1 ELSE 0 END) AS legacy_id,
-       SUM(CASE WHEN ${legacy} AND s.native_post_id IS NOT NULL AND s.native_post_id <> s.provider_post_id THEN 1 ELSE 0 END) AS legacy_resolved,
        SUM(CASE WHEN st.inbox_post_id IS NULL THEN 1 ELSE 0 END) AS never_read,
        SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL THEN 1 ELSE 0 END) AS read_without_comments,
        SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL AND st.rank = 4 THEN 1 ELSE 0 END) AS read_empty,
@@ -146,8 +133,7 @@ export async function commentsCoverage(env: Env): Promise<{
        ${announced} AS announced,
        CASE WHEN st.inbox_post_id IS NULL THEN 'never_read'
             WHEN st.rank = 4 THEN 'ok' WHEN st.rank = 3 THEN 'rejected' WHEN st.rank = 2 THEN 'not_found' ELSE 'unknown' END AS outcome,
-       CASE WHEN s.native_post_id IS NULL AND ${legacy} THEN 'legacy_unresolved'
-            WHEN st.rank = 3 THEN 'rejected' WHEN st.rank = 2 THEN 'not_found'
+       CASE WHEN st.rank = 3 THEN 'rejected' WHEN st.rank = 2 THEN 'not_found'
             ELSE 'comments_missing' END AS reason
      FROM analytics_snapshots s
      LEFT JOIN (
@@ -166,8 +152,7 @@ export async function commentsCoverage(env: Env): Promise<{
        ) GROUP BY post
      ) c ON c.post = COALESCE(s.native_post_id, s.provider_post_id)
      WHERE s.provider_post_id IS NOT NULL AND COALESCE(s.source, '') <> 'newsletter'
-       AND ((s.native_post_id IS NULL AND ${legacy}) OR st.rank IN (2, 3)
-            OR (COALESCE(${announced}, 0) > 0 AND c.n IS NULL))
+       AND (st.rank IN (2, 3) OR (COALESCE(${announced}, 0) > 0 AND c.n IS NULL))
      ORDER BY s.platform, s.sent_at DESC
      LIMIT ${DETAIL_LIMIT}`,
   ).all<CoverageDetail>();
@@ -178,7 +163,7 @@ export async function commentsCoverage(env: Env): Promise<{
   ).all<{ platform: string; count: number; oldest: string | null }>();
 
   const { results: history } = await env.DB.prepare(
-    "SELECT substr(key, length('account_history:') + 1) AS account, value AS state FROM settings WHERE key LIKE 'account_history:%'",
+    "SELECT substr(key, length('account_history:') + 1) AS account, value AS state FROM settings WHERE key LIKE 'account_history:ayrshare:%'",
   ).all<{ account: string; state: string | null }>();
 
   return {

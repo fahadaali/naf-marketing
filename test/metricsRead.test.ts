@@ -167,10 +167,10 @@ describe('حال ربط المؤشر', () => {
     expect((await find('reach'))?.connected).toBe(false);
 
     // مزوّدٌ حقيقي بلا مفتاح لا يسحب شيئاً
-    setting('provider_name', 'socialapi');
+    setting('provider_name', 'ayrshare');
     expect((await find('reach'))?.connected).toBe(false);
 
-    env.SOCIALAPI_API_KEY = 'key';
+    env.AYRSHARE_API_KEY = 'key';
     expect((await find('reach'))?.connected).toBe(true);
   });
 
