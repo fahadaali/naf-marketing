@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mapMetrics } from '../src/adapters/metrics';
-import { mapPostMetrics } from '../src/adapters/buffer';
 
 // تخريط مقاييس SocialAPI — هنا وقعت أخطاء فعلية سابقاً (المقاييس المتداخلة داخل extra)
-describe('mapMetrics (SocialAPI)', () => {
+describe('mapMetrics', () => {
   it('يجمع مقاييس التفاعل المعروفة', () => {
     const m = mapMetrics({ likes: 5, comments: 3, shares: 2, saves: 1 });
     expect(m.engagement).toBe(11);
@@ -78,28 +77,5 @@ describe('mapMetrics (SocialAPI)', () => {
     expect(m.present).toBe(true);
     expect(m.engagement).toBe(0);
     expect(m.syncedAt).toBe('2026-09-01T10:00:00.000Z');
-  });
-});
-
-// تخريط مقاييس Buffer — يعتمد على type/name من تعداد PostMetricType
-describe('mapPostMetrics (Buffer)', () => {
-  it('يجمع التفاعل ويقرأ الوصول', () => {
-    const m = mapPostMetrics([
-      { type: 'reach', value: 200 },
-      { type: 'likes', value: 6 },
-      { type: 'comments', value: 4 },
-    ]);
-    expect(m.reach).toBe(200);
-    expect(m.engagement).toBe(10);
-  });
-
-  it('يشتق الانطباعات من المشاهدات عند غيابها', () => {
-    const m = mapPostMetrics([{ type: 'views', value: 90 }]);
-    expect(m.impressions).toBe(90);
-  });
-
-  it('يتجاهل القيم غير الرقمية', () => {
-    const m = mapPostMetrics([{ type: 'likes', value: 'x' as any }]);
-    expect(m.engagement).toBe(0);
   });
 });

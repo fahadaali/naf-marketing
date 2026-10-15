@@ -186,7 +186,7 @@ describe('الجمهور', () => {
 describe('مصدر مزوّد النشر يكتب أرقام الحسابات', () => {
   it('يُربط وحده حين يكون Ayrshare هو المزوّد', () => {
     expect(db.prepare("SELECT is_enabled FROM integrations WHERE key = 'social'").get().is_enabled).toBe(1);
-    expect(build('socialapi').prepare("SELECT is_enabled FROM integrations WHERE key = 'social'").get().is_enabled).toBe(0);
+    expect(build('mock').prepare("SELECT is_enabled FROM integrations WHERE key = 'social'").get().is_enabled).toBe(0);
   });
 
   it('الشهر الجاري: مجاميع الأيام لكل منصة، وأداء الملف التجاري، واللقطات', async () => {

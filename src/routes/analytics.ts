@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { pullAnalytics, ingestExportVideos, readAnalyticsReport, readAnalyticsHistoryReport } from '../services/analytics';
+import { pullAnalytics, readAnalyticsReport, readAnalyticsHistoryReport } from '../services/analytics';
 import { readInboxReport, inboxHistoryDoneAt } from '../services/commentsSync';
 import { parsePeriod, periodBoundsUtc, periodOf, isPeriodKind } from '../services/period';
 import { listStaleContent } from '../services/alerts';
-import { providerKey, publishingProviderConnected } from '../adapters';
-import { createAnalyticsExport, listAnalyticsExports, getAnalyticsExport, listSocialApiAccounts } from '../adapters/socialapi';
+import { publishingProviderConnected } from '../adapters';
 
 export const analyticsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -14,7 +13,7 @@ analyticsRoutes.use('*', requireAuth);
 analyticsRoutes.use('*', requirePermission('analytics.view'));
 
 // الداشبورد الموحّد — مؤشرات مجمّعة مع فلاتر: from, to, platform, campaign_id, source
-// source=platform يقصر النتائج على ما نُشر عبر المنصة فقط (بقيّتها منشورات Buffer الأخرى).
+// source=platform يقصر النتائج على ما نُشر عبر المنصة فقط (بقيّتها ما نُشر من تطبيق المنصّة).
 analyticsRoutes.get('/dashboard', async (c) => {
   const from = c.req.query('from');
   const to = c.req.query('to');
@@ -182,7 +181,7 @@ analyticsRoutes.get('/sources', async (c) => {
   /* أين بلغت قراءة السجلّ القديم — لمزوّدٍ يُقرأ سجلّه على دفعات وحده. فمن فتح
      السنة الماضية في أوّل يومٍ ووجدها ناقصة يعرف أن النقص لم يُقرأ بعد. */
   let history: { posts: { accounts: number | null; done: number | null }; inbox: { doneAt: string | null } } | null = null;
-  if (provider === 'socialapi' || provider === 'ayrshare') {
+  if (provider === 'ayrshare') {
     const postsHistory = await readAnalyticsHistoryReport(c.env);
     history = {
       posts: { accounts: postsHistory?.historyAccounts ?? null, done: postsHistory?.historyDone ?? null },
@@ -365,53 +364,5 @@ analyticsRoutes.post('/refresh', async (c) => {
     return c.json({ ok: true, captured, report: await readAnalyticsReport(c.env) });
   } catch (e: any) {
     return c.json({ error: `تعذّر السحب. ${String(e?.message || e)}` }, 502);
-  }
-});
-
-// ===== تصدير التحليلات (Analytics Export) — تحليلات فيديو أعمق ليوتيوب/تيك توك =====
-// إنشاء تصدير لحساب مربوط (يستهلك رصيد تصدير حسب الخطة)
-analyticsRoutes.post('/export', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'التصدير متاح لمزوّد SocialAPI فقط' }, 400);
-  const { account_id } = await c.req.json<{ account_id: string }>();
-  if (!account_id) return c.json({ error: 'اختر حساباً' }, 400);
-  try {
-    const job = await createAnalyticsExport(token, account_id);
-    return c.json({ ok: true, job });
-  } catch (e: any) {
-    return c.json({ error: `تعذّر إنشاء التصدير: ${String(e?.message || e)}` }, 502);
-  }
-});
-
-// سرد مهام التصدير مع حالتها، والحسابات القابلة للتصدير (منصات فيديو)
-analyticsRoutes.get('/exports', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ exports: [], accounts: [] });
-  const VIDEO = new Set(['youtube', 'tiktok']);
-  let accounts: { id: string; platform: string; name: string }[] = [];
-  try {
-    accounts = (await listSocialApiAccounts(token)).filter((a) => VIDEO.has(a.platform));
-  } catch { /* تجاهل */ }
-  try {
-    return c.json({ exports: await listAnalyticsExports(token), accounts });
-  } catch (e: any) {
-    return c.json({ error: String(e?.message || e), accounts }, 502);
-  }
-});
-
-// استيراد نتائج تصدير مكتمل إلى اللوحة
-analyticsRoutes.post('/exports/:id/ingest', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'التصدير متاح لمزوّد SocialAPI فقط' }, 400);
-  const id = c.req.param('id');
-  try {
-    const job = await getAnalyticsExport(token, id);
-    if (job.status !== 'completed' && job.status !== 'complete' && job.status !== 'done') {
-      return c.json({ ok: false, pending: true, status: job.status });
-    }
-    const imported = await ingestExportVideos(c.env, id);
-    return c.json({ ok: true, imported });
-  } catch (e: any) {
-    return c.json({ error: `تعذّر الاستيراد: ${String(e?.message || e)}` }, 502);
   }
 });

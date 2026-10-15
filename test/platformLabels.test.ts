@@ -19,8 +19,6 @@ import { scheduleRoutes } from '../src/routes/schedules';
 import { postRoutes } from '../src/routes/posts';
 import { notifyPublishFailed } from '../src/services/notify';
 import { buildReportWorkbook } from '../src/services/report';
-import { SocialApiProvider } from '../src/adapters/socialapi';
-import { BufferProvider } from '../src/adapters/buffer';
 
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
   DatabaseSync: new (path: string) => any;
@@ -185,14 +183,6 @@ describe('الإشعار ورسائل المزوّد', () => {
     await notifyPublishFailed(env(), 'p3', 'twitter', 'رفضت المنصة النص');
     const n = db.prepare("SELECT title, body FROM notifications WHERE type = 'publish_failed'").get();
     expect(n.body).toBe('إطلاق الخدمة — إكس: رفضت المنصة النص');
-  });
-
-  it('حسابٌ غير مربوط: الأسماء لا المفاتيح، والمخصّصة بأسمائها', async () => {
-    const input = { text: 'نص', platforms: ['x', 'pinterest'] } as any;
-    await expect(new SocialApiProvider('k', {}, { pinterest: 'بنترست' }).publish(input))
-      .rejects.toThrow('لا يوجد حساب SocialAPI مربوط للمنصات: إكس، بنترست —');
-    await expect(new BufferProvider('k', {}).publish(input))
-      .rejects.toThrow('لا توجد قناة Buffer مربوطة للمنصات: إكس، pinterest —');
   });
 });
 

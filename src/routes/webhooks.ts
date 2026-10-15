@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePermission } from '../middleware';
-import { ayrshareAuth, providerKey } from '../adapters';
-import { registerSocialApiWebhook, listSocialApiWebhooks, deleteSocialApiWebhook } from '../adapters/socialapi';
+import { ayrshareAuth } from '../adapters';
 import {
   AYRSHARE_WEBHOOK_ACTIONS, deleteAyrshareWebhook, listAyrshareWebhooks, registerAyrshareWebhook,
 } from '../adapters/ayrshare';
@@ -11,9 +10,6 @@ import { reconcilePublishing } from '../services/publish';
 import { onSocialEvent, onSuspendedEvent } from '../services/ayrshareAlerts';
 
 export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
-
-// الأحداث التي نستقبلها من SocialAPI (صندوق الوارد الفوري)
-const INBOX_EVENTS = ['comment.received', 'dm.received', 'review.received', 'mention.received'];
 
 async function getSetting(env: Env, key: string): Promise<string> {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
@@ -42,12 +38,6 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// HMAC-SHA256 لجسم الطلب الخام، بصيغة "sha256=<hex>"، مع مقارنة ثابتة الزمن.
-export async function verifySignature(secret: string, rawBody: string, header: string): Promise<boolean> {
-  if (!header) return false;
-  return safeEqual(`sha256=${await hmacHex(secret, rawBody)}`, header);
-}
-
 /**
  * توقيع Ayrshare: hex بلا بادئة في `X-Authorization-Content-SHA256`، و`-V2`
  * يسرد `v1=<توقيع>` لكل سرٍّ صالح مفصولةً بفواصل — سرّان خلال يومٍ بعد
@@ -64,85 +54,6 @@ export async function verifyAyrshareSignature(secret: string, rawBody: string, v
   const expected = await hmacHex(secret, rawBody);
   return candidates.some((sig) => safeEqual(expected, sig.toLowerCase()));
 }
-
-/* السرّ تحت البادئة المحجوزة `secret:` — لا يخرج من `GET /api/settings`.
-   وكان باسمٍ عاديّ في الجدول نفسه الذي تردّه تلك القراءة كاملاً لأي عضو. */
-const WEBHOOK_SECRET_KEY = 'secret:socialapi_webhook';
-
-// نقطة الاستقبال العامة (بلا مصادقة) — يجب أن تردّ 2xx خلال 10 ثوانٍ.
-// نتحقق من التوقيع، ثم — لأحداث الصندوق — نُشغّل مزامنة كاملة في الخلفية كي تُخزَّن
-// السجلات بترميز الرد الصحيح بدل الاعتماد على حمولة جزئية.
-webhookRoutes.post('/socialapi', async (c) => {
-  const raw = await c.req.text();
-  const secret = await getSetting(c.env, WEBHOOK_SECRET_KEY);
-  const sig = c.req.header('X-SocialAPI-Signature') || '';
-
-  /* ═══ ولا يُقبل شيء بلا سرّ ═══
-
-     كان الشرط `if (secret && !verify)` — أي أن غياب السرّ يعني قبول كل
-     طلب. والمسار عام: `/api/webhooks/` مستثنًى في `PUBLIC_PREFIXES`،
-     فمن يعرف العنوان يُشغّل `syncComments` كاملةً متى شاء على حصّة
-     المزوّد. وخطّافٌ لم يُسجَّل بعدُ لا ينبغي أن يُستقبَل أصلاً — فالردّ
-     ٤٠١ لا ٢٠٠، ويُسجَّل ليُقرأ من اللوغ لأن المنادي آلةٌ لا إنسان. */
-  if (!secret) {
-    console.error('socialapi: webhook_unregistered — وصل حدثٌ ولا سرّ توقيع مخزَّن');
-    return c.text('Webhook not registered', 401);
-  }
-  if (!(await verifySignature(secret, raw, sig))) {
-    return c.text('Invalid signature', 401);
-  }
-  let evt: any = null;
-  try { evt = JSON.parse(raw); } catch { return c.text('bad request', 400); }
-  const event = String(evt?.event || evt?.type || '');
-  if (INBOX_EVENTS.includes(event)) {
-    /* دورةٌ تزايدية بحصّتها، لا مسحٌ كامل لكل حدث: التعليقات تصل دفعاتٍ،
-       ومزامنةٌ كاملة لكلٍّ منها تستهلك الحصّة مرّاتٍ على الشيء نفسه. والقفل
-       يجمع الدفعة في دورةٍ واحدة — ما يصل خلالها تلتقطه التالية. */
-    c.executionCtx.waitUntil(
-      syncComments(c.env, { trigger: 'webhook', skipIfRunningWithinMs: 45_000 }).catch(() => {}),
-    );
-  }
-  return c.text('ok', 200);
-});
-
-// إدارة الويب هوك (مصادقة مطلوبة)
-webhookRoutes.use('/socialapi/manage/*', requireAuth, requirePermission('comments.manage'));
-
-// تسجيل نقطة الاستقبال لدى SocialAPI وتخزين السرّ محلياً
-webhookRoutes.post('/socialapi/manage/register', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
-  // نبني عنوان النقطة من أصل الطلب الحالي
-  const origin = new URL(c.req.url).origin;
-  const url = `${origin}/api/webhooks/socialapi`;
-  try {
-    const { id, secret } = await registerSocialApiWebhook(token, url, INBOX_EVENTS);
-    if (secret) await setSetting(c.env, WEBHOOK_SECRET_KEY, secret);
-    if (id) await setSetting(c.env, 'socialapi_webhook_id', id);
-    return c.json({ ok: true, id, url });
-  } catch (e: any) {
-    return c.json({ error: `تعذّر تسجيل الويب هوك: ${String(e?.message || e)}` }, 502);
-  }
-});
-
-// سرد نقاط الاستقبال المسجّلة
-webhookRoutes.get('/socialapi/manage/list', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
-  try {
-    return c.json({ webhooks: await listSocialApiWebhooks(token) });
-  } catch (e: any) {
-    return c.json({ error: String(e?.message || e) }, 502);
-  }
-});
-
-// حذف نقطة استقبال
-webhookRoutes.delete('/socialapi/manage/:id', async (c) => {
-  const token = providerKey(c.env, 'socialapi');
-  if (!token) return c.json({ error: 'لا يوجد مفتاح SocialAPI' }, 400);
-  await deleteSocialApiWebhook(token, c.req.param('id'));
-  return c.json({ ok: true });
-});
 
 /* ═══ Ayrshare ═══
 

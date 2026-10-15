@@ -2,20 +2,12 @@ import type { Env } from '../types';
 import type { PublishingProvider } from './provider';
 import { MockProvider } from './mock';
 import { AYRSHARE_RATE_KEY, AyrshareProvider, AyrshareRate, type AyrshareAuth } from './ayrshare';
-import { BufferProvider } from './buffer';
-import { SocialApiProvider } from './socialapi';
 import { customPlatformLabels } from '../platformLabels';
 import { suspensionNotice } from '../services/ayrshareAlerts';
 
 // يحل مفتاح المزوّد: يُفضّل السرّ الخاص بالمزوّد، ثم يتراجع إلى PROVIDER_API_KEY العام.
-// هكذا يمكن تخزين مفتاح Buffer وSocialAPI معاً على Cloudflare بأسماء مختلفة والتبديل بينهما.
 export function providerKey(env: Env, name: string): string {
-  const n = name.toLowerCase();
-  const specific =
-    n === 'buffer' ? env.BUFFER_API_KEY :
-    n === 'socialapi' ? env.SOCIALAPI_API_KEY :
-    n === 'ayrshare' ? env.AYRSHARE_API_KEY :
-    undefined;
+  const specific = name.toLowerCase() === 'ayrshare' ? env.AYRSHARE_API_KEY : undefined;
   return (specific || env.PROVIDER_API_KEY || '').trim();
 }
 
@@ -46,7 +38,7 @@ function ayrshareRate(env: Env): AyrshareRate {
 }
 
 /** المزوّدون الذين ينشرون فعلاً — وما عداهم تجريبيٌّ أو غير مدعوم. */
-const REAL_PROVIDERS = ['socialapi', 'buffer', 'ayrshare'];
+const REAL_PROVIDERS = ['ayrshare'];
 
 /**
  * أمزوّد النشر مربوطٌ بخدمةٍ حقيقية؟
@@ -63,8 +55,8 @@ export async function publishingProviderConnected(env: Env): Promise<boolean> {
   return REAL_PROVIDERS.includes(name) && providerKey(env, name) !== '';
 }
 
-// مصنع المزوّد — يُحقَن المزوّد الفعلي حسب الإعدادات، ومفتاحه من Secrets.
-// إضافة مزوّد جديد (Zernio / Late): أنشئ ملفاً ينفّذ PublishingProvider وأضِفه هنا.
+// مصنع المزوّد — Ayrshare وحده، ومفتاحه من Secrets. والتجريبي للتطوير والاختبار
+// وحدهما، لا يُعرض في الإعدادات.
 export async function getProvider(env: Env): Promise<PublishingProvider> {
   const setting = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{
     value: string;
@@ -78,20 +70,6 @@ export async function getProvider(env: Env): Promise<PublishingProvider> {
       return new AyrshareProvider(
         key, ayrshareAuth(env)?.x, await customPlatformLabels(env), env.IMAGES, await suspensionNotice(env), ayrshareRate(env),
       );
-    case 'buffer': {
-      if (!key) throw new Error('مفتاح Buffer غير مضبوط (BUFFER_API_KEY أو PROVIDER_API_KEY)');
-      const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'buffer_profiles'").first<{ value: string }>();
-      let profiles: Record<string, string> = {};
-      try { profiles = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
-      return new BufferProvider(key, profiles, await customPlatformLabels(env));
-    }
-    case 'socialapi': {
-      if (!key) throw new Error('مفتاح SocialAPI.ai غير مضبوط (SOCIALAPI_API_KEY أو PROVIDER_API_KEY)');
-      const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'socialapi_profiles'").first<{ value: string }>();
-      let accounts: Record<string, string> = {};
-      try { accounts = row?.value ? JSON.parse(row.value) : {}; } catch { /* خريطة فارغة */ }
-      return new SocialApiProvider(key, accounts, await customPlatformLabels(env));
-    }
     case 'mock':
       return new MockProvider();
     default:

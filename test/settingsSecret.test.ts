@@ -40,12 +40,12 @@ describe('أسرار جدول الإعدادات', () => {
   it('ما تحت البادئة لا يخرج من مسار القراءة، وما عداه يخرج', () => {
     const d = db();
     // `OR REPLACE` لأن بعض المفاتيح مزروعةٌ في الهجرات أصلاً
-    d.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('secret:socialapi_webhook', 'whsec_xyz')").run();
+    d.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('secret:ayrshare_webhook', 'whsec_xyz')").run();
     d.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('email_from', 'no-reply@naflaw.sa')").run();
 
     const keys = readable(d);
     expect(keys).toContain('email_from');
-    expect(keys).not.toContain('secret:socialapi_webhook');
+    expect(keys).not.toContain('secret:ayrshare_webhook');
     // ولا تسريب بالقيمة أيضاً
     expect(JSON.stringify(readable(d))).not.toContain('whsec_xyz');
   });
@@ -59,7 +59,8 @@ describe('أسرار جدول الإعدادات', () => {
     const rename = files.find((f) => f.includes('secret_settings'))!;
     expect(rename, 'هجرة نقل السرّ مفقودة').toBeTruthy();
 
-    for (const f of files) {
+    // حتى هجرة النقل وحدها: ما بعدها يحذف خطّاف المزوّد السابق كلَّه
+    for (const f of files.slice(0, files.indexOf(rename) + 1)) {
       if (f === rename) {
         d.prepare("INSERT INTO settings (key, value) VALUES ('socialapi_webhook_secret', 'whsec_old')").run();
       }

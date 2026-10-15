@@ -72,12 +72,6 @@ export function youtubeTitle(title: string | undefined, text: string): string {
   return [...source.replace(/[<>]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 100).join('');
 }
 
-/** نوع منشور إنستغرام من وسائطه: أكثر من وسيطٍ دوّارة، والمقطع الواحد ريلز، والصورة منشور. */
-export function instagramContentType(kinds: string[]): 'feed' | 'reel' | 'carousel' {
-  if (kinds.length > 1) return 'carousel';
-  return kinds[0] === 'video' ? 'reel' : 'feed';
-}
-
 /** نوع الوسيط من صيغته. */
 export function mediaKind(mime: string): 'image' | 'video' | 'audio' | 'file' {
   if (mime.startsWith('image/')) return 'image';

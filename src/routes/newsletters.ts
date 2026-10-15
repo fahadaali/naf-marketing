@@ -156,7 +156,7 @@ newsletterRoutes.post('/:id/send', async (c) => {
    ‎/meta/export-capabilities ولا تعرض زرّاً يفشل عند الضغط. */
 newsletterRoutes.get('/meta/export-capabilities', (c) => c.json({ pdf: !!c.env.BROWSER }));
 
-/* جاهزية البريد — تسألها الإعدادات كما تسأل بيسكامب وBuffer عن حالتهما.
+/* جاهزية البريد — تسألها الإعدادات كما تسأل بيسكامب ومزوّد النشر عن حالتهما.
    وكان البريد وحده بلا فحصٍ، وهو الوحيد الذي كان يبتلع الإرسال صامتاً. */
 newsletterRoutes.get('/meta/email-status', async (c) => c.json(await emailReadiness(c.env)));
 

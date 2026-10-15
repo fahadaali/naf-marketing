@@ -1,6 +1,6 @@
 import type { Env } from '../types';
 import type { ModerateAction } from '../adapters/provider';
-import { ayrshareAuth, getProvider, providerKey } from '../adapters';
+import { ayrshareAuth, getProvider } from '../adapters';
 import {
   attachmentLabel, AYRSHARE_COMMENT_PLATFORMS, AYRSHARE_DM_PLATFORMS, AyrshareError, ayrshareComments, ayrshareLinkedInReplies,
   ayrshareMessages,
@@ -9,19 +9,12 @@ import {
   type AyrshareAccount, type AyrshareAuth, type AyrshareMessage,
 } from '../adapters/ayrshare';
 import { mergeDmThread, mergeThread, parseThread, sortThread, threadAnswer, threadDecision, type ThreadEntry } from './inboxThread';
-import {
-  conversationLatest, isNotFound, isOwnAuthor, isUnsupported, listCommentReplies,
-  listConversations, listInboxPosts, listMentions, listPostComments, listReviews,
-  listSocialApiAccountsDetailed, ownReply, SocialApiError, supportsDirectInbox,
-  type InboxPost, type MentionsPath, type RepliesPath, type SocialApiOwnedAccount,
-} from '../adapters/socialapi';
 import { BudgetExhausted, CallBudget } from '../adapters/budget';
 import type { InboxItem } from '../adapters/inbox';
 import { newId, nowIso } from '../util';
 import { loadMedia } from './publish';
-import { legacyKeySql, resolveNativeIdsFromUrls } from './nativePostId';
 import { notifyUsers, usersWithPermission } from './notify';
-import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
+import { customPlatformLabels, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 
 /* ============================================================
@@ -86,8 +79,6 @@ export type InboxSyncReport = {
   kinds: Record<InboxKind, InboxKindStatus>;
   errors: string[];
   lastOkAt: string | null;
-  repliesPath: RepliesPath | 'none' | null;
-  mentionsPath: MentionsPath | 'none' | null;
   /** الخطة المعلنة، وهل نزلت حصصها إلى المجانية احتياطاً — انظر `limits.ts`. */
   plan?: Plan;
   fallback?: boolean;
@@ -105,8 +96,6 @@ const REPORT_KEY = 'inbox_sync_report';
 const LOCK_KEY = 'inbox_sync_lock';
 const HISTORY_REPORT_KEY = 'inbox_history_report';
 const HISTORY_LOCK_KEY = 'inbox_history_lock';
-/** أين بلغت قراءة قائمة منشورات الصندوق نحو أقدمها، ومتى اكتملت. */
-const HISTORY_CURSOR_KEY = 'inbox_history_cursor';
 const HISTORY_DONE_KEY = 'inbox_history_done_at';
 /** آخر قراءةٍ للمراجعات والرسائل والإشارات إلى آخرها — مرّةً في اليوم. */
 const HISTORY_DEEP_KEY = 'inbox_history_deep_at';
@@ -149,17 +138,7 @@ export async function inboxHistoryDoneAt(env: Env): Promise<string | null> {
   return (await getSetting(env, HISTORY_DONE_KEY)) || null;
 }
 
-/**
- * `hints` تقريرٌ تُؤخذ منه المسارات التي تعلّمتها الدورات — مسارُ ردود التعليقات
- * ومسارُ الإشارات. وهو السابق نفسه، إلا في سحب السجلّ: يأخذها من الصندوق.
- */
-function newReport(
-  mode: SyncMode,
-  provider: string,
-  budget: number,
-  prev: InboxSyncReport | null,
-  hints: InboxSyncReport | null = prev,
-): InboxSyncReport {
+function newReport(mode: SyncMode, provider: string, budget: number, prev: InboxSyncReport | null): InboxSyncReport {
   const kind = (): InboxKindStatus => ({ ok: null, items: 0 });
   return {
     at: nowIso(),
@@ -174,22 +153,11 @@ function newReport(
     kinds: { comment: kind(), dm: kind(), review: kind(), mention: kind() },
     errors: [],
     lastOkAt: prev?.lastOkAt ?? null,
-    repliesPath: hints?.repliesPath ?? null,
-    mentionsPath: hints?.mentionsPath ?? null,
   };
 }
 
 function errorText(err: unknown): string {
   return String((err as Error)?.message || err).slice(0, 240);
-}
-
-/**
- * رفضٌ يخصّ منشوراً بعينه: ٤xx من المزوّد بعد أن قُبلت قائمة المنشورات نفسها —
- * حُذف المنشور، أو مُنع عنه الحساب، أو رُدّ الطلب بمحتواه. وليس منه ٤٠١ (الرمز
- * كلّه)، ولا ٤٠٨ و٤٢٩ (مهلةٌ وتمهّل). وما سواه عطلٌ عامّ لا ذنب للمنشور فيه.
- */
-function rejectedPost(err: unknown): boolean {
-  return err instanceof SocialApiError && err.status >= 400 && err.status < 500 && ![401, 408, 429].includes(err.status);
 }
 
 /**
@@ -232,15 +200,13 @@ export async function syncComments(
     const prev = await readReport(env, reportKey);
     const limits = await runLimits(env, trigger);
     const provider = await providerName(env);
-    const report = newReport(mode, provider, opts.budget ?? limits.calls, prev, history ? await readInboxReport(env) : prev);
+    const report = newReport(mode, provider, opts.budget ?? limits.calls, prev);
     report.plan = limits.plan;
     report.fallback = limits.fallback;
 
     try {
-      if (provider === 'socialapi') await syncSocialApiInbox(env, report, limits.deadline);
-      else if (provider === 'ayrshare') await syncAyrshareInbox(env, report, limits.deadline);
-      // المزوّدون الآخرون يُقرأ صندوقهم كلُّه في كل دورة — لا سجلّ له مستقلّ
-      else if (!history) await syncPerPost(env, report);
+      // Ayrshare وحده يُقرأ صندوقه؛ والتجريبي لا صندوق له
+      if (provider === 'ayrshare') await syncAyrshareInbox(env, report, limits.deadline);
     } catch (err) {
       report.errors.push(errorText(err));
     }
@@ -252,113 +218,6 @@ export async function syncComments(
   } finally {
     if (mark) await endScheduledRun(env, job, mark);
   }
-}
-
-/* ============================================================
-   SocialAPI — الصندوق الموحّد عبر كل الحسابات
-   ============================================================ */
-
-type Owners = { forAccount: (accountId: string) => Set<string> };
-
-function ownerIndex(accounts: SocialApiOwnedAccount[]): Owners {
-  const byAccount = new Map(accounts.map((a) => [a.id, new Set(a.ownerKeys)]));
-  const all = new Set(accounts.flatMap((a) => a.ownerKeys));
-  return { forAccount: (accountId) => byAccount.get(accountId) ?? all };
-}
-
-async function syncSocialApiInbox(env: Env, report: InboxSyncReport, deadline: number): Promise<void> {
-  const token = providerKey(env, 'socialapi');
-  if (!token) {
-    report.errors.push('مفتاح SocialAPI غير مضبوط. اضبط SOCIALAPI_API_KEY.');
-    return;
-  }
-  const budget = new CallBudget(report.budget, deadline);
-
-  // تنظيف السجلات الفارغة (بلا نص ولم يُردّ عليها) — يشمل التقييمات بلا تعليق مكتوب.
-  await env.DB.prepare(
-    "DELETE FROM platform_comments WHERE (body IS NULL OR TRIM(body) = '') AND reply_body IS NULL AND replied_at IS NULL",
-  ).run();
-
-  const fail = (kind: InboxKind | null, err: unknown) => {
-    if (err instanceof BudgetExhausted) {
-      report.complete = false;
-      return;
-    }
-    const message = errorText(err);
-    if (kind) {
-      report.kinds[kind].ok = false;
-      report.kinds[kind].error = message;
-    }
-    report.errors.push(message);
-  };
-
-  let accounts: SocialApiOwnedAccount[] = [];
-  try {
-    accounts = await listSocialApiAccountsDetailed(token, budget);
-  } catch (err) {
-    fail(null, err);
-  }
-  const owners = ownerIndex(accounts);
-
-  /* ما يُحجز لبقية الأنواع: المراجعات بنداء، والرسائل بنداءٍ ونداءين لتعرّف
-     آخر رسالة، والإشارات بنداءٍ لكل حسابٍ يدعمها. والتعليقات تأخذ الباقي —
-     فلا يأكل منشورٌ كثيرُ التعليقات حصّةَ الرسائل في كل دورة. */
-  const direct = accounts.filter((a) => supportsDirectInbox(a.platform)).length;
-
-  /* سحب السجلّ يقرأ المراجعات والرسائل والإشارات إلى آخرها مرّةً في اليوم —
-     أحدثُها تقرؤه الدورات المعتادة كل عشرين دقيقة، وقديمُها لا يتغيّر كثيراً. */
-  const history = report.mode === 'history';
-  const deepAt = history ? await getSetting(env, HISTORY_DEEP_KEY) : null;
-  const deep = history && (!deepAt || Date.now() - Date.parse(deepAt) > DAY);
-  const others = !history || deep;
-  const reserve = others ? Math.min(1 + (direct ? 3 : 0) + direct, 12) * (deep ? 3 : 1) : 0;
-
-  try {
-    await syncCommentThreads(env, token, budget, report, owners, reserve);
-  } catch (err) {
-    fail('comment', err);
-  }
-
-  if (history) {
-    try {
-      await sweepOldReplies(env, token, budget, report, owners, reserve);
-    } catch (err) {
-      fail('comment', err);
-    }
-  }
-
-  const fresh: InboxItem[] = [];
-  if (others) {
-    try {
-      fresh.push(...(await syncReviews(env, token, budget, report, deep ? 10 : 2)));
-    } catch (err) {
-      fail('review', err);
-    }
-
-    try {
-      await syncConversations(env, token, budget, report, accounts, deep ? 5 : 2);
-    } catch (err) {
-      fail('dm', err);
-    }
-
-    try {
-      await syncMentions(env, token, budget, report, accounts, deep ? 3 : 1);
-    } catch (err) {
-      fail('mention', err);
-    }
-    // لم تُستكمل قبل الحصّة — تُعاد في السحب التالي لا بعد يوم
-    if (deep && budget.left > 0) await setSetting(env, HISTORY_DEEP_KEY, nowIso());
-  }
-
-  report.calls = budget.used;
-  report.stoppedBy = budget.stoppedBy;
-  if (budget.stoppedBy) report.complete = false;
-  /* التنبيه لما جدّ لا لما قُرئ أوّل مرّة: قراءةُ الصفحات إلى آخرها تُدخل
-     الصندوقَ مراجعاتِ سنواتٍ مضت، ولكلّ سلبيةٍ منها بريدٌ لكل مسؤول. فلا يُنبَّه
-     إلا لمراجعة الأسبوع الأخير، ولا شيء من سحب السجلّ. */
-  const since = Date.now() - 7 * DAY;
-  const negative = history ? [] : fresh.filter((it) => it.rating != null && it.rating <= 2 && Date.parse(it.createdAt) >= since);
-  if (negative.length) await notifyNegative(env, negative);
 }
 
 /* ─── صفوف القاعدة ─── */
@@ -377,7 +236,6 @@ type Row = {
   replied_at: string | null;
   reply_source: string | null;
   reply_checked_at: string | null;
-  provider_interaction_id: string | null;
   created_at: string;
   reply_provider_id: string | null;
   ignored_at: string | null;
@@ -385,17 +243,7 @@ type Row = {
 };
 
 const ROW_COLUMNS =
-  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, provider_interaction_id, created_at, reply_provider_id, ignored_at, thread_json';
-
-/** صفوف منشورٍ واحد بترميزها `منشور|حساب|` — مطابقةُ بادئةٍ حرفية لا `LIKE` (معرّفات فيسبوك فيها `_`). */
-async function rowsByPrefix(env: Env, prefix: string): Promise<Map<string, Row>> {
-  const { results } = await env.DB.prepare(
-    `SELECT ${ROW_COLUMNS} FROM platform_comments WHERE substr(provider_comment_id, 1, ?) = ?`,
-  )
-    .bind(prefix.length, prefix)
-    .all<Row>();
-  return new Map(results.map((r) => [r.provider_comment_id, r]));
-}
+  'id, provider_comment_id, platform, kind, author_name, body, is_hidden, capabilities_json, rating, reply_body, replied_at, reply_source, reply_checked_at, created_at, reply_provider_id, ignored_at, thread_json';
 
 /** صفوفٌ بمعرّفاتها — دفعاتٍ دون حدّ الروابط في D1. */
 async function rowsByIds(env: Env, ids: string[]): Promise<Map<string, Row>> {
@@ -498,26 +346,24 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
         stmt: env.DB.prepare(
           `INSERT INTO platform_comments
              (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at,
-              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source, provider_interaction_id, thread_json)
-           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              capabilities_json, is_hidden, rating, reply_body, replied_at, reply_source, thread_json)
+           VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(platform, provider_comment_id) DO NOTHING`,
         ).bind(
           newId('cm'), it.platform, it.id, it.kind, it.authorName, it.body, it.createdAt,
           caps, it.isHidden ? 1 : 0, it.rating ?? null,
           replied ? it.repliedBody : null, replied ? it.repliedAt ?? null : null, replied ? 'external' : null,
-          it.interactionId ?? null, it.thread ? JSON.stringify(sortThread(it.thread)) : null,
+          it.thread ? JSON.stringify(sortThread(it.thread)) : null,
         ),
       });
       if (replied) result.externalReplies++;
       continue;
     }
 
-    // معرّف المزوّد يُستكمل لصفٍّ كُتب قبل أن يُحفظ — ولا يُستبدل ما حُفظ
-    const interaction = !row.provider_interaction_id && it.interactionId ? it.interactionId : null;
     const changed =
       row.body !== it.body || row.author_name !== it.authorName || row.kind !== it.kind ||
       (row.is_hidden ? 1 : 0) !== (it.isHidden ? 1 : 0) || (row.capabilities_json ?? null) !== caps ||
-      (row.rating ?? null) !== (it.rating ?? null) || interaction !== null;
+      (row.rating ?? null) !== (it.rating ?? null);
     const reopened = it.kind === 'dm' && row.body !== it.body;
     if (changed) {
       updates.push(
@@ -526,12 +372,11 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
              لما قاله، لا لما سيقوله. */
           `UPDATE platform_comments
            SET kind = ?, body = ?, author_name = ?, capabilities_json = ?, is_hidden = ?, rating = ?,
-               provider_interaction_id = COALESCE(provider_interaction_id, ?),
                ignored_at = CASE WHEN ? THEN NULL ELSE ignored_at END,
                ignored_by = CASE WHEN ? THEN NULL ELSE ignored_by END
            WHERE id = ?`,
         ).bind(
-          it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null, interaction,
+          it.kind, it.body, it.authorName, caps, it.isHidden ? 1 : 0, it.rating ?? null,
           reopened ? 1 : 0, reopened ? 1 : 0, row.id,
         ),
       );
@@ -560,631 +405,13 @@ async function writeItems(env: Env, items: InboxItem[], existing?: Map<string, R
   return result;
 }
 
-/* ─── التعليقات ─── */
-
-type PostState = {
-  inbox_post_id: string;
-  account_id: string;
-  signature: string;
-  synced_at: string | null;
-  tail_cursor: string | null;
-  needs_more: number;
-};
-
-type ReplyCheck = {
-  rowKey: string; // provider_comment_id
-  postId: string;
-  accountId: string;
-  commentId: string;
-  interactionId: string;
-  createdAt: string;
-  known: boolean; // المزوّد أعلن عدد الردود وهو فوق الصفر
-  checkedAt: string | null;
-};
-
 const DAY = 86_400_000;
-
-/**
- * أولويّة المنشور في الدورة — أصغرُها أسبق، و`null` لا يُجلب هذه المرّة.
- * ٠ لم يُقرأ قطّ · ١ منشورٌ كبير لم تكتمل قراءته · ٢ تغيّرت بصمتُه ·
- * ٣ المزوّد لا يُعلن بصمةً فيُقرأ بالتناوب · ٤ عليه تعليقاتٌ بلا رد تُفحص
- * ردودها · ٥ كل ما عداه في الجلب اليدوي.
- */
-export function postPriority(
-  p: InboxPost,
-  st: PostState | null,
-  hasOpen: boolean,
-  mode: SyncMode,
-  now: number,
-): number | null {
-  if (!st) return 0;
-  if (st.needs_more) return 1;
-  // سحب السجلّ للقديم وحده: ما لم يُقرأ قطّ أو وقفت قراءته — والباقي للدورة المعتادة
-  if (mode === 'history') return null;
-  if (p.signature && p.signature !== st.signature) return 2;
-  const age = now - Date.parse(st.synced_at || '1970-01-01T00:00:00Z');
-  if (!p.signature && age > 30 * 60_000) return 3;
-  if (hasOpen && age > 2 * 3_600_000) return 4;
-  if (mode === 'full') return 5;
-  return null;
-}
-
-async function syncCommentThreads(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  owners: Owners,
-  reserve: number,
-): Promise<void> {
-  const mode = report.mode;
-
-  /* سحب السجلّ يمضي في قائمة المنشورات من مؤشّره المحفوظ نحو أقدمها، ثلاث
-     صفحاتٍ في كل سحب. فإذا بلغ آخرها استراح ثلاثين يوماً ثم عاد من أحدثها —
-     المنشور القديم الذي يجدّ عليه تعليقٌ يصعد إلى أوّل القائمة فتقرؤه الدورة
-     المعتادة، ولا ينتظر السجلّ. */
-  let startCursor: string | null = null;
-  if (mode === 'history') {
-    const doneAt = await getSetting(env, HISTORY_DONE_KEY);
-    if (doneAt && Date.now() - Date.parse(doneAt) < 30 * DAY) {
-      report.kinds.comment.ok = true;
-      return;
-    }
-    startCursor = (await getSetting(env, HISTORY_CURSOR_KEY)) || null;
-  }
-  let listing;
-  try {
-    listing = await listInboxPosts(token, { budget, maxPages: mode === 'full' ? 5 : mode === 'history' ? 3 : 2, startCursor });
-  } catch (err) {
-    // مؤشّرٌ لم يعد يقبله المزوّد — يُبدأ السجلّ من أوّله في السحب التالي
-    if (startCursor && isUnsupported(err)) {
-      await setSetting(env, HISTORY_CURSOR_KEY, '');
-      report.complete = false;
-      return;
-    }
-    throw err;
-  }
-  report.kinds.comment.ok = true;
-  if (listing.exhausted) report.complete = false;
-
-  const { results: stateRows } = await env.DB.prepare(
-    'SELECT inbox_post_id, account_id, signature, synced_at, tail_cursor, needs_more FROM inbox_post_state',
-  ).all<PostState>();
-  const state = new Map(stateRows.map((s) => [`${s.inbox_post_id}|${s.account_id}`, s]));
-
-  // منشوراتٌ عليها تعليقاتٌ بلا رد في الأسبوعين الأخيرين — تُفحص ردودها
-  const { results: openRows } = await env.DB.prepare(
-    `SELECT DISTINCT substr(provider_comment_id, 1, instr(provider_comment_id, '|') - 1) AS post_id
-     FROM platform_comments
-     WHERE kind = 'comment' AND reply_body IS NULL AND created_at >= ? AND instr(provider_comment_id, '|') > 0`,
-  )
-    .bind(new Date(Date.now() - 14 * DAY).toISOString())
-    .all<{ post_id: string }>();
-  const open = new Set(openRows.map((r) => r.post_id));
-
-  const now = Date.now();
-  const ranked = listing.posts
-    .map((p) => {
-      const st = state.get(`${p.postId}|${p.accountId}`) ?? null;
-      return { p, st, pr: postPriority(p, st, open.has(p.postId), report.mode, now) };
-    })
-    .filter((x): x is { p: InboxPost; st: PostState | null; pr: number } => x.pr !== null)
-    .sort((a, b) => a.pr - b.pr || (a.st?.synced_at ?? '').localeCompare(b.st?.synced_at ?? ''));
-
-  const replyQueue: ReplyCheck[] = [];
-  const stateWrites: D1PreparedStatement[] = [];
-  const stamp = nowIso();
-  let seen = 0;
-  let processed = 0;
-  let unfinished = 0;
-
-  const stateOf = (p: InboxPost, resume: string | null, needsMore: boolean) =>
-    env.DB.prepare(
-      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at, tail_cursor, needs_more)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET
-         platform = excluded.platform, signature = excluded.signature, seen_at = excluded.seen_at,
-         synced_at = excluded.synced_at, tail_cursor = excluded.tail_cursor, needs_more = excluded.needs_more`,
-    ).bind(p.postId, p.accountId, p.platform, p.signature, stamp, stamp, resume, needsMore ? 1 : 0);
-  let failed = 0;
-  /** ما تعذّر لعطلٍ عامّ — لم يُقرأ ولا حالة له. */
-  let unread = 0;
-  let firstError: string | null = null;
-
-  for (const { p, st } of ranked) {
-    // يُترك للردود ثلاثةُ نداءاتٍ على الأقل، وللأنواع الأخرى حصّتها
-    if (budget.left <= reserve + 3) {
-      report.complete = false;
-      break;
-    }
-    let r;
-    try {
-      r = await syncOnePost(env, token, budget, report, owners, p, st, replyQueue);
-    } catch (err) {
-      if (err instanceof BudgetExhausted) {
-        report.complete = false;
-        break;
-      }
-      /* منشورٌ واحد يتعذّر — حُذف على المنصّة أو مُنع عنه الحساب — لا يوقف
-         الباقي. وكان خطؤه يُسقط الحلقة كلَّها: لا تُكتب حالةُ ما قُرئ قبله ولا
-         يُقرأ ما بعده، وهو أوّل القائمة في كل دورة لأنه لم يُقرأ قطّ. فيُعطى
-         حالةً ببصمته الحالية — لا يُعاد حتى يتغيّر نشاطه — ويُمضى إلى غيره.
-
-         وذلك للمنشور الذي رفضه المزوّد وحده. أما العطل العامّ — مزوّدٌ متوقّف،
-         أو شبكة، أو قاعدةٌ ينقصها عمود — فحالتُه تعلّم المنشور مقروءاً ولم
-         تُحفظ تعليقاته، فتضيع بصمت. فلا حالة له: يُعاد في السحب التالي. */
-      failed++;
-      firstError ??= errorText(err);
-      if (rejectedPost(err)) stateWrites.push(stateOf(p, st?.tail_cursor ?? null, false));
-      else unread++;
-      processed++;
-      continue;
-    }
-    seen += r.seen;
-    stateWrites.push(stateOf(p, r.resume, !r.complete));
-    if (r.exhausted) {
-      report.complete = false;
-      break;
-    }
-    processed++;
-    if (!r.complete) unfinished++;
-  }
-  await runBatch(env, stateWrites);
-  report.kinds.comment.items = seen;
-  if (failed) {
-    report.kinds.comment.error = firstError ?? undefined;
-    // كلُّ ما جُرّب تعذّر — عطلٌ يُقال، لا منشورٌ شاذّ
-    if (failed === processed) {
-      report.kinds.comment.ok = false;
-      report.errors.push(firstError ?? '');
-    }
-  }
-
-  /* لا يتقدّم مؤشّر السجلّ إلا وقد قُرئت منشورات صفحاته كلُّها إلى آخر
-     تعليقاتها — وإلا تخطّى منشوراتٍ لم تُقرأ أو بقي منها شيء، ولا تبلغها
-     الدورة المعتادة لأنها في أعماق القائمة. وما اكتمل منها له حالةٌ الآن، فلا
-     يُعاد في السحب التالي، وما بقي منه يُستأنف من آخر صفحةٍ بلغها. وما تعذّر
-     لعطلٍ عامّ لم يُقرأ ولا حالة له، فالمؤشّر يقف عنده كما يقف عند ما بقي. */
-  if (mode === 'history' && processed === ranked.length && !unfinished && !unread && !listing.exhausted) {
-    if (listing.complete) {
-      await setSetting(env, HISTORY_DONE_KEY, stamp);
-      await setSetting(env, HISTORY_CURSOR_KEY, '');
-    } else {
-      await setSetting(env, HISTORY_CURSOR_KEY, listing.resume ?? '');
-    }
-  }
-
-  await checkReplies(env, token, budget, report, owners, replyQueue, reserve, { anyAge: mode === 'history' });
-}
-
-async function syncOnePost(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  owners: Owners,
-  p: InboxPost,
-  st: PostState | null,
-  replyQueue: ReplyCheck[],
-): Promise<{ seen: number; complete: boolean; exhausted: boolean; resume: string | null }> {
-  /* كل نمطٍ يستأنف المنشور من آخر صفحةٍ بلغها: التعليقات من الأقدم إلى
-     الأحدث، فالبدء من أوّله في «جلب الآن» كان يقرأ أقدم خمسمئةٍ على منشورٍ
-     كبير ولا يبلغ أحدثها — ثم يعيد مؤشّره إلى الصفحة السادسة فتعيد الدورات
-     قراءة ما قُرئ. واليدوي يزيد الصفحات ويشمل كل منشور. */
-  const full = report.mode === 'full';
-  const startCursor = st?.tail_cursor ?? null;
-  const maxPages = full || report.mode === 'history' ? 5 : 3;
-  let res;
-  try {
-    res = await listPostComments(token, p.postId, p.accountId, { budget, maxPages, startCursor });
-  } catch (err) {
-    // مؤشّرٌ قديم لم يعد يقبله المزوّد — يُبدأ من أوّل المنشور
-    if (!startCursor || !isUnsupported(err)) throw err;
-    res = await listPostComments(token, p.postId, p.accountId, { budget, maxPages });
-  }
-
-  const ownerKeys = owners.forAccount(p.accountId);
-  // الترميز القديم نفسه (منشور|حساب|تعليق) — به يُردّ على التعليق ويُشرف عليه
-  const prefix = `${p.postId}|${p.accountId}|`;
-  const existing = await rowsByPrefix(env, prefix);
-
-  const items: InboxItem[] = [];
-  const replies: { key: string; reply: ExternalReply }[] = [];
-  const stale: string[] = [];
-
-  for (const c of res.comments) {
-    if (!c.commentId && !c.body) continue;
-    const key = `${prefix}${c.commentId}`;
-
-    if (isOwnAuthor(c.raw, ownerKeys)) {
-      /* تعليقٌ كتبه حسابُنا: ردٌّ على تعليق — فالتعليق الأصل مردودٌ عليه —
-         أو أوّلُ تعليقٍ ننشره تحت منشورنا. وليس في الحالين عنصراً ينتظر ردّاً. */
-      if (c.parentId) replies.push({ key: `${prefix}${c.parentId}`, reply: { text: c.body, at: c.createdAt, id: c.commentId || null } });
-      const row = existing.get(key);
-      if (row && row.reply_body === null) stale.push(row.id);
-      continue;
-    }
-    // نتجاهل ما لا نص له — بنفس شرط التنظيف، وإلّا حُذف وأُعيدت إضافته كل دورة.
-    if (!c.body.trim()) continue;
-
-    items.push({
-      id: key,
-      platform: String(c.raw?.platform || p.platform),
-      kind: 'comment',
-      authorName: c.authorName,
-      body: c.body,
-      createdAt: c.createdAt,
-      capabilities: c.capabilities,
-      isHidden: c.isHidden,
-      interactionId: c.interactionId || null,
-    });
-
-    const row = existing.get(key);
-    if (row && row.reply_body !== null) continue;
-    if (c.replies) {
-      const own = ownReply(c.replies, ownerKeys);
-      if (own) replies.push({ key, reply: own });
-    } else if (c.replyCount === null || c.replyCount > 0) {
-      replyQueue.push({
-        rowKey: key,
-        postId: p.postId,
-        accountId: p.accountId,
-        commentId: c.commentId,
-        interactionId: c.interactionId,
-        createdAt: c.createdAt,
-        known: c.replyCount !== null,
-        checkedAt: row?.reply_checked_at ?? null,
-      });
-    }
-  }
-
-  const written = await writeItems(env, items, existing);
-  report.added += written.added;
-
-  // الردود بعد الإدراج: تعليقٌ جديدٌ ردُّه معه في الدفعة نفسها
-  if (replies.length) {
-    const after = await rowsByPrefix(env, prefix);
-    const stmts: D1PreparedStatement[] = [];
-    for (const { key, reply } of replies) {
-      const row = after.get(key);
-      if (row && row.reply_body === null) {
-        stmts.push(externalReplyStmt(env, row.id, reply));
-        report.externalReplies++;
-      }
-    }
-    await runBatch(env, stmts);
-  }
-
-  if (stale.length) {
-    await runBatch(env, stale.map((id) => env.DB.prepare('DELETE FROM platform_comments WHERE id = ? AND reply_body IS NULL').bind(id)));
-  }
-
-  return { seen: res.comments.length, complete: res.complete, exhausted: res.exhausted, resume: res.resume };
-}
-
-/**
- * يبحث في ردود التعليقات عن ردٍّ كتبه حسابُنا من تطبيق المنصّة.
- *
- * ما أعلن المزوّد أن عليه ردوداً يسبق، ثم ما لم يُفحص قطّ، ثم أقدمُها فحصاً.
- * وما لا يُعلَن عددُ ردوده يُفحص في أسبوعيه الأوّلين وحدهما — فحصُ كل تعليقٍ
- * قديم في كل دورة يأكل الحصّة ولا يجد شيئاً.
- */
-async function checkReplies(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  owners: Owners,
-  queue: ReplyCheck[],
-  reserve: number,
-  opts: { anyAge?: boolean } = {},
-): Promise<void> {
-  const cutoff = Date.now() - 14 * DAY;
-  const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
-  /* ما أعلن المزوّد أن عليه ردوداً، وتعليقات الأسبوعين، تُفحص في كل دورة.
-     والأقدم يُفحص أوّل ما يُقرأ، ثم كل أسبوع — لا في كل دورة. وسحب السجلّ
-     يفحص ما يقرؤه كلَّه: هو القراءة الأولى لمنشوراتٍ قديمة. */
-  const eligible = queue
-    .filter((q) => opts.anyAge || q.known || Date.parse(q.createdAt) >= cutoff || q.checkedAt === null || q.checkedAt < weekAgo)
-    .sort((a, b) =>
-      Number(b.known) - Number(a.known) ||
-      Number(Date.parse(b.createdAt) >= cutoff) - Number(Date.parse(a.createdAt) >= cutoff) ||
-      Number(a.checkedAt !== null) - Number(b.checkedAt !== null) ||
-      (a.checkedAt ?? '').localeCompare(b.checkedAt ?? '') ||
-      b.createdAt.localeCompare(a.createdAt),
-    );
-  if (!eligible.length) return;
-
-  let path: RepliesPath | null = report.repliesPath === 'inbox' || report.repliesPath === 'interactions' ? report.repliesPath : null;
-  let answered = false;
-  const checked: string[] = [];
-  const found: { key: string; reply: ExternalReply }[] = [];
-
-  for (const q of eligible) {
-    if (budget.left <= reserve) {
-      report.complete = false;
-      break;
-    }
-    let res;
-    try {
-      res = await listCommentReplies(
-        token,
-        { postId: q.postId, accountId: q.accountId, commentId: q.commentId, interactionId: q.interactionId },
-        { budget, prefer: path },
-      );
-    } catch (err) {
-      if (err instanceof BudgetExhausted) {
-        report.complete = false;
-        break;
-      }
-      /* تعليقٌ تتعذّر ردودُه لا يُسقط ما فُحص قبله ولا ما بعده — وكان يُسقطهما
-         ويبقى أوّلَ الدور في كل دورة. فيُختم وقتُ فحصه كغيره ويُمضى. */
-      report.kinds.comment.error ??= errorText(err);
-      checked.push(q.rowKey);
-      continue;
-    }
-    checked.push(q.rowKey);
-    if (res.path) {
-      path = res.path;
-      answered = true;
-    }
-    const own = ownReply(res.replies, owners.forAccount(q.accountId));
-    if (own) found.push({ key: q.rowKey, reply: own });
-  }
-  if (checked.length) report.repliesPath = answered ? path : report.repliesPath ?? 'none';
-
-  const rows = await rowsByIds(env, [...checked, ...found.map((f) => f.key)]);
-  const stamp = nowIso();
-  const stmts: D1PreparedStatement[] = [];
-  for (const key of checked) {
-    const row = rows.get(key);
-    if (row) stmts.push(env.DB.prepare('UPDATE platform_comments SET reply_checked_at = ? WHERE id = ?').bind(stamp, row.id));
-  }
-  for (const { key, reply } of found) {
-    const row = rows.get(key);
-    if (row && row.reply_body === null) {
-      stmts.push(externalReplyStmt(env, row.id, reply));
-      report.externalReplies++;
-    }
-  }
-  await runBatch(env, stmts);
-}
-
-/**
- * يدور سحبُ السجلّ على التعليقات القديمة بلا رد — ما مضى عليه أكثر من
- * أسبوعين، وأحدثُه تفحصه الدورة المعتادة — فيفحص ردودها: ما لم يُفحص قطّ
- * أوّلاً، ثم أقدمُها فحصاً، وكلٌّ مرّةً في الأسبوع على الأكثر. هكذا يُعرف ردٌّ
- * كتبه الفريق من تطبيق المنصّة قبل شهورٍ على تعليقٍ لم يُفتح منشورُه منذئذ.
- */
-async function sweepOldReplies(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  owners: Owners,
-  reserve: number,
-): Promise<void> {
-  const room = budget.left - reserve;
-  if (room <= 0) return;
-  const { results } = await env.DB.prepare(
-    `SELECT provider_comment_id, provider_interaction_id, created_at, reply_checked_at
-     FROM platform_comments
-     WHERE kind = 'comment' AND reply_body IS NULL AND created_at < ?
-       AND (reply_checked_at IS NULL OR reply_checked_at < ?)
-       AND instr(provider_comment_id, '|') > 0
-     ORDER BY reply_checked_at IS NOT NULL, reply_checked_at, created_at DESC
-     LIMIT ?`,
-  )
-    .bind(new Date(Date.now() - 14 * DAY).toISOString(), new Date(Date.now() - 7 * DAY).toISOString(), Math.min(room, 60))
-    .all<{ provider_comment_id: string; provider_interaction_id: string | null; created_at: string; reply_checked_at: string | null }>();
-
-  const queue: ReplyCheck[] = [];
-  for (const r of results) {
-    // الترميز `منشور|حساب|تعليق`
-    const [postId, accountId, ...rest] = r.provider_comment_id.split('|');
-    const commentId = rest.join('|');
-    if (!postId || !commentId) continue;
-    queue.push({
-      rowKey: r.provider_comment_id,
-      postId,
-      accountId: accountId ?? '',
-      commentId,
-      interactionId: r.provider_interaction_id ?? '',
-      createdAt: r.created_at,
-      known: false,
-      checkedAt: r.reply_checked_at,
-    });
-  }
-  await checkReplies(env, token, budget, report, owners, queue, reserve, { anyAge: true });
-}
-
-/* ─── المراجعات ─── */
-
-async function syncReviews(env: Env, token: string, budget: CallBudget, report: InboxSyncReport, pages: number): Promise<InboxItem[]> {
-  if (budget.left <= 0) {
-    report.complete = false;
-    return [];
-  }
-  let r;
-  try {
-    r = await listReviews(token, { budget, maxPages: pages });
-  } catch (err) {
-    if (isNotFound(err)) return []; // لا حساب مراجعاتٍ مربوط
-    throw err;
-  }
-  report.kinds.review.ok = true;
-  report.kinds.review.items = r.items.length;
-  if (r.exhausted) report.complete = false;
-
-  /* مراجعةٌ بلا حسابٍ في الردّ الحالي تُرمَّز «rv::{مراجعة}»، وقد كُتبت قبلُ
-     بحسابها «rv:{حساب}:{مراجعة}» من ملخّص الحساب. فتُطابَق بالمراجعة وحدها
-     كي لا تظهر مرّتين. */
-  const orphan = r.items.filter((it) => it.id.startsWith('rv::'));
-  if (orphan.length) {
-    const { results } = await env.DB.prepare(
-      "SELECT provider_comment_id FROM platform_comments WHERE kind = 'review' AND provider_comment_id LIKE 'rv:%'",
-    ).all<{ provider_comment_id: string }>();
-    const bySuffix = new Map(results.map((x) => [x.provider_comment_id.slice(x.provider_comment_id.indexOf(':', 3) + 1), x.provider_comment_id]));
-    for (const it of orphan) {
-      const known = bySuffix.get(it.id.slice(4));
-      if (known) it.id = known;
-    }
-  }
-
-  const res = await writeItems(env, r.items);
-  report.added += res.added;
-  report.externalReplies += res.externalReplies;
-  return res.fresh;
-}
-
-/* ─── الرسائل الخاصة ─── */
-
-async function syncConversations(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  accounts: SocialApiOwnedAccount[],
-  pages: number,
-): Promise<void> {
-  if (!accounts.some((a) => supportsDirectInbox(a.platform))) return;
-  if (budget.left <= 0) {
-    report.complete = false;
-    return;
-  }
-  const r = await listConversations(token, accounts, { budget, pages });
-  if (r.exhausted) report.complete = false;
-  report.kinds.dm.ok = true;
-  report.kinds.dm.items = r.conversations.length;
-
-  const keyOf = (cv: { id: string; accountId: string }) => `dm:${cv.id}:${cv.accountId}`;
-  const existing = await rowsByIds(env, r.conversations.map(keyOf));
-  const items: InboxItem[] = [];
-  const replies: { key: string; reply: ExternalReply }[] = [];
-  const reopen: { key: string; text: string; at: string }[] = [];
-
-  for (const cv of r.conversations) {
-    const key = keyOf(cv);
-    const row = existing.get(key);
-    // الاتجاه لا يُعتدّ به بلا وقت: لا يُعرف أهو قبل آخر ردٍّ أم بعده
-    let lastIn = cv.lastDirection === 'in' && cv.lastAt ? { text: cv.lastText, at: cv.lastAt } : null;
-    let lastOut: ExternalReply | null = cv.lastDirection === 'out' && cv.lastAt ? { text: cv.lastText, at: cv.lastAt, id: null } : null;
-
-    /* الاتجاه مجهول، أو آخرُ رسالةٍ منّا في محادثةٍ لم تُحفظ بعد — فنصُّ
-       العميل غير معروف. تُقرأ رسائلها مرّةً إن تغيّرت منذ آخر دورة. */
-    const changed = !row || row.body !== cv.lastText;
-    if ((!lastIn && !lastOut || (lastOut && !row)) && changed) {
-      if (budget.left > 0) {
-        try {
-          const latest = await conversationLatest(token, cv.id, budget);
-          lastIn = latest.lastIn ?? lastIn;
-          lastOut = latest.lastOut ?? lastOut;
-        } catch (err) {
-          if (err instanceof BudgetExhausted) report.complete = false;
-          else if (!isUnsupported(err)) throw err;
-        }
-      } else {
-        report.complete = false;
-      }
-    }
-
-    if (lastIn) {
-      items.push({ id: key, platform: cv.platform, kind: 'dm', authorName: cv.participant, body: lastIn.text, createdAt: lastIn.at });
-      const weAnsweredLast = lastOut && lastOut.at && lastOut.at >= lastIn.at;
-      if (weAnsweredLast) {
-        if (!row || row.reply_body === null) replies.push({ key, reply: lastOut as ExternalReply });
-      } else if (row && row.reply_body !== null && (!row.replied_at || row.replied_at < lastIn.at)) {
-        // العميل كتب بعد آخر ردّ: المحادثة تنتظر ردّاً من جديد
-        reopen.push({ key, text: lastIn.text, at: lastIn.at });
-      }
-    } else if (lastOut) {
-      // ردٌّ منّا على محادثةٍ محفوظة — لا نصَّ عميلٍ جديد
-      if (row && row.reply_body === null) replies.push({ key, reply: lastOut });
-    } else {
-      // لا اتجاه معروف: السلوك القديم — آخرُ رسالةٍ نصّاً، بلا حكمٍ على الردّ
-      items.push({ id: key, platform: cv.platform, kind: 'dm', authorName: cv.participant, body: cv.lastText, createdAt: cv.lastAt ?? nowIso() });
-    }
-  }
-
-  const written = await writeItems(env, items, existing);
-  report.added += written.added;
-
-  if (replies.length || reopen.length) {
-    const after = await rowsByIds(env, [...replies.map((x) => x.key), ...reopen.map((x) => x.key)]);
-    const stmts: D1PreparedStatement[] = [];
-    for (const { key, reply } of replies) {
-      const row = after.get(key);
-      if (row && row.reply_body === null) {
-        stmts.push(externalReplyStmt(env, row.id, reply));
-        report.externalReplies++;
-      }
-    }
-    for (const { key, text, at } of reopen) {
-      const row = after.get(key);
-      if (!row) continue;
-      stmts.push(
-        env.DB.prepare(
-          `UPDATE platform_comments
-           SET body = ?, created_at = ?, reply_body = NULL, replied_at = NULL, replied_by = NULL,
-               reply_provider_id = NULL, reply_source = NULL, ignored_at = NULL, ignored_by = NULL
-           WHERE id = ?`,
-        ).bind(text, at, row.id),
-      );
-    }
-    await runBatch(env, stmts);
-  }
-}
-
-/* ─── الإشارات ─── */
-
-async function syncMentions(
-  env: Env,
-  token: string,
-  budget: CallBudget,
-  report: InboxSyncReport,
-  accounts: SocialApiOwnedAccount[],
-  pages: number,
-): Promise<void> {
-  const targets = accounts.filter((a) => supportsDirectInbox(a.platform));
-  if (!targets.length) return;
-  let path: MentionsPath | null = report.mentionsPath === 'accounts' || report.mentionsPath === 'inbox' ? report.mentionsPath : null;
-  let supported = false;
-  const items: InboxItem[] = [];
-  for (const acc of targets) {
-    if (budget.left <= 0) {
-      report.complete = false;
-      break;
-    }
-    try {
-      const r = await listMentions(token, acc, { budget, prefer: path, pages });
-      if (r.path) {
-        path = r.path;
-        supported = true;
-      }
-      items.push(...r.items);
-    } catch (err) {
-      if (err instanceof BudgetExhausted) {
-        report.complete = false;
-        break;
-      }
-      throw err;
-    }
-  }
-  report.mentionsPath = supported ? path : report.mentionsPath ?? 'none';
-  if (supported) {
-    report.kinds.mention.ok = true;
-    report.kinds.mention.items = items.length;
-  }
-  const res = await writeItems(env, items.filter((it) => it.body.trim()));
-  report.added += res.added;
-}
 
 /* ============================================================
    Ayrshare — التعليقات بمنشوراتها، والرسائل والمراجعات بمنصاتها
 
-   لا صندوق موحّداً في Ayrshare يسرد «المنشورات التي عليها تعليقات» كما في
-   SocialAPI: التعليقات تُطلب لكل منشورٍ بمعرّفه على منصته. فالمنشورات من
-   لقطات التحليلات (وفيها ما نُشر من خارج المنصة)، ويُختار منها ما تغيّر:
+   لا صندوق موحّداً في Ayrshare يسرد «المنشورات التي عليها تعليقات»: التعليقات
+   تُطلب لكل منشورٍ بمعرّفه على منصته. فالمنشورات من لقطات التحليلات (وفيها ما نُشر من خارج المنصة)، ويُختار منها ما تغيّر:
    - لم يُقرأ قطّ — أوّلاً.
    - تغيّر عدد تعليقاته في أرقامه منذ آخر قراءة — البصمة عدد التعليقات.
    - عليه تعليقاتٌ بلا ردّ — تُفحص ردودها كل ستّ ساعات، فما ردّ عليه حسابُنا
@@ -1225,109 +452,6 @@ async function readPendingPosts(env: Env): Promise<PendingPost[]> {
   } catch {
     return [];
   }
-}
-
-/* ═══ ما سُحب أيام SocialAPI ═══
-
-   الصفوف القديمة بمعرّفات SocialAPI — التعليق `منشور|حساب|تعليق`، والمراجعة
-   `rv:حساب:مراجعة` — فلا يجدها Ayrshare بمعرّفه: يبقى القديم «بلا رد» ولو رُدّ
-   عليه من المنصة، ويُكتب التعليق نفسه صفّاً ثانياً. ومعرّف التعليق والمراجعة
-   على المنصة واحدٌ في الاثنين، فبه يُطابَقان:
-   - لا صفَّ جديداً بعد: يُنقل القديم إلى معرّف Ayrshare بردّه كما هو.
-   - كُتب الجديد: يُنقل إليه ردُّ القديم إن لم يكن له ردّ، ويُحذف القديم —
-     قرار المالك. والرسائل لا تُطابَق: معرّف المحادثة عند SocialAPI غيرُه
-     عند المنصة. */
-
-type LegacyRow = {
-  id: string; platform: string; kind: string; provider_comment_id: string;
-  reply_body: string | null; replied_at: string | null; replied_by: string | null;
-  reply_source: string | null; reply_provider_id: string | null; created_at: string | null;
-};
-
-/* مراجعة قوقل: SocialAPI حفظ معرّفها باسم موردها كاملاً
-   (`accounts/…/locations/…/reviews/{مراجعة}`) فبقيت سبعُ مراجعاتٍ قديمة بلا
-   مطابقة وظهرت كلٌّ منها مرّتين. فيُطابَق بآخر جزءٍ من المعرّف في الطرفين، ثم
-   بوقت كتابة المراجعة إلى الثانية — وقتٌ يعلنه قوقل نفسه، فلا يختلف بين
-   المزوّدَين. ولا يُطابَق بالوقت إلا ما انفرد به. */
-const lastSegment = (id: string) => id.slice(id.lastIndexOf('/') + 1);
-const secondOf = (at: string | null | undefined): string => {
-  const t = at ? Date.parse(at) : NaN;
-  return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 19) : '';
-};
-
-/** مفاتيح الصفّ القديم: بمعرّفه على المنصة، وللمراجعة بوقتها أيضاً. */
-function legacyKeys(r: LegacyRow): string[] {
-  const platform = normalizePlatformKey(r.platform);
-  let native = '';
-  if (r.kind === 'review' && r.provider_comment_id.startsWith('rv:')) {
-    native = lastSegment(r.provider_comment_id.slice(r.provider_comment_id.indexOf(':', 3) + 1));
-  } else if (r.kind === 'comment') {
-    const parts = r.provider_comment_id.split('|');
-    if (parts.length === 3) native = parts[2];
-  }
-  const keys = native ? [`${platform}|${r.kind}|${native}`] : [];
-  const at = r.kind === 'review' ? secondOf(r.created_at) : '';
-  if (at) keys.push(`${platform}|review@${at}`);
-  return keys;
-}
-
-/** الصفوف القديمة بمفتاح «منصة|نوع|معرّف المنصة» — تُقرأ مرّةً في الدورة. */
-async function legacyIndex(env: Env): Promise<Map<string, LegacyRow>> {
-  const { results } = await env.DB.prepare(
-    `SELECT id, platform, kind, provider_comment_id, reply_body, replied_at, replied_by, reply_source, reply_provider_id, created_at
-     FROM platform_comments
-     WHERE kind IN ('comment', 'review') AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')`,
-  ).all<LegacyRow>();
-  const out = new Map<string, LegacyRow>();
-  const ambiguous = new Set<string>();
-  for (const r of results) {
-    for (const key of legacyKeys(r)) {
-      // وقتٌ تشترك فيه مراجعتان لا يُطابَق به
-      if (out.has(key) && key.includes('|review@')) ambiguous.add(key);
-      out.set(key, r);
-    }
-  }
-  for (const key of ambiguous) out.delete(key);
-  return out;
-}
-
-/** يضمّ القديم إلى عناصر Ayrshare قبل كتابتها — انظر أعلاه. */
-async function adoptLegacy(env: Env, legacy: Map<string, LegacyRow>, items: InboxItem[]): Promise<void> {
-  if (!legacy.size || !items.length) return;
-  const matches: { item: InboxItem; old: LegacyRow }[] = [];
-  const taken = new Set<string>();
-  for (const it of items) {
-    const d = decodeAyrshareId(it.id);
-    const native = d?.type === 'comment' ? d.commentId : d?.type === 'review' ? lastSegment(d.reviewId) : '';
-    const platform = normalizePlatformKey(it.platform);
-    const at = it.kind === 'review' ? secondOf(it.createdAt) : '';
-    const old = (native ? legacy.get(`${platform}|${it.kind}|${native}`) : undefined)
-      ?? (at ? legacy.get(`${platform}|review@${at}`) : undefined);
-    if (!old || taken.has(old.id)) continue;
-    taken.add(old.id);
-    matches.push({ item: it, old });
-  }
-  if (!matches.length) return;
-  const current = await rowsByIds(env, matches.map((m) => m.item.id));
-  const stmts: D1PreparedStatement[] = [];
-  for (const { item, old } of matches) {
-    const fresh = current.get(item.id);
-    if (!fresh) {
-      // والمنصة باسمها عندنا: SocialAPI كتب إكس `twitter`
-      stmts.push(env.DB.prepare('UPDATE platform_comments SET provider_comment_id = ?, platform = ? WHERE id = ?').bind(item.id, item.platform, old.id));
-    } else {
-      if (fresh.reply_body === null && old.reply_body !== null) {
-        stmts.push(env.DB.prepare(
-          `UPDATE platform_comments
-           SET reply_body = ?, replied_at = ?, replied_by = ?, reply_source = ?, reply_provider_id = COALESCE(reply_provider_id, ?)
-           WHERE id = ? AND reply_body IS NULL`,
-        ).bind(old.reply_body, old.replied_at, old.replied_by, old.reply_source, old.reply_provider_id, fresh.id));
-      }
-      stmts.push(env.DB.prepare('DELETE FROM platform_comments WHERE id = ?').bind(old.id));
-    }
-    for (const key of legacyKeys(old)) legacy.delete(key);
-  }
-  await runBatch(env, stmts);
 }
 
 async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: number): Promise<void> {
@@ -1379,11 +503,10 @@ async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: nu
     ? accounts.filter((a) => a.messaging && AYRSHARE_DM_PLATFORMS.has(ayrsharePlatform(a.platform)))
     : [];
   const reviewAccounts = accounts.filter((a) => a.platform === 'google' || a.platform === 'facebook');
-  const legacy = await legacyIndex(env);
   const reserve = others ? (dmAccounts.length + reviewAccounts.length) * (deep ? 3 : 1) : 0;
 
   try {
-    await syncAyrshareComments(env, auth, budget, report, accounts, reserve, history, legacy);
+    await syncAyrshareComments(env, auth, budget, report, accounts, reserve, history);
   } catch (err) {
     fail('comment', err);
   }
@@ -1399,7 +522,6 @@ async function syncAyrshareInbox(env: Env, report: InboxSyncReport, deadline: nu
         const items = (await ayrshareReviews(auth, ayrsharePlatform(acc.platform), budget)).map((it) => ({ ...it, platform: acc.platform }));
         report.kinds.review.ok = true;
         report.kinds.review.items += items.length;
-        await adoptLegacy(env, legacy, items);
         const res = await writeItems(env, items);
         report.added += res.added;
         report.externalReplies += res.externalReplies;
@@ -1441,13 +563,10 @@ async function syncAyrshareComments(
   accounts: AyrshareAccount[],
   reserve: number,
   history: boolean,
-  legacy: Map<string, LegacyRow>,
 ): Promise<void> {
   const byInternal = new Map(accounts.filter((a) => AYRSHARE_COMMENT_PLATFORMS.has(ayrsharePlatform(a.platform))).map((a) => [a.platform, a]));
   if (!byInternal.size) return;
   report.kinds.comment.ok = true;
-  // معرّفٌ أصليٌّ يحمله رابط المنشور — قبل أن تُطلب التعليقات بمفتاح مزوّدٍ سابق
-  await resolveNativeIdsFromUrls(env).catch(() => 0);
 
   /* لينكدإن المربوط صفحةٌ لا حساب: لقطةٌ كُتبت `linkedin` (من جدولةٍ بمفتاح
      الحساب أو من مزوّدٍ سابق) هي منشور الصفحة، فتُطلب تعليقاتها باسمها. */
@@ -1459,17 +578,11 @@ async function syncAyrshareComments(
      أبداً ولا يُختم السجلّ مكتملاً. والقراءة تدور بموعد آخر قراءة لا بتاريخ
      النشر، فيكفي سقفٌ أوسع يحمل المنشورات كلّها. */
   const { results: posts } = await env.DB.prepare(
-    /* بالمعرّف الأصلي على المنصة إن عُرف (0045): مفتاحُ لقطةٍ من مزوّدٍ سابق يردّه
-       Ayrshare «غير موجود». ولقطتان لمنشورٍ واحد — بالمفتاح القديم وبالأصلي —
-       تُطلبان مرّةً واحدة. */
-    /* ومفتاحٌ من مزوّدٍ سابق لم يُعرف معرّفه الأصلي لا يُطلب: Ayrshare لا يعرفه
-       فيرفضه في كل دورة («Error getting comments… Post ID or the Social Post
-       ID»)، وحين لا تُطلب من المنصة غيرُه في الدورة يظهر رفضُه عطلاً لها كلّها. */
+    /* بالمعرّف الأصلي على المنصة إن عُرف (0045) — ولقطتان لمنشورٍ واحد تُطلبان مرّةً. */
     `SELECT COALESCE(native_post_id, provider_post_id) AS provider_post_id, platform, MAX(metrics_json) AS metrics_json
      FROM analytics_snapshots
      WHERE platform IN (${platforms.map(() => '?').join(',')})
        AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
-       AND NOT (native_post_id IS NULL AND ${legacyKeySql('provider_post_id', 'platform')})
      GROUP BY COALESCE(native_post_id, provider_post_id), platform
      ORDER BY MAX(sent_at) DESC
      LIMIT ${history ? 3000 : 400}`,
@@ -1583,7 +696,6 @@ async function syncAyrshareComments(
       const items = mapAyrshareComments(q.ayr, q.postId, data, keys).map((it) => ({ ...it, platform: q.internal }));
       report.kinds.comment.items += items.length;
       if (q.ayr === 'twitter') await dropAbsorbedReplies(env, q.postId, items);
-      await adoptLegacy(env, legacy, items);
       const checked = q.ayr === 'linkedin' ? await linkedInThreads(env, auth, budget, reserve, items, keys) : [];
       const res = await writeItems(env, items);
       report.added += res.added;
@@ -1688,7 +800,7 @@ async function replierName(env: Env, rowId: string): Promise<string> {
 }
 
 /**
- * محادثات منصةٍ من رسائلها — عنصرٌ لكل محادثة كما في SocialAPI: نصُّه آخرُ ما
+ * محادثات منصةٍ من رسائلها — عنصرٌ لكل محادثة: نصُّه آخرُ ما
  * كتبه العميل، وردُّنا آخرُ ما أرسلناه بعده. وعميلٌ كتب بعد آخر ردٍّ يُعيد
  * المحادثة إلى «بلا رد». يعود بعدد المحادثات.
  */
@@ -1806,38 +918,6 @@ async function notifyNegative(
       });
     }
   } catch { /* التنبيه أفضل جهد — لا يُعطّل المزامنة */ }
-}
-
-// مزوّدون يعتمدون getComments لكل منشور نُشر عبر المنصة — ما سوى SocialAPI وAyrshare
-async function syncPerPost(env: Env, report: InboxSyncReport): Promise<void> {
-  const provider = await getProvider(env);
-  if (!provider.getComments) return;
-  report.kinds.comment.ok = true;
-
-  const { results } = await env.DB.prepare(
-    `SELECT DISTINCT s.post_id, s.platform, s.provider_post_id, s.id AS schedule_id
-     FROM schedules s WHERE s.status = 'published' AND s.provider_post_id IS NOT NULL AND s.deleted_at IS NULL`,
-  ).all<{ post_id: string; platform: string; provider_post_id: string; schedule_id: string }>();
-
-  for (const row of results) {
-    let items: Awaited<ReturnType<NonNullable<typeof provider.getComments>>> = [];
-    try {
-      items = await provider.getComments(row.provider_post_id);
-    } catch {
-      continue;
-    }
-    report.kinds.comment.items += items.length;
-    for (const it of items) {
-      const res = await env.DB.prepare(
-        `INSERT OR IGNORE INTO platform_comments
-           (id, post_id, schedule_id, platform, provider_comment_id, kind, author_name, body, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(newId('cm'), row.post_id, row.schedule_id, row.platform, it.id, it.kind, it.authorName, it.body, it.createdAt)
-        .run();
-      if (res.meta.changes > 0) report.added++;
-    }
-  }
 }
 
 /**

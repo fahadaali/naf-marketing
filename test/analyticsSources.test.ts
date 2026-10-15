@@ -164,7 +164,7 @@ describe('الصندوق بفتراته وصفحاته', () => {
 
 describe('السجلّ القديم في «مصادر الأرقام»', () => {
   it('يقول أين بلغت قراءة سجلّ المنشورات والصندوق', async () => {
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'socialapi')").run();
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'ayrshare')").run();
     db.prepare("INSERT INTO settings (key, value) VALUES ('analytics_history_report', ?)").run(JSON.stringify({ at: '2026-09-24T10:38:00Z', historyAccounts: 3, historyDone: 1 }));
     db.prepare("INSERT INTO settings (key, value) VALUES ('inbox_history_done_at', '2026-09-24T10:18:00Z')").run();
 
@@ -172,8 +172,8 @@ describe('السجلّ القديم في «مصادر الأرقام»', () => {
     expect(body.history).toEqual({ posts: { accounts: 3, done: 1 }, inbox: { doneAt: '2026-09-24T10:18:00Z' } });
   });
 
-  it('لا يذكر سجلّاً لمزوّدٍ لا يُقرأ سجلّه على دفعات', async () => {
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'buffer')").run();
+  it('لا يذكر سجلّاً على المزوّد التجريبي', async () => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('provider_name', 'mock')").run();
     const { body } = await get(`/analytics/sources?period=monthly&start=${JULY.start}`);
     expect(body.history).toBeNull();
   });

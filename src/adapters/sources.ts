@@ -25,8 +25,7 @@
 
 import type { Env } from '../types';
 import { getAccessToken, googleJson, parseServiceAccount, GoogleAuthError } from './googleAuth';
-import { ayrshareAuth, providerKey } from './index';
-import { socialApiAudience, socialApiReviewSummary } from './socialapi';
+import { ayrshareAuth } from './index';
 import {
   ayrshareAudiencePoints, ayrshareDailyPoints, ayrshareFollowers, ayrsharePlatform, ayrshareReviewSummary, ayrshareSocialAnalytics,
   ayrshareUser, dailyWindowDays, linkedInNewFollowers,
@@ -394,15 +393,9 @@ async function fetchBusinessProfile(env: Env, cfg: SourceConfig, range: SourceRa
    لا تزال الإصدار الرابع وتحتاج اعتماداً مستقلاً للحساب، ومزوّد النشر يقرأها
    اليوم بالمفتاح القائم. والرقم واحد في الحالين — مصدرُ جوجل نفسه. */
 
-/** مزوّد النشر المختار — من الإعدادات، وإلا احتياطه في الأسرار. */
-async function activeProvider(env: Env): Promise<string> {
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'provider_name'").first<{ value: string }>();
-  return (row?.value || env.PROVIDER_NAME || 'mock').toLowerCase();
-}
-
-/** سرُّ مصدر «مزوّد النشر» — مفتاح المزوّد المختار. */
-export async function socialSecretName(env: Env): Promise<string> {
-  return (await activeProvider(env)) === 'ayrshare' ? 'AYRSHARE_API_KEY' : 'SOCIALAPI_API_KEY';
+/** سرُّ مصدر «مزوّد النشر» — مفتاح Ayrshare. */
+export async function socialSecretName(_env: Env): Promise<string> {
+  return 'AYRSHARE_API_KEY';
 }
 
 /** الأيام بين تاريخين (YYYY-MM-DD) شاملاً الطرفين. */
@@ -478,51 +471,7 @@ async function fetchAyrshareSocial(env: Env, range: SourceRange): Promise<Metric
 }
 
 async function fetchSocial(env: Env, _cfg: SourceConfig, range: SourceRange): Promise<MetricPoint[]> {
-  const ayrshare = (await activeProvider(env)) === 'ayrshare';
-  if (ayrshare) return fetchAyrshareSocial(env, range);
-  const key = providerKey(env, 'socialapi');
-  if (!key) throw new SourceError('مفتاح مزوّد النشر غير مضبوط. اضبط SOCIALAPI_API_KEY.');
-
-  /* ═══ الثلاثة لقطاتٌ لا مجاميع، فلا تُكتب في فترةٍ منقضية ═══
-
-     المزوّد يعلن عدد المتابعين اليوم وعدد المراجعات منذ أول يوم، ولا يقبل
-     مدىً بتاريخين. والدورة اليومية تسحب الفترة السابقة مع الجارية — عمداً،
-     لأن المصادر تراجع أرقام يومها بعد انقضائه. فلو كُتبت اللقطة في الفترة
-     السابقة كتبت عددَ اليوم مكان عدد ذلك الشهر كلَّ يوم، فصار طرفا المقارنة
-     رقماً واحداً و«معدل النمو في المتابعين» صفراً أبداً.
-
-     فتُترك الفترة المنقضية على ما سُجّل فيها حين كانت جارية. ولقطةٌ فاتت لا
-     تُستدرك: من ربط المصدر اليوم يبدأ نموُّه من اليوم. */
-  if (range.end < riyadhToday()) return [];
-
-  const out: MetricPoint[] = [];
-
-  /* المتابعون لقطةٌ لا مجموع فترة: العدد اليوم هو العدد، ولا يُجمع على أيام
-     الشهر. والنموّ يُحتسب بمقارنة الفترتين في `services/metrics.ts` كما كان
-     يُحتسب حين كان يُسجَّل باليد. */
-  for (const acc of await socialApiAudience(key)) {
-    if (acc.followers === null) continue; // منصّة لا تُعلن العدد — يبقى تسجيله باليد
-    out.push({ metricKey: 'followers_total', dimKey: 'platform', dimValue: acc.platform, value: acc.followers });
-  }
-
-  let reviewCount = 0;
-  let weighted = 0;
-  let sawAverage = false;
-  for (const r of await socialApiReviewSummary(key)) {
-    if (r.count !== null) reviewCount += r.count;
-    if (r.average !== null && r.count) {
-      weighted += r.average * r.count;
-      sawAverage = true;
-    }
-  }
-  if (reviewCount > 0) {
-    out.push({ metricKey: 'gbp_reviews', value: reviewCount });
-    // المتوسط مرجَّحٌ بعدد مراجعات كل حساب: حسابٌ بمراجعتين لا يزن حساباً
-    // بمئتين، ومتوسّطُ المتوسّطات يجعلهما سواء.
-    if (sawAverage) out.push({ metricKey: 'gbp_rating', value: Math.round((weighted / reviewCount) * 100) / 100, sample: reviewCount });
-  }
-
-  return out;
+  return fetchAyrshareSocial(env, range);
 }
 
 /* ═══ المصادر الأربعة بالعقد الواحد ═══ */
@@ -617,7 +566,7 @@ export const SOURCES: Record<string, SourceDefinition> = {
   },
   social: {
     key: 'social',
-    secretName: 'SOCIALAPI_API_KEY',
+    secretName: 'AYRSHARE_API_KEY',
     fields: [],
     fetch: fetchSocial,
   },

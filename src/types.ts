@@ -23,9 +23,7 @@ export type Env = {
   CLAUDE_API_KEY?: string;
   PROVIDER_API_KEY?: string; // مفتاح عام (تراجعي) — يُستخدم إن لم يوجد سرّ خاص بالمزوّد
   PROVIDER_NAME?: string;
-  // أسرار خاصة لكل مزوّد (تتيح تخزين أكثر من مفتاح والتبديل بينها):
-  BUFFER_API_KEY?: string;
-  SOCIALAPI_API_KEY?: string;
+  // سرّ Ayrshare الخاص — يُفضَّل على PROVIDER_API_KEY:
   AYRSHARE_API_KEY?: string;
   /* مفتاحا تطبيق المطوّر في إكس — يشترطهما Ayrshare منذ ٣١ مارس ٢٠٢٦ في
      كل طلبٍ يمسّ إكس. وغيابهما يمنع إكس وحده عبر Ayrshare. */

@@ -39,8 +39,7 @@ export const ayrshareRoutes = new Hono<{ Bindings: Env; Variables: Variables }>(
 
 ayrshareRoutes.use('*', requireAuth);
 
-/* صحّة التكامل بالشكل الذي يقرؤه `IntegrationHealth` في الإعدادات — كما يردّه
-   `/socialapi/health`، فبطاقةٌ واحدة تعرض المزوّدَين ولا يُكتب لها نصٌّ جديد.
+/* صحّة التكامل بالشكل الذي يقرؤه `IntegrationHealth` في الإعدادات.
 
    ولا خريطة ربطٍ في Ayrshare: لكل منصةٍ حسابٌ واحد في الملف الرئيسي يُنشر
    إليه باسمها، فكل حسابٍ مربوطٍ لديه مربوطٌ عندنا. ولا حصّة تُعرض: خطة
@@ -81,12 +80,11 @@ ayrshareRoutes.get('/health', requirePermission('settings.manage'), async (c) =>
 
    ما يردّه Ayrshare فعلاً — لا ما يقوله توثيقه — في الموضعين اللذين لا يُعرف
    سببهما إلا بهذا: الردّ من تطبيق المنصة الذي لا يُكشف، ومقاطع يوتيوب القصيرة
-   التي لا تظهر. يردّ الشكل والمعرّفات، وأسماءُ الكتّاب مقنّعةٌ كما في تشخيص
-   SocialAPI ومع كلٍّ منها أهو حسابنا — ولا نصَّ تعليقٍ ولا رسالة. ونداءاته
+   التي لا تظهر. يردّ الشكل والمعرّفات، وأسماءُ الكتّاب مقنّعةٌ ومع كلٍّ منها
+   أهو حسابنا — ولا نصَّ تعليقٍ ولا رسالة. ونداءاته
    محدودة (سبعة على الأكثر). */
 
-/** أوّل ثلاثة أحرفٍ وطولُ الباقي — تكفي لمقارنة كاتبٍ بحسابنا، ولا تكشف اسم عميل.
-    كما في تشخيص SocialAPI (`maskKey`). */
+/** أوّل ثلاثة أحرفٍ وطولُ الباقي — تكفي لمقارنة كاتبٍ بحسابنا، ولا تكشف اسم عميل. */
 function mask(v: unknown): string {
   const s = ownerKey(v);
   return s.length <= 3 ? '•'.repeat(s.length) : `${s.slice(0, 3)}…(${s.length})`;
@@ -341,23 +339,6 @@ export async function diagnoseAyrshare(
       out.linkedinReplies = { commentId: li.waiting[0], error: String(e?.message || e) };
     }
   }
-
-  /* ١ج) ما بقي بلا ردّ من أيام SocialAPI — بلا نصّ: المنصة والنوع وشكل المعرّف
-     والتاريخ. فما لم يُضمّ يُعرف لماذا: منشورٌ لا يُقرأ، أو معرّفٌ لا يُطابَق. */
-  const { results: legacy } = await env.DB.prepare(
-    `SELECT platform, kind, provider_comment_id, created_at FROM platform_comments
-     WHERE reply_body IS NULL AND ignored_at IS NULL AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')
-     ORDER BY created_at DESC LIMIT 30`,
-  ).all<{ platform: string; kind: string; provider_comment_id: string; created_at: string }>();
-  out.legacyUnreplied = legacy.map((r) => ({
-    platform: r.platform,
-    kind: r.kind,
-    created: r.created_at,
-    // الشكل لا القيمة: عدد الأجزاء وبادئتها، وآخر جزءٍ (معرّف المنصة) بطوله
-    idShape: r.provider_comment_id.includes('|')
-      ? `${r.provider_comment_id.split('|').length} أجزاء بـ|، آخرها ${mask(r.provider_comment_id.split('|').pop())}`
-      : `${r.provider_comment_id.split(':')[0]}:… (${r.provider_comment_id.length})`,
-  }));
 
   // ٢أ) قائمة القناة العامة — ومنها المقاطع القصيرة التي لا يردّها سجلُّ Ayrshare
   if (channelId) {

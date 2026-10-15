@@ -14,8 +14,6 @@ export type InboxItem = {
   repliedBody?: string | null; // ردٌّ موجود على المنصة كُتب من خارج هذه المنصة
   repliedAt?: string | null; // ووقته إن أعلنه المزوّد
   rating?: number | null; // تقييم بالنجوم (١..٥) للمراجعات
-  /** معرّف المزوّد `sapi_cmt_…` — يُحفظ كي تُفحص ردود التعليق القديم بالمسار الآخر أيضاً. */
-  interactionId?: string | null;
   /** السلسلة تحت التعليق كلُّها — من Ayrshare. غيابُها: لا سلسلة تُكتب ولا تُمسّ. */
   thread?: ThreadEntry[];
 };

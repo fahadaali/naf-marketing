@@ -10,9 +10,9 @@ export const PLATFORM_KEYS = [
 
 export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
-// مرادفات المزوّدين → مفاتيح المنصات لدينا.
-// المزوّدون (SocialAPI/Buffer) يستخدمون تسميات مختلفة عن مفاتيحنا، فتظهر خام بلا أيقونة
-// إن لم تُوحَّد — مثل twitter بدل x، وgooglebusiness بدل google.
+// مرادفات المزوّد → مفاتيح المنصات لدينا.
+// المزوّد يستخدم تسمياتٍ غير مفاتيحنا، فتظهر خام بلا أيقونة إن لم تُوحَّد —
+// مثل twitter بدل x، وgooglebusiness بدل google.
 const PLATFORM_ALIASES: Record<string, string> = {
   twitter: 'x',
   'twitter.com': 'x',
