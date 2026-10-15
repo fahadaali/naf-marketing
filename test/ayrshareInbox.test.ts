@@ -257,6 +257,22 @@ describe('رفض المنصة لطلب التعليقات', () => {
   });
 });
 
+describe('منشورٌ بمعرّف مزوّدٍ سابق ورابطٍ يحمل معرّفه الأصلي', () => {
+  it('تُطلب تعليقاته بمعرّف الفيديو من رابطه — لا بمعرّف Buffer الذي يردّه Ayrshare «غير موجود»', async () => {
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json, external_url) VALUES ('a1', '5f8d0d55b54764421b7156c9', 'youtube', ?, '[]', 'https://youtu.be/dQw4w9WgXcQ')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'yt1', platform: 'youtube', username: 'naf' }] } });
+    routes['GET /comments/dQw4w9WgXcQ'] = () => ({ body: { status: 'success', youtube: [
+      { commentId: 'yc1', comment: 'شرحٌ واضح، شكراً', created: RECENT, userName: 'reem' },
+    ] } });
+    await syncComments(env);
+    expect(calls.some((c) => c.key === 'GET /comments/5f8d0d55b54764421b7156c9')).toBe(false);
+    expect(db.prepare("SELECT native_post_id FROM analytics_snapshots WHERE id = 'a1'").get()).toEqual({ native_post_id: 'dQw4w9WgXcQ' });
+    expect(db.prepare("SELECT body FROM platform_comments WHERE kind = 'comment'").all()).toEqual([{ body: 'شرحٌ واضح، شكراً' }]);
+  });
+});
+
 describe('ردود لينكدإن', () => {
   it('تُطلب لكل تعليقٍ بلا ردّ — فما رددنا به من تطبيق لينكدإن يُعرف', async () => {
     const URN = 'urn:li:comment:(urn:li:activity:71,74)';

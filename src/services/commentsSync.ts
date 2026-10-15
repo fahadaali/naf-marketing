@@ -17,6 +17,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { loadMedia } from './publish';
+import { resolveNativeIdsFromUrls } from './nativePostId';
 import { notifyUsers, usersWithPermission } from './notify';
 import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
@@ -1409,6 +1410,8 @@ async function syncAyrshareComments(
   const byInternal = new Map(accounts.filter((a) => AYRSHARE_COMMENT_PLATFORMS.has(ayrsharePlatform(a.platform))).map((a) => [a.platform, a]));
   if (!byInternal.size) return;
   report.kinds.comment.ok = true;
+  // معرّفٌ أصليٌّ يحمله رابط المنشور — قبل أن تُطلب التعليقات بمفتاح مزوّدٍ سابق
+  await resolveNativeIdsFromUrls(env).catch(() => 0);
 
   /* لينكدإن المربوط صفحةٌ لا حساب: لقطةٌ كُتبت `linkedin` (من جدولةٍ بمفتاح
      الحساب أو من مزوّدٍ سابق) هي منشور الصفحة، فتُطلب تعليقاتها باسمها. */

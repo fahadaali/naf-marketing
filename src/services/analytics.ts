@@ -16,6 +16,7 @@ import { ayrshareAuth } from '../adapters';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
 import { newId, nowIso } from '../util';
 import { normalizePlatformKey } from '../platformLabels';
+import { nativeIdFromUrl, URL_NATIVE_PLATFORMS } from './nativePostId';
 
 /* ============================================================
    سحب لقطات المنشورات — ومنها تُحتسب الطبقتان الأولى والثانية.
@@ -441,6 +442,13 @@ export function matchSnapshot(h: AccountPost, platform: string, candidates: Snap
   if (h.externalUrl) {
     const byUrl = candidates.find((c) => c.platform === platform && c.external_url && c.external_url === h.externalUrl);
     if (byUrl) return byUrl;
+  }
+  /* ورابطان بصيغتين لمنشورٍ واحد (`youtu.be/…` و`watch?v=…`) يُطابَقان بالمعرّف
+     الذي يحملانه — انظر `nativeIdFromUrl`. */
+  const native = nativeIdFromUrl(platform, h.externalUrl) ?? (URL_NATIVE_PLATFORMS.includes(platform) ? h.id : null);
+  if (native) {
+    const byNative = candidates.find((c) => c.platform === platform && nativeIdFromUrl(platform, c.external_url) === native);
+    if (byNative) return byNative;
   }
   if (!h.sentAt) return null;
   const t = Date.parse(h.sentAt);
