@@ -17,7 +17,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { loadMedia } from './publish';
-import { resolveNativeIdsFromUrls } from './nativePostId';
+import { legacyKeySql, resolveNativeIdsFromUrls } from './nativePostId';
 import { notifyUsers, usersWithPermission } from './notify';
 import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
@@ -1460,10 +1460,14 @@ async function syncAyrshareComments(
     /* بالمعرّف الأصلي على المنصة إن عُرف (0045): مفتاحُ لقطةٍ من مزوّدٍ سابق يردّه
        Ayrshare «غير موجود». ولقطتان لمنشورٍ واحد — بالمفتاح القديم وبالأصلي —
        تُطلبان مرّةً واحدة. */
+    /* ومفتاحٌ من مزوّدٍ سابق لم يُعرف معرّفه الأصلي لا يُطلب: Ayrshare لا يعرفه
+       فيرفضه في كل دورة («Error getting comments… Post ID or the Social Post
+       ID»)، وحين لا تُطلب من المنصة غيرُه في الدورة يظهر رفضُه عطلاً لها كلّها. */
     `SELECT COALESCE(native_post_id, provider_post_id) AS provider_post_id, platform, MAX(metrics_json) AS metrics_json
      FROM analytics_snapshots
      WHERE platform IN (${platforms.map(() => '?').join(',')})
        AND COALESCE(source, '') <> 'newsletter' AND sent_at IS NOT NULL AND sent_at ${history ? '<' : '>='} ?
+       AND NOT (native_post_id IS NULL AND ${legacyKeySql('provider_post_id', 'platform')})
      GROUP BY COALESCE(native_post_id, provider_post_id), platform
      ORDER BY MAX(sent_at) DESC
      LIMIT ${history ? 3000 : 400}`,

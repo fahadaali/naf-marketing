@@ -390,6 +390,21 @@ describe('مراجعات قوقل من أيام SocialAPI', () => {
   });
 });
 
+describe('مفتاحٌ من مزوّدٍ سابق لم يُعرف معرّفه الأصلي', () => {
+  it('لا تُطلب تعليقاته — Ayrshare لا يعرفه فيرفضه ويظهر عطلاً للمنصة كلّها', async () => {
+    const add = db.prepare("INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json, external_url) VALUES (?, ?, 'youtube', ?, '[]', ?)");
+    add.run('a1', '5f8d0d55b54764421b7156c9', RECENT, null);
+    add.run('a2', '9b1c-uuid:youtube', RECENT, 'https://www.youtube.com/@naflawsa');
+    add.run('a3', 'hz_YQ7CCPdE', RECENT, null);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'yt1', platform: 'youtube', username: 'naf' }] } });
+    routes['GET /comments/hz_YQ7CCPdE'] = () => ({ body: { status: 'success', youtube: [] } });
+    const report = await syncComments(env);
+    const asked = calls.filter((c) => c.key.startsWith('GET /comments/')).map((c) => c.key);
+    expect(asked).toEqual(['GET /comments/hz_YQ7CCPdE']);
+    expect(report?.errors).toEqual([]);
+  });
+});
+
 describe('الردّ عبر Ayrshare', () => {
   const insert = (id: string, providerId: string, platform: string, kind = 'comment') =>
     db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at) VALUES (?, ?, ?, ?, 'عميل', 'نص', ?)")

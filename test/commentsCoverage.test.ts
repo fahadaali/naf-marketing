@@ -104,6 +104,12 @@ describe('تغطية الصندوق', () => {
       analytics_with_comments: 4, analytics_comments_missing: 3,
     });
     expect(out.last_sync).toEqual({ at: recent, complete: true, not_found: { instagram: 1 }, rejected: { instagram: 1 }, errors: [] });
+    // وكلُّ منشورٍ يستحق النظر بعينه: لماذا، وماذا تعلن المنصة
+    expect(out.details.map((d) => [d.key, d.reason, d.outcome, d.announced])).toEqual([
+      ['I1', 'comments_missing', 'ok', 3],
+      ['I3', 'not_found', 'not_found', 2],
+      ['I4', 'rejected', 'rejected', 1],
+    ]);
   });
 
   it('«عُرف معرّفه الأصلي» من لقطات المزوّد السابق وحدها', async () => {

@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { readInboxHistoryReport, readInboxReport, type InboxSyncReport } from './commentsSync';
+import { legacyKeySql } from './nativePostId';
 
 /* ═══ تغطية الصندوق: أيّ المنشورات تُقرأ تعليقاتها وأيّها لا ═══
 
@@ -67,8 +68,25 @@ function summary(r: InboxSyncReport | null): SyncSummary {
   return { at: r.at, complete: r.complete, not_found: r.notFound ?? {}, rejected: r.rejected ?? {}, errors: r.errors };
 }
 
+/** منشورٌ يستحق النظر: رُفض، أو «غير موجود»، أو تعلن المنصة تعليقاته ولم يصل منها شيء،
+    أو مفتاحه من مزوّدٍ سابق لم يُعرف معرّفه الأصلي فلا تُطلب تعليقاته. */
+export type CoverageDetail = {
+  platform: string;
+  key: string;
+  native: string | null;
+  sent_at: string | null;
+  url: string | null;
+  /** عدد التعليقات كما تعلنه تحليلات المنصة */
+  announced: number | null;
+  outcome: 'ok' | 'not_found' | 'rejected' | 'unknown' | 'never_read';
+  reason: 'rejected' | 'not_found' | 'comments_missing' | 'legacy_unresolved';
+};
+
+const DETAIL_LIMIT = 60;
+
 export async function commentsCoverage(env: Env): Promise<{
   platforms: PlatformCoverage[];
+  details: CoverageDetail[];
   comments: { platform: string; count: number; oldest: string | null }[];
   history: { account: string; state: string | null }[];
   last_sync: SyncSummary;
@@ -78,9 +96,7 @@ export async function commentsCoverage(env: Env): Promise<{
   /* المعرّف من مزوّدٍ سابق: نائب SocialAPI أو معرّف Buffer. و«عُرف معرّفه
      الأصلي» منها وحدها — وكانت تُعدّ كل لقطةٍ اختلف معرّفها الأصلي عن مفتاحها،
      فيظهر في تيك توك «عُرف» ما ليس من مزوّدٍ سابق أصلاً. */
-  const legacy = `(s.provider_post_id LIKE '%:' || s.platform
-                  OR (length(s.provider_post_id) = 24 AND s.provider_post_id NOT GLOB '*[^0-9a-f]*'
-                      AND s.provider_post_id GLOB '*[a-f]*'))`;
+  const legacy = legacyKeySql('s.provider_post_id', 's.platform');
   /* عدد التعليقات كما تعلنه تحليلات المنصة: عنصر `comments` في `metrics_json`
      (انظر `ayrshareMetrics`)، كما يقرؤه السحب نفسه في `commentsOf`. */
   const announced = `(SELECT CAST(json_extract(j.value, '$.value') AS INTEGER)
@@ -125,6 +141,37 @@ export async function commentsCoverage(env: Env): Promise<{
      ORDER BY posts DESC`,
   ).bind(cutoff).all<Omit<PlatformCoverage, 'recognised'>>();
 
+  const { results: rows } = await env.DB.prepare(
+    `SELECT s.platform, s.provider_post_id AS key, s.native_post_id AS native, s.sent_at, s.external_url AS url,
+       ${announced} AS announced,
+       CASE WHEN st.inbox_post_id IS NULL THEN 'never_read'
+            WHEN st.rank = 4 THEN 'ok' WHEN st.rank = 3 THEN 'rejected' WHEN st.rank = 2 THEN 'not_found' ELSE 'unknown' END AS outcome,
+       CASE WHEN s.native_post_id IS NULL AND ${legacy} THEN 'legacy_unresolved'
+            WHEN st.rank = 3 THEN 'rejected' WHEN st.rank = 2 THEN 'not_found'
+            ELSE 'comments_missing' END AS reason
+     FROM analytics_snapshots s
+     LEFT JOIN (
+       -- منشورٌ قُرئ من أكثر من حساب تُؤخذ أفضلُ نتائجه: قُرئ، ثم رُفض، ثم «غير موجود»
+       SELECT inbox_post_id,
+         MAX(CASE outcome WHEN 'ok' THEN 4 WHEN 'rejected' THEN 3 WHEN 'not_found' THEN 2 ELSE 1 END) AS rank
+       FROM inbox_post_state WHERE account_id LIKE 'ayrshare:%'
+       GROUP BY inbox_post_id
+     ) st
+       ON st.inbox_post_id = COALESCE(s.native_post_id, s.provider_post_id)
+     LEFT JOIN (
+       SELECT substr(rest, 1, instr(rest, '|') - 1) AS post, COUNT(*) AS n FROM (
+         SELECT substr(after, instr(after, '|') + 1) AS rest FROM (
+           SELECT substr(provider_comment_id, 5) AS after FROM platform_comments WHERE provider_comment_id LIKE 'ayc|%'
+         )
+       ) GROUP BY post
+     ) c ON c.post = COALESCE(s.native_post_id, s.provider_post_id)
+     WHERE s.provider_post_id IS NOT NULL AND COALESCE(s.source, '') <> 'newsletter'
+       AND ((s.native_post_id IS NULL AND ${legacy}) OR st.rank IN (2, 3)
+            OR (COALESCE(${announced}, 0) > 0 AND c.n IS NULL))
+     ORDER BY s.platform, s.sent_at DESC
+     LIMIT ${DETAIL_LIMIT}`,
+  ).all<CoverageDetail>();
+
   const { results: comments } = await env.DB.prepare(
     `SELECT platform, COUNT(*) AS count, MIN(created_at) AS oldest FROM platform_comments
      WHERE kind = 'comment' GROUP BY platform ORDER BY count DESC`,
@@ -136,6 +183,7 @@ export async function commentsCoverage(env: Env): Promise<{
 
   return {
     platforms: results.map((r) => ({ ...r, recognised: COMMENT_PLATFORM_KEYS.includes(r.platform) })),
+    details: rows,
     comments,
     history,
     last_sync: summary(await readInboxReport(env)),

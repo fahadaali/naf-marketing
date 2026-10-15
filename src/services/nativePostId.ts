@@ -54,6 +54,15 @@ export function nativeIdFromUrl(platform: string, url: string | null | undefined
   return null;
 }
 
+/**
+ * شرطُ SQL لمفتاحٍ من مزوّدٍ سابق: نائبُ SocialAPI (`…:منصة`) أو معرّف Buffer
+ * (٢٤ خانة ست عشرية فيها حرف). مفتاحٌ كهذا لا يعرفه Ayrshare أبداً.
+ */
+export function legacyKeySql(keyCol: string, platformCol: string): string {
+  return `(${keyCol} LIKE '%:' || ${platformCol}
+          OR (length(${keyCol}) = 24 AND ${keyCol} NOT GLOB '*[^0-9a-f]*' AND ${keyCol} GLOB '*[a-f]*'))`;
+}
+
 /** المنصات التي يُقرأ معرّفها الأصلي من رابطها. */
 export const URL_NATIVE_PLATFORMS = ['youtube', 'x', 'tiktok'];
 
