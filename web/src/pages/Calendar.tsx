@@ -5,6 +5,7 @@ import { api, formatRiyadh, displayStatus, STATUS_LABELS } from '../api';
 import { useAuth } from '../auth';
 import StatusBadge from '../components/StatusBadge';
 import PlanItemModal from '../components/PlanItemModal';
+import PostPlatformsModal from '../components/PostPlatformsModal';
 import PlanImportModal, { PlanExportMenu, exportPlanFile, importSummary } from '../components/PlanImport';
 import { platformLabel, platformsOf, PlatformIcons, usePlatformLabels } from '../platforms';
 import { formatDate, formatMonth, isolate } from '../lib/format';
@@ -34,6 +35,8 @@ export default function Calendar() {
   // «لا أفكار» تُقال بعد وصول الردّ لا أثناءه — وإلا ومضت على كل شهرٍ قبل خطّته
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  // موعدٌ نُقر عليه: نافذة «منصات التواصل» — يُلغى منها ويُجدوَل، و«تعديل» إلى المحرر
+  const [platformsFor, setPlatformsFor] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   /* الشهر رقمان لا تاريخٌ كامل: `setMonth` على ٣١ يناير يطويه إلى مارس
@@ -177,7 +180,7 @@ export default function Calendar() {
                   )}
                 </div>
                 {layer === 'schedule' && cell.events.map((e) => (
-                  <button type="button" key={e.key} className="cal-event" title={cardLabel(e, labels)} aria-label={cardLabel(e, labels)} onClick={() => navigate(`/editor/${e.post_id}`)}>
+                  <button type="button" key={e.key} className="cal-event" title={cardLabel(e, labels)} aria-label={cardLabel(e, labels)} onClick={() => setPlatformsFor(e.post_id)}>
                     <PlatformIcons platforms={e.platforms} custom={labels} />
                     <span className="cal-event-title">{e.title}</span>
                   </button>
@@ -215,6 +218,14 @@ export default function Calendar() {
         <PlanImportModal
           onClose={() => setImporting(false)}
           onDone={(r) => { setImporting(false); setMsg(importSummary(r)); setReload((n) => n + 1); }}
+        />
+      )}
+
+      {platformsFor && (
+        <PostPlatformsModal
+          postId={platformsFor}
+          onClose={() => setPlatformsFor(null)}
+          onChanged={() => setReload((n) => n + 1)}
         />
       )}
 

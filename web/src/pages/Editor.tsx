@@ -42,6 +42,7 @@ import { isBlankHtml } from '../contentFlow';
 import { splitProviderReason } from '../providerReason';
 import { PlanFields, usePlanOptions } from '../components/PlanItemModal';
 import { EMPTY_PLAN, planFromPost, planPayload, riyadhToday, type PlanDraft } from '../planning';
+import { platformChanges, platformStates, SCHEDULING_STATUSES } from '../postPlatforms';
 
 /* رسالة النجاح تحمل اسم الإجراء نفسه، على صيغة «تم + المصدر»
    من naf-terms.md §4. الزر الذي يقول «رفض» ينتج «تم الرفض». */
@@ -65,6 +66,8 @@ export default function Editor() {
   const [savedBody, setSavedBody] = useState('');
   // حقول خطة المحتوى — الشكل منها بدل «نوع المحتوى»، والحملة كذلك
   const [plan, setPlan] = useState<PlanDraft>(EMPTY_PLAN);
+  // منصات الخطة كما حُفظت — بالفرق بينها وبين الرقائق يُعرف ما يُلغى وما يُجدوَل
+  const [savedPlatforms, setSavedPlatforms] = useState<string[]>([]);
   const [assigneeName, setAssigneeName] = useState('');
   const planOptions = usePlanOptions();
   const [status, setStatus] = useState('draft');
@@ -95,6 +98,8 @@ export default function Editor() {
   const [showAIMedia, setShowAIMedia] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  // منصاتٌ بعينها تُفتح بها «جدولة النشر» — منصةٌ حُدّدت ثم حُفظت، أو زرّ سطرها
+  const [scheduleFor, setScheduleFor] = useState<string[] | null>(null);
   // `?schedule=1` من سحب البطاقة إلى «مجدول» — تُفتح النافذة مرّةً واحدة لا مع كل تحميل
   const scheduleAsked = useRef(sp.get('schedule') === '1');
   const [showVersions, setShowVersions] = useState(false);
@@ -109,6 +114,7 @@ export default function Editor() {
     | { kind: 'publish'; early: boolean; when: string }
     | { kind: 'delete' }
     | { kind: 'cancelSchedule'; id: string }
+    | { kind: 'cancelPlatforms'; platforms: string[]; schedule: string[] }
     | { kind: 'deletePublished'; id: string; platform: string }
     | null
   >(null);
@@ -125,6 +131,7 @@ export default function Editor() {
     setBody(upgradeVideoEmbeds(d.post.body));
     setSavedBody(d.post.body);
     setPlan(planFromPost(d.post));
+    setSavedPlatforms(planFromPost(d.post).planned_platforms);
     setAssigneeName(d.post.assignee_name || '');
     setStatus(d.post.status);
     /* يُستهلك مع أوّل تحميل: محتوى لم يُعتمد بعد لا تُفتح له النافذة، ولا
@@ -280,11 +287,51 @@ export default function Editor() {
     setConfirming(null);
     try {
       await api.del(`/schedules/${sid}`);
-      setMsg('أُلغي موعد النشر');
-      loadPost(postId);
+      await loadPost(postId);
+      setMsg('تم إلغاء الجدولة');
     } catch (e: any) {
       setErr(e.message);
     }
+  }
+
+  /* ═══ الحفظ والرقائق ═══
+
+     للمعتمد والمجدول والمنشور، الرقائق تتحكّم بالمواعيد: منصةٌ لها موعدٌ أُلغي
+     تحديدها تُلغى جدولتها بعد تأكيد، ومنصةٌ حُدّدت ولا موعد لها تُفتح لها «جدولة
+     النشر». والإلغاء قبل الحفظ: إن تعذّر بقيت الخطة كما كانت ولم تخالف المواعيد. */
+  const platformControl = !!postId && SCHEDULING_STATUSES.includes(status) && can('content.schedule');
+  const states = platformControl ? platformStates(schedules) : {};
+
+  async function saveAll() {
+    const changes = platformControl ? platformChanges(states, savedPlatforms, plan.planned_platforms) : { cancel: [], schedule: [] };
+    if (changes.cancel.length) {
+      setConfirming({ kind: 'cancelPlatforms', platforms: changes.cancel, schedule: changes.schedule });
+      return;
+    }
+    await finishSave(changes.schedule, false);
+  }
+
+  async function cancelPlatforms(list: string[], schedule: string[]) {
+    if (!postId) return;
+    setConfirming(null);
+    setErr(''); setMsg('');
+    try {
+      await api.post('/schedules/cancel', { post_id: postId, platforms: list });
+    } catch (e: any) {
+      setErr(e.message);
+      return;
+    }
+    await finishSave(schedule, true);
+  }
+
+  async function finishSave(schedule: string[], cancelled: boolean) {
+    if (!(await save()) || !postId) return;
+    setSavedPlatforms(plan.planned_platforms);
+    // المسودة تُحفظ كما كانت: لا مواعيد تُعاد قراءتها، ولا يُعاد تحميل نصٍّ يُكتب الآن
+    if (!cancelled && !schedule.length) return;
+    await loadPost(postId);
+    if (cancelled) setMsg('تم إلغاء الجدولة');
+    if (schedule.length && can('content.schedule')) setScheduleFor(schedule);
   }
 
   /* حذفُ المنشور من منصته نفسها — والموعد يبقى بوقت حذفه، فيُجدوَل المحتوى
@@ -428,7 +475,7 @@ export default function Editor() {
           </div>
 
           {!readOnly && (
-            <button className="btn" onClick={save}><Save size={20} /> حفظ المسودة</button>
+            <button className="btn" onClick={saveAll}><Save size={20} /> حفظ المسودة</button>
           )}
         </div>
 
@@ -445,6 +492,7 @@ export default function Editor() {
               disabled={readOnly}
               idPrefix="plan-edit"
               assigneeName={assigneeName}
+              states={states}
             />
           </div>
 
@@ -541,10 +589,22 @@ export default function Editor() {
                         </button>
                       )}
                       {/* الإلغاء متاح للمعلّق والفاشل فقط — المنشور فعلاً لا يُلغى من هنا */}
+                      {/* المتعثّر يُجدوَل من سطره، فلا يُعاد معه ما سواه */}
+                      {s.status === 'failed' && can('content.schedule') && (
+                        <button
+                          className="btn sm ghost"
+                          title="جدولة النشر"
+                          aria-label={`جدولة النشر على ${platformLabel(s.platform, platLabels)}`}
+                          onClick={() => setScheduleFor([s.platform])}
+                        >
+                          <CalendarClock size={20} />
+                        </button>
+                      )}
                       {['pending', 'failed'].includes(s.status) && can('content.schedule') && (
                         <button
                           className="btn sm ghost"
-                          title="إلغاء هذا الموعد"
+                          title="إلغاء الجدولة"
+                          aria-label={`إلغاء الجدولة على ${platformLabel(s.platform, platLabels)}`}
                           onClick={() => setConfirming({ kind: 'cancelSchedule', id: s.id })}
                         >
                           <Trash2 size={20} />
@@ -572,6 +632,19 @@ export default function Editor() {
                   <PlatformIcon platform={p} size={16} />
                   <span>{platformLabel(p, platLabels)}</span>
                   <span className="muted">— بلا موعد نشر</span>
+                  {can('content.schedule') && !publishedOn.includes(p) && (
+                    <>
+                      <div className="spacer" />
+                      <button
+                        className="btn sm ghost"
+                        title="جدولة النشر"
+                        aria-label={`جدولة النشر على ${platformLabel(p, platLabels)}`}
+                        onClick={() => setScheduleFor([p])}
+                      >
+                        <CalendarClock size={20} />
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -693,16 +766,17 @@ export default function Editor() {
           onReject={async (reason) => { setShowReject(false); await doAction('reject', reason); }}
         />
       )}
-      {showSchedule && postId && (
+      {(showSchedule || scheduleFor) && postId && (
         <ScheduleModal
           postId={postId}
-          platforms={platforms.filter((p) => !publishedOn.includes(p))}
+          platforms={[...new Set([...platforms, ...(scheduleFor || [])])].filter((p) => !publishedOn.includes(p))}
           labels={platLabels}
-          initialPlatforms={plan.planned_platforms.filter((p) => platforms.includes(p) && !publishedOn.includes(p))}
+          initialPlatforms={scheduleFor || plan.planned_platforms.filter((p) => platforms.includes(p) && !publishedOn.includes(p))}
           initialDay={plan.planned_on && plan.planned_on >= riyadhToday() ? plan.planned_on : ''}
-          onClose={() => setShowSchedule(false)}
+          onClose={() => { setShowSchedule(false); setScheduleFor(null); }}
           onDone={async (issues) => {
             setShowSchedule(false);
+            setScheduleFor(null);
             await loadPost(postId);
             setStatus('scheduled');
             /* ما سترفضه المنصات يُقال الآن — بمنصّته وسببه، كما يُقال رفض «نشر الآن» —
@@ -755,11 +829,22 @@ export default function Editor() {
 
       {confirming?.kind === 'cancelSchedule' && (
         <ConfirmModal
-          title="إلغاء موعد النشر"
-          message="يُلغى هذا الموعد ولا يُنشر المحتوى عليه. يبقى المحتوى كما هو ويمكن جدولته من جديد."
-          actionLabel="إلغاء الموعد"
+          title="إلغاء الجدولة"
+          message="لا يُنشر المحتوى على هذه المنصة. ويبقى كما هو ويمكن جدولته عليها من جديد."
+          actionLabel="إلغاء الجدولة"
           danger
           onConfirm={() => cancelSchedule(confirming.id)}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.kind === 'cancelPlatforms' && (
+        <ConfirmModal
+          title="إلغاء الجدولة"
+          message={<>لا يُنشر المحتوى على: <bdi>{confirming.platforms.map((p) => platformLabel(p, platLabels)).join('، ')}</bdi>. ويبقى كما هو ويمكن جدولته عليها من جديد.</>}
+          actionLabel="إلغاء الجدولة"
+          danger
+          onConfirm={() => cancelPlatforms(confirming.platforms, confirming.schedule)}
           onClose={() => setConfirming(null)}
         />
       )}

@@ -12,6 +12,7 @@ import { CampaignBadge } from '../components/StateBadge';
 import StatusBadge from '../components/StatusBadge';
 import TargetBadge from '../components/TargetBadge';
 import PostKanban, { moveAction, opensScheduling } from '../components/PostKanban';
+import PostPlatformsModal from '../components/PostPlatformsModal';
 import Bar from '../components/Bar';
 import Modal from '../components/Modal';
 import ConfirmModal, { FieldModal } from '../components/ConfirmModal';
@@ -51,6 +52,8 @@ export default function CampaignDetail() {
   const [rejecting, setRejecting] = useState<any>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  // نافذة «منصات التواصل» لمحتوى معتمد أو مجدول أو منشور
+  const [platformsFor, setPlatformsFor] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   const canWrite = can('content.schedule');
@@ -268,6 +271,7 @@ export default function CampaignDetail() {
             showCampaign={false}
             onOpen={(p) => navigate(`/editor/${p.id}`)}
             onMove={onMovePost}
+            onPlatforms={can('content.schedule') ? (p) => setPlatformsFor(p.id) : undefined}
             cardAction={canWrite ? (p) => (
               <button className="btn ghost sm" onClick={() => unlink(p.id)}>
                 <FolderMinus size={16} /> إزالة من الحملة
@@ -278,6 +282,10 @@ export default function CampaignDetail() {
           <Timeline posts={posts} campaign={campaign} late={rollup?.late ?? 0} />
         )}
       </div>
+
+      {platformsFor && (
+        <PostPlatformsModal postId={platformsFor} onClose={() => setPlatformsFor(null)} onChanged={load} />
+      )}
 
       {showEdit && (
         <CampaignForm
