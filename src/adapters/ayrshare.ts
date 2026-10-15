@@ -123,6 +123,11 @@ function liveTarget(t: any): boolean {
   return !!id && id !== 'pending' && id !== 'failed';
 }
 
+/* «One or more of the social networks timed out with your request. Please re-try
+   the post. You may use the /retry endpoint» — رآه الفريق على تيك توك. مهلةٌ
+   انتهت قبل أن تردّ المنصة، لا رفضٌ للمحتوى. */
+const TIMED_OUT = /timed out|re-?try the post|\/retry/i;
+
 export function ayrshareOutcome(raw: any): PublishCheck | null {
   if (!raw || typeof raw !== 'object') return null;
   const data = unwrapAyrsharePost(raw);
@@ -132,7 +137,12 @@ export function ayrshareOutcome(raw: any): PublishCheck | null {
 
   const failedTarget = targets.some((t) => String(t?.status || '').toLowerCase() === 'error' || t?.id === 'failed');
   if (status === 'error' || status === 'deleted' || failedTarget || (Array.isArray(data?.errors) && data.errors.length)) {
-    return { state: 'failed', error: errors || (status === 'deleted' ? 'حُذف المنشور' : undefined) };
+    const retryable = status !== 'deleted' && (retryableFailure(raw) || TIMED_OUT.test(errors));
+    return {
+      state: 'failed',
+      error: errors || (status === 'deleted' ? 'حُذف المنشور' : undefined),
+      ...(retryable ? { retryable: true } : {}),
+    };
   }
   /* وجهاتٌ حيّةٌ كلها ← نُشر، ولو بقي أعلى الردّ «pending». وكان يُقرأ قبلها
      فيبقى موعد لينكدإن «قيد النشر» ساعةً ثم «فاشلاً» وهو على الصفحة. */
@@ -241,6 +251,8 @@ const GATEWAY_STATUS = new Set([502, 503, 504]);
 
 export const UNCERTAIN_ERROR =
   'انقطع الاتصال بـ Ayrshare قبل أن يردّ، فقد يكون المنشور وصله. أعد النشر حين تشاء: إن كان وصله فلن يتكرّر';
+export const ALREADY_RETRIED_ERROR =
+  'أُعيدت محاولة هذا المنشور من قبل ولم يُنشر، وAyrshare لا يعيده مرّتين. تحقّق منه على المنصة، وإن لم تجده فأعد النشر ليُرسل من جديد';
 export const DUPLICATE_KEY_ERROR =
   'وصل هذا المنشور إلى Ayrshare في محاولةٍ سابقة، فلم يُرسل ثانيةً. تحقّق منه على المنصة، وإن لم تجده فأعد النشر';
 
@@ -982,6 +994,25 @@ export class AyrshareProvider implements PublishingProvider {
     // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان
     const state = id && outcome ? outcome.state : 'published';
     return { providerPostId: id, status: String(post?.status || 'success'), state };
+  }
+
+  /* ═══ إعادة المنشور نفسه ═══
+
+     `PUT /post/retry` يُعيد منشوراً فشل بتعثّرٍ يُعاد، بمعرّفه، مرّةً واحدة — ويعود
+     «pending» فيُتابَع كأيّ منشورٍ قيد النشر. وإعادتُه بنشرٍ جديد كانت تُكرّره إن
+     كانت المنصة استلمته (التوثيق: «Social networks may sometimes report errors
+     even when they've successfully processed and published the post»). وما أُعيد
+     قبلُ (329) يُقال، فيُنشر من جديد بعلم الفريق. */
+  async retryPost(providerPostId: string): Promise<PublishResult> {
+    let data: any;
+    try {
+      data = await this.call('PUT', '/post/retry', { id: providerPostId });
+    } catch (err) {
+      if (err instanceof AyrshareError && errorCodes(err.body).includes(329)) throw new Error(ALREADY_RETRIED_ERROR);
+      if (uncertainOutcome(err)) throw new PublishUncertain(UNCERTAIN_ERROR);
+      throw err;
+    }
+    return { providerPostId: String(data?.id || providerPostId), status: String(data?.status || 'pending'), state: 'pending' };
   }
 
   async getPublishStatus(providerPostId: string, ctx?: PublishStatusContext): Promise<PublishCheck | null> {
