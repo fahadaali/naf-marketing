@@ -5,6 +5,8 @@ import { nowIso, htmlToText, extractMediaIds, newId } from '../util';
 import { notifyPublishFailed } from './notify';
 import { adaptImage, frameImage, imageDims, platformMediaFilter, videoIssues } from './mediaSpecs';
 import { optionIssues, parseOptions } from './publishOptions';
+import { ALREADY_RETRIED_ERROR } from '../adapters/ayrshare';
+import { customPlatformLabels, platformName } from '../platformLabels';
 
 // مُشغّل النشر — idempotent:
 // 1) يلتقط كل جدول ويقفله بحالة 'processing' عبر تحديث شرطي (لا يُلتقط مرتين).
@@ -145,13 +147,15 @@ function extraIds(ids?: string[]): string | null {
  * معروفة، والإعادة محاولةٌ جديدة — إلا ما لا تُعرف نتيجته (`keepKey`): يبقى
  * مفتاحه فتُرفض إعادته لدى المزوّد إن كان المنشور وصله.
  */
-async function failJob(env: Env, job: Job, errMsg: string, opts: { keepKey?: boolean } = {}): Promise<void> {
+/** `retryId`: معرّف المنشور لدى المزوّد إن كان فشله يُعاد — به تُعاد المحاولة على المنشور نفسه (0048). */
+async function failJob(env: Env, job: Job, errMsg: string, opts: { keepKey?: boolean; retryId?: string | null } = {}): Promise<void> {
   await env.DB.prepare(
     `UPDATE schedules SET status = 'failed', error = ?, published_at = NULL,
-            publish_key = CASE WHEN ? = 1 THEN publish_key ELSE NULL END
+            publish_key = CASE WHEN ? = 1 THEN publish_key ELSE NULL END,
+            retry_id = ?
      WHERE id = ?`,
   )
-    .bind(errMsg, opts.keepKey ? 1 : 0, job.id)
+    .bind(errMsg, opts.keepKey ? 1 : 0, opts.retryId ?? null, job.id)
     .run();
   try { await notifyPublishFailed(env, job.post_id, job.platform, errMsg); } catch { /* لا تعطّل النشر */ }
 }
@@ -193,12 +197,47 @@ async function publishJobs(
       .run();
     if (lock.meta.changes === 0) continue; // التقطها عامل آخر أو نُشرت مسبقاً
 
+    const key = await env.DB.prepare('SELECT publish_key, retry_id, scheduled_at FROM schedules WHERE id = ?')
+      .bind(job.id)
+      .first<{ publish_key: string | null; retry_id: string | null; scheduled_at: string | null }>();
+
+    /* فشلٌ يُعاد (مهلة المنصة انتهت): يُعاد المنشور نفسه لدى المزوّد لا منشورٌ
+       جديد — فإن كانت المنصة استلمته لم يتكرّر. ويُسأل سجلّها أولاً: ما ظهر فيه
+       منشورٌ لا يُعاد. وما أُعيد قبلُ يُفلت معرّفه فتُرسله المحاولة التالية جديداً. */
+    if (key?.retry_id && provider?.retryPost) {
+      const retryId = key.retry_id;
+      try {
+        const input = await prepareInput(env, job);
+        const seen = provider.findOnPlatform && key.scheduled_at
+          ? await provider.findOnPlatform({ platform: job.platform, text: input.text, since: key.scheduled_at }).catch(() => null)
+          : null;
+        if (seen) {
+          await env.DB.prepare(
+            `UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = NULL,
+                    publish_key = NULL, retry_id = NULL
+             WHERE id = ?`,
+          )
+            .bind(retryId, seen, job.id)
+            .run();
+          published++;
+          continue;
+        }
+        const result = await provider.retryPost(retryId);
+        await env.DB.prepare('UPDATE schedules SET provider_post_id = ?, retry_id = NULL WHERE id = ?')
+          .bind(result.providerPostId, job.id)
+          .run();
+        pending++;
+      } catch (err: any) {
+        const msg = String(err?.message || err);
+        await failJob(env, job, msg, { keepKey: err instanceof PublishUncertain, retryId: msg === ALREADY_RETRIED_ERROR ? null : retryId });
+        failed++;
+      }
+      continue;
+    }
+
     try {
       if (!provider) throw new Error(providerError);
 
-      const key = await env.DB.prepare('SELECT publish_key FROM schedules WHERE id = ?')
-        .bind(job.id)
-        .first<{ publish_key: string | null }>();
       const input = { ...(await prepareInput(env, job, { adapt: true })), idempotencyKey: key?.publish_key || undefined };
       const missing = missingRequirement(job.platform, input.text, input.media || []);
       if (missing) throw new Error(missing);
@@ -219,7 +258,7 @@ async function publishJobs(
       // `note`: نشرةٌ من نشرات الموعد لم تُنشر وغيرها نُشر (سناب) — يُكتب تحته
       await env.DB.prepare(
         `UPDATE schedules SET status = 'published', provider_post_id = ?, published_at = ?, error = ?,
-                extra_provider_ids = ?, publish_key = NULL
+                extra_provider_ids = ?, publish_key = NULL, retry_id = NULL
          WHERE id = ?`,
       )
         .bind(result.providerPostId, nowIso(), result.note || null, extraIds(result.extraIds), job.id)
@@ -361,6 +400,10 @@ export const CONFIRM_WITHIN_MS = 60 * 60_000;
 
 const INTERRUPTED_ERROR =
   'انقطع النشر قبل أن يردّ المزوّد. تحقّق من الحساب على المنصة قبل إعادة النشر، فقد يكون المنشور وصلها';
+/** مهلةُ المنصة انتهت قبل أن تردّ — لا رفضٌ للمحتوى. والسببُ كما قاله المزوّد بعده. */
+function timedOutError(platform: string, reason?: string): string {
+  return `انتهت مهلة ${platform} قبل أن تردّ، ولم يُرفض المحتوى. اضغط «نشر الآن» لإعادة المحاولة على المنشور نفسه فلا يتكرّر${reason ? ` (${reason})` : ''}`;
+}
 const UNCONFIRMED_ERROR =
   'لم يؤكّد المزوّد النشر خلال ساعة. تحقّق من الحساب على المنصة قبل إعادة النشر، فقد يكون المنشور وصلها';
 
@@ -424,12 +467,17 @@ export async function reconcilePublishing(env: Env): Promise<{ published: number
       if (check?.state === 'pending' && !expired) continue;
 
       if (check?.state === 'failed' || check?.state === 'pending') {
-        const msg = check.state === 'failed'
-          ? `فشل النشر عبر المزوّد: ${check.error || 'رفضت المنصة المنشور'}`
-          : UNCONFIRMED_ERROR;
-        // ما لم يُؤكَّد قد يُنشر بعد: يبقى مفتاحه فلا تُكرّره إعادة النشر
+        const retryable = check.state === 'failed' && !!check.retryable;
+        const msg = retryable
+          ? timedOutError(platformName(row.platform, await customPlatformLabels(env)), check.error)
+          : check.state === 'failed'
+            ? `فشل النشر عبر المزوّد: ${check.error || 'رفضت المنصة المنشور'}`
+            : UNCONFIRMED_ERROR;
+        // ما لم يُؤكَّد قد يُنشر بعد: يبقى مفتاحه فلا تُكرّره إعادة النشر.
+        // وما فشل بتعثّرٍ يُعاد يبقى معرّفه: به يُعاد المنشور نفسه
         await failJob(env, { id: row.id, post_id: row.post_id, platform: row.platform, body: '', title: '' }, msg, {
           keepKey: check.state === 'pending',
+          retryId: retryable ? row.provider_post_id : null,
         });
         failed++;
         continue;
