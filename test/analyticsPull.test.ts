@@ -210,6 +210,15 @@ describe('ما نُشر من خارج المنصة', () => {
     expect(matchSnapshot(h, 'tiktok', cands)?.provider_post_id).toBe('a');
     expect(matchSnapshot({ ...h, sentAt: '2026-09-01T11:00:00Z' }, 'tiktok', cands)).toBeNull();
   });
+
+  it('يطابق رابطين بصيغتين لمنشورٍ واحد بالمعرّف الذي يحملانه', () => {
+    const cands = [{ provider_post_id: '5f8d0d55b54764421b7156c9', platform: 'youtube', title: 'قديم', sent_at: '2025-11-23T14:01:36Z', external_url: 'https://youtu.be/dQw4w9WgXcQ' } as any];
+    const h = { id: 'dQw4w9WgXcQ', platform: 'youtube', accountId: 'y', title: 'عنوانٌ آخر', sentAt: '2025-11-24T09:00:00Z', externalUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', metrics: {} as any };
+    expect(matchSnapshot(h, 'youtube', cands)?.provider_post_id).toBe('5f8d0d55b54764421b7156c9');
+    // وبلا رابطٍ في السجلّ: معرّفه نفسه هو معرّف الفيديو
+    expect(matchSnapshot({ ...h, externalUrl: null }, 'youtube', cands)?.provider_post_id).toBe('5f8d0d55b54764421b7156c9');
+    expect(matchSnapshot({ ...h, id: 'aaaaaaaaaaa', externalUrl: 'https://youtu.be/aaaaaaaaaaa' }, 'youtube', cands)).toBeNull();
+  });
 });
 
 describe('الاحتساب بعد السحب', () => {

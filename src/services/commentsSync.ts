@@ -17,6 +17,7 @@ import {
 } from '../adapters/socialapi';
 import { newId, nowIso } from '../util';
 import { loadMedia } from './publish';
+import { resolveNativeIdsFromUrls } from './nativePostId';
 import { notifyUsers, usersWithPermission } from './notify';
 import { customPlatformLabels, normalizePlatformKey, platformName } from '../platformLabels';
 import { beginScheduledRun, endScheduledRun, runLimits, type Plan, type Trigger } from './limits';
@@ -93,6 +94,9 @@ export type InboxSyncReport = {
   /** منشوراتٌ ردّها المزوّد «غير موجود» لكل منصة — حُذفت، أو مفتاحها لا يعرفه.
    *  ليس عطلاً فلا يُكتب في `errors`، لكنه يُعدّ: كان يُبتلع فيغيب السبب. */
   notFound?: Record<string, number>;
+  /** منشوراتٌ رفضها المزوّد لسببٍ يخصّها لكل منصة — والمنصة تُقرأ بقيّتُها، فلا
+   *  يُكتب الرفض في `errors`. كان يُبتلع: يُختم المنشور مقروءاً ولا يُعرف أنه رُفض. */
+  rejected?: Record<string, number>;
 };
 
 const REPORT_KEY = 'inbox_sync_report';
@@ -1409,6 +1413,8 @@ async function syncAyrshareComments(
   const byInternal = new Map(accounts.filter((a) => AYRSHARE_COMMENT_PLATFORMS.has(ayrsharePlatform(a.platform))).map((a) => [a.platform, a]));
   if (!byInternal.size) return;
   report.kinds.comment.ok = true;
+  // معرّفٌ أصليٌّ يحمله رابط المنشور — قبل أن تُطلب التعليقات بمفتاح مزوّدٍ سابق
+  await resolveNativeIdsFromUrls(env).catch(() => 0);
 
   /* لينكدإن المربوط صفحةٌ لا حساب: لقطةٌ كُتبت `linkedin` (من جدولةٍ بمفتاح
      الحساب أو من مزوّدٍ سابق) هي منشور الصفحة، فتُطلب تعليقاتها باسمها. */
@@ -1505,6 +1511,7 @@ async function syncAyrshareComments(
       break;
     }
     let data: any;
+    let outcome: 'ok' | 'not_found' | 'rejected' = 'ok';
     try {
       data = await ayrshareComments(auth, q.ayr, q.postId, budget);
     } catch (err) {
@@ -1526,6 +1533,11 @@ async function syncAyrshareComments(
         blocked.add(q.internal);
         continue;
       }
+      outcome = notFound ? 'not_found' : 'rejected';
+      if (!notFound) {
+        report.rejected ??= {};
+        report.rejected[q.internal] = (report.rejected[q.internal] ?? 0) + 1;
+      }
       data = null;
     }
     if (data) {
@@ -1545,11 +1557,13 @@ async function syncAyrshareComments(
         ).bind(id)));
       }
     }
+    /* والنتيجة تُحفظ مع الختم: منشورٌ رُفض يُختم كي لا يُطلب في كل دورة، لكن
+       تقرير التغطية يعدّه مرفوضاً لا «قُرئ بلا تعليقات» (0049). */
     await env.DB.prepare(
-      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET signature = excluded.signature, synced_at = excluded.synced_at`,
-    ).bind(q.postId, `ayrshare:${q.ayr}`, q.internal, q.signature, nowIso(), nowIso()).run();
+      `INSERT INTO inbox_post_state (inbox_post_id, account_id, platform, signature, seen_at, synced_at, outcome)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(inbox_post_id, account_id) DO UPDATE SET signature = excluded.signature, synced_at = excluded.synced_at, outcome = excluded.outcome`,
+    ).bind(q.postId, `ayrshare:${q.ayr}`, q.internal, q.signature, nowIso(), nowIso(), outcome).run();
     if (q.rank === -1) done.push({ platform: q.ayr, postId: q.postId });
   }
   for (const [p, message] of refused) {

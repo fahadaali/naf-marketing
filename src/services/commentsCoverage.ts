@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { readInboxHistoryReport, readInboxReport, type InboxSyncReport } from './commentsSync';
 
 /* ═══ تغطية الصندوق: أيّ المنشورات تُقرأ تعليقاتها وأيّها لا ═══
 
@@ -8,7 +9,13 @@ import type { Env } from '../types';
    منصةٍ لا يعرفه السحب (`twitter` لا `x`)، أو بلا تاريخ نشر فلا يُسأل عنه.
 
    قراءةٌ من قاعدة البيانات وحدها — لا طلب إلى المزوّد ولا كتابة — تُعدّ هذه
-   الأسباب لكل منصة، ليُبنى الإصلاح على أرقامٍ لا على ظنّ. */
+   الأسباب لكل منصة، ليُبنى الإصلاح على أرقامٍ لا على ظنّ.
+
+   و«قُرئ بلا تعليقات» كان يجمع ثلاثاً لا يفرّقها: ردّ المزوّد بقائمةٍ فارغة،
+   أو «غير موجود»، أو رفضاً يخصّ المنشور — فالمنشور يُختم مقروءاً في الثلاث.
+   فتُعدّ كلٌّ منها وحدها بنتيجة آخر طلب (0049)، ويُقابَل ما وصل بعدد التعليقات
+   الذي تعلنه تحليلات المنصة نفسها: منشورٌ تقول المنصة إن عليه تعليقات ولم
+   يصلنا منها شيء هو موضع الخلل، لا ما سواه. */
 
 /** مفاتيح المنصات التي يسحب لها `syncAyrshareComments` — كما يسمّيها `ayrshareAccountPlatform`. */
 export const COMMENT_PLATFORM_KEYS = ['x', 'facebook', 'instagram', 'linkedin', 'linkedin_page', 'tiktok', 'youtube', 'threads'];
@@ -27,35 +34,84 @@ export type PlatformCoverage = {
   /** منها ما عُرف معرّفه الأصلي فتُطلب به تعليقاته */
   legacy_resolved: number;
   never_read: number;
+  /** مجموع الأربعة التالية — قُرئ ولم يُحفظ له تعليق */
   read_without_comments: number;
+  /** ردّ المزوّد بقائمةٍ لا تعليق فيها من غيرنا */
+  read_empty: number;
+  /** ردّه المزوّد «غير موجود»: حُذف، أو مفتاحه لا يعرفه */
+  not_found: number;
+  /** رفضه المزوّد لسببٍ يخصّه */
+  rejected: number;
+  /** قُرئ قبل أن تُحفظ نتيجة الطلب — يُعاد طلبه */
+  outcome_unknown: number;
   with_comments: number;
+  /** تعلن تحليلات المنصة أن عليه تعليقاً أو أكثر */
+  analytics_with_comments: number;
+  /** منها ما لم يُحفظ له تعليقٌ واحد */
+  analytics_comments_missing: number;
   oldest_post: string | null;
   newest_post: string | null;
 };
+
+/** ملخّص دورةٍ للتغطية: ما ردّه المزوّد «غير موجود» أو رفضه لكل منصة، وأعطالها. */
+export type SyncSummary = {
+  at: string;
+  complete: boolean;
+  not_found: Record<string, number>;
+  rejected: Record<string, number>;
+  errors: string[];
+} | null;
+
+function summary(r: InboxSyncReport | null): SyncSummary {
+  if (!r) return null;
+  return { at: r.at, complete: r.complete, not_found: r.notFound ?? {}, rejected: r.rejected ?? {}, errors: r.errors };
+}
 
 export async function commentsCoverage(env: Env): Promise<{
   platforms: PlatformCoverage[];
   comments: { platform: string; count: number; oldest: string | null }[];
   history: { account: string; state: string | null }[];
+  last_sync: SyncSummary;
+  last_history_sync: SyncSummary;
 }> {
   const cutoff = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
+  /* المعرّف من مزوّدٍ سابق: نائب SocialAPI أو معرّف Buffer. و«عُرف معرّفه
+     الأصلي» منها وحدها — وكانت تُعدّ كل لقطةٍ اختلف معرّفها الأصلي عن مفتاحها،
+     فيظهر في تيك توك «عُرف» ما ليس من مزوّدٍ سابق أصلاً. */
+  const legacy = `(s.provider_post_id LIKE '%:' || s.platform
+                  OR (length(s.provider_post_id) = 24 AND s.provider_post_id NOT GLOB '*[^0-9a-f]*'
+                      AND s.provider_post_id GLOB '*[a-f]*'))`;
+  /* عدد التعليقات كما تعلنه تحليلات المنصة: عنصر `comments` في `metrics_json`
+     (انظر `ayrshareMetrics`)، كما يقرؤه السحب نفسه في `commentsOf`. */
+  const announced = `(SELECT CAST(json_extract(j.value, '$.value') AS INTEGER)
+                      FROM json_each(CASE WHEN json_valid(s.metrics_json) THEN s.metrics_json ELSE '[]' END) j
+                      WHERE j.type = 'object' AND json_extract(j.value, '$.type') = 'comments' LIMIT 1)`;
   const { results } = await env.DB.prepare(
     `SELECT s.platform,
        COUNT(*) AS posts,
        SUM(CASE WHEN s.sent_at IS NULL THEN 1 ELSE 0 END) AS no_date,
        SUM(CASE WHEN s.sent_at < ? THEN 1 ELSE 0 END) AS older_than_30d,
-       SUM(CASE WHEN s.provider_post_id LIKE '%:' || s.platform
-                  OR (length(s.provider_post_id) = 24 AND s.provider_post_id NOT GLOB '*[^0-9a-f]*'
-                      AND s.provider_post_id GLOB '*[a-f]*')
-                THEN 1 ELSE 0 END) AS legacy_id,
-       SUM(CASE WHEN s.native_post_id IS NOT NULL AND s.native_post_id <> s.provider_post_id THEN 1 ELSE 0 END) AS legacy_resolved,
+       SUM(CASE WHEN ${legacy} THEN 1 ELSE 0 END) AS legacy_id,
+       SUM(CASE WHEN ${legacy} AND s.native_post_id IS NOT NULL AND s.native_post_id <> s.provider_post_id THEN 1 ELSE 0 END) AS legacy_resolved,
        SUM(CASE WHEN st.inbox_post_id IS NULL THEN 1 ELSE 0 END) AS never_read,
        SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL THEN 1 ELSE 0 END) AS read_without_comments,
+       SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL AND st.rank = 4 THEN 1 ELSE 0 END) AS read_empty,
+       SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL AND st.rank = 2 THEN 1 ELSE 0 END) AS not_found,
+       SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL AND st.rank = 3 THEN 1 ELSE 0 END) AS rejected,
+       SUM(CASE WHEN st.inbox_post_id IS NOT NULL AND c.n IS NULL AND st.rank = 1 THEN 1 ELSE 0 END) AS outcome_unknown,
        SUM(CASE WHEN c.n IS NOT NULL THEN 1 ELSE 0 END) AS with_comments,
+       SUM(CASE WHEN COALESCE(${announced}, 0) > 0 THEN 1 ELSE 0 END) AS analytics_with_comments,
+       SUM(CASE WHEN COALESCE(${announced}, 0) > 0 AND c.n IS NULL THEN 1 ELSE 0 END) AS analytics_comments_missing,
        MIN(s.sent_at) AS oldest_post,
        MAX(s.sent_at) AS newest_post
      FROM analytics_snapshots s
-     LEFT JOIN (SELECT DISTINCT inbox_post_id FROM inbox_post_state WHERE account_id LIKE 'ayrshare:%') st
+     LEFT JOIN (
+       -- منشورٌ قُرئ من أكثر من حساب تُؤخذ أفضلُ نتائجه: قُرئ، ثم رُفض، ثم «غير موجود»
+       SELECT inbox_post_id,
+         MAX(CASE outcome WHEN 'ok' THEN 4 WHEN 'rejected' THEN 3 WHEN 'not_found' THEN 2 ELSE 1 END) AS rank
+       FROM inbox_post_state WHERE account_id LIKE 'ayrshare:%'
+       GROUP BY inbox_post_id
+     ) st
        ON st.inbox_post_id = COALESCE(s.native_post_id, s.provider_post_id)
      LEFT JOIN (
        SELECT substr(rest, 1, instr(rest, '|') - 1) AS post, COUNT(*) AS n FROM (
@@ -82,5 +138,7 @@ export async function commentsCoverage(env: Env): Promise<{
     platforms: results.map((r) => ({ ...r, recognised: COMMENT_PLATFORM_KEYS.includes(r.platform) })),
     comments,
     history,
+    last_sync: summary(await readInboxReport(env)),
+    last_history_sync: summary(await readInboxHistoryReport(env)),
   };
 }

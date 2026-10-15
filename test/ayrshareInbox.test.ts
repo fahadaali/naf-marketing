@@ -243,7 +243,15 @@ describe('رفض المنصة لطلب التعليقات', () => {
     routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'ig1', platform: 'instagram', username: 'naf' }] } });
     routes['GET /comments/I1'] = () => ({ status: 400, body: { status: 'error', code: 400, message: 'instagram: Error getting comments' } });
     routes['GET /comments/I2'] = () => ({ body: { status: 'success', instagram: [] } });
-    expect((await syncComments(env))?.errors).toEqual([]);
+    const report = await syncComments(env);
+    expect(report?.errors).toEqual([]);
+    // لا يُقال عطلاً، لكنه يُعدّ — ويُحفظ لكل منشورٍ أرُفض أم قُرئ (0049)
+    expect(report?.rejected).toEqual({ instagram: 1 });
+    const outcomes = Object.fromEntries(
+      db.prepare("SELECT inbox_post_id, outcome FROM inbox_post_state WHERE account_id = 'ayrshare:instagram'").all()
+        .map((r: any) => [r.inbox_post_id, r.outcome]),
+    );
+    expect(outcomes).toEqual({ I1: 'rejected', I2: 'ok' });
   });
 
   it('المنشور المحذوف لا يُعدّ عطلاً', async () => {
@@ -254,6 +262,24 @@ describe('رفض المنصة لطلب التعليقات', () => {
     expect(report?.errors).toEqual([]);
     // ليس عطلاً، لكنه يُعدّ — كان يُبتلع فيغيب سبب ما لا يظهر
     expect(report?.notFound).toEqual({ x: 1 });
+    expect(report?.rejected).toBeUndefined();
+    expect(db.prepare("SELECT outcome FROM inbox_post_state WHERE inbox_post_id = 'T9'").get()).toEqual({ outcome: 'not_found' });
+  });
+});
+
+describe('منشورٌ بمعرّف مزوّدٍ سابق ورابطٍ يحمل معرّفه الأصلي', () => {
+  it('تُطلب تعليقاته بمعرّف الفيديو من رابطه — لا بمعرّف Buffer الذي يردّه Ayrshare «غير موجود»', async () => {
+    db.prepare(
+      "INSERT INTO analytics_snapshots (id, provider_post_id, platform, sent_at, metrics_json, external_url) VALUES ('a1', '5f8d0d55b54764421b7156c9', 'youtube', ?, '[]', 'https://youtu.be/dQw4w9WgXcQ')",
+    ).run(RECENT);
+    routes['GET /user'] = () => ({ body: { displayNames: [{ id: 'yt1', platform: 'youtube', username: 'naf' }] } });
+    routes['GET /comments/dQw4w9WgXcQ'] = () => ({ body: { status: 'success', youtube: [
+      { commentId: 'yc1', comment: 'شرحٌ واضح، شكراً', created: RECENT, userName: 'reem' },
+    ] } });
+    await syncComments(env);
+    expect(calls.some((c) => c.key === 'GET /comments/5f8d0d55b54764421b7156c9')).toBe(false);
+    expect(db.prepare("SELECT native_post_id FROM analytics_snapshots WHERE id = 'a1'").get()).toEqual({ native_post_id: 'dQw4w9WgXcQ' });
+    expect(db.prepare("SELECT body FROM platform_comments WHERE kind = 'comment'").all()).toEqual([{ body: 'شرحٌ واضح، شكراً' }]);
   });
 });
 
