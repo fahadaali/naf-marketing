@@ -1239,45 +1239,76 @@ async function readPendingPosts(env: Env): Promise<PendingPost[]> {
 type LegacyRow = {
   id: string; platform: string; kind: string; provider_comment_id: string;
   reply_body: string | null; replied_at: string | null; replied_by: string | null;
-  reply_source: string | null; reply_provider_id: string | null;
+  reply_source: string | null; reply_provider_id: string | null; created_at: string | null;
 };
+
+/* مراجعة قوقل: SocialAPI حفظ معرّفها باسم موردها كاملاً
+   (`accounts/…/locations/…/reviews/{مراجعة}`) فبقيت سبعُ مراجعاتٍ قديمة بلا
+   مطابقة وظهرت كلٌّ منها مرّتين. فيُطابَق بآخر جزءٍ من المعرّف في الطرفين، ثم
+   بوقت كتابة المراجعة إلى الثانية — وقتٌ يعلنه قوقل نفسه، فلا يختلف بين
+   المزوّدَين. ولا يُطابَق بالوقت إلا ما انفرد به. */
+const lastSegment = (id: string) => id.slice(id.lastIndexOf('/') + 1);
+const secondOf = (at: string | null | undefined): string => {
+  const t = at ? Date.parse(at) : NaN;
+  return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 19) : '';
+};
+
+/** مفاتيح الصفّ القديم: بمعرّفه على المنصة، وللمراجعة بوقتها أيضاً. */
+function legacyKeys(r: LegacyRow): string[] {
+  const platform = normalizePlatformKey(r.platform);
+  let native = '';
+  if (r.kind === 'review' && r.provider_comment_id.startsWith('rv:')) {
+    native = lastSegment(r.provider_comment_id.slice(r.provider_comment_id.indexOf(':', 3) + 1));
+  } else if (r.kind === 'comment') {
+    const parts = r.provider_comment_id.split('|');
+    if (parts.length === 3) native = parts[2];
+  }
+  const keys = native ? [`${platform}|${r.kind}|${native}`] : [];
+  const at = r.kind === 'review' ? secondOf(r.created_at) : '';
+  if (at) keys.push(`${platform}|review@${at}`);
+  return keys;
+}
 
 /** الصفوف القديمة بمفتاح «منصة|نوع|معرّف المنصة» — تُقرأ مرّةً في الدورة. */
 async function legacyIndex(env: Env): Promise<Map<string, LegacyRow>> {
   const { results } = await env.DB.prepare(
-    `SELECT id, platform, kind, provider_comment_id, reply_body, replied_at, replied_by, reply_source, reply_provider_id
+    `SELECT id, platform, kind, provider_comment_id, reply_body, replied_at, replied_by, reply_source, reply_provider_id, created_at
      FROM platform_comments
      WHERE kind IN ('comment', 'review') AND substr(provider_comment_id, 1, 4) NOT IN ('ayc|', 'ayd|', 'ayr|')`,
   ).all<LegacyRow>();
   const out = new Map<string, LegacyRow>();
+  const ambiguous = new Set<string>();
   for (const r of results) {
-    let native = '';
-    if (r.kind === 'review' && r.provider_comment_id.startsWith('rv:')) {
-      native = r.provider_comment_id.slice(r.provider_comment_id.indexOf(':', 3) + 1);
-    } else if (r.kind === 'comment') {
-      const parts = r.provider_comment_id.split('|');
-      if (parts.length === 3) native = parts[2];
+    for (const key of legacyKeys(r)) {
+      // وقتٌ تشترك فيه مراجعتان لا يُطابَق به
+      if (out.has(key) && key.includes('|review@')) ambiguous.add(key);
+      out.set(key, r);
     }
-    if (native) out.set(`${normalizePlatformKey(r.platform)}|${r.kind}|${native}`, r);
   }
+  for (const key of ambiguous) out.delete(key);
   return out;
 }
 
 /** يضمّ القديم إلى عناصر Ayrshare قبل كتابتها — انظر أعلاه. */
 async function adoptLegacy(env: Env, legacy: Map<string, LegacyRow>, items: InboxItem[]): Promise<void> {
   if (!legacy.size || !items.length) return;
-  const matches: { item: InboxItem; old: LegacyRow; key: string }[] = [];
+  const matches: { item: InboxItem; old: LegacyRow }[] = [];
+  const taken = new Set<string>();
   for (const it of items) {
     const d = decodeAyrshareId(it.id);
-    const native = d?.type === 'comment' ? d.commentId : d?.type === 'review' ? d.reviewId : '';
-    const key = `${normalizePlatformKey(it.platform)}|${it.kind}|${native}`;
-    const old = native ? legacy.get(key) : undefined;
-    if (old) matches.push({ item: it, old, key });
+    const native = d?.type === 'comment' ? d.commentId : d?.type === 'review' ? lastSegment(d.reviewId) : '';
+    const platform = normalizePlatformKey(it.platform);
+    const at = it.kind === 'review' ? secondOf(it.createdAt) : '';
+    const old = (native ? legacy.get(`${platform}|${it.kind}|${native}`) : undefined)
+      ?? (at ? legacy.get(`${platform}|review@${at}`) : undefined);
+    if (!old || taken.has(old.id)) continue;
+    taken.add(old.id);
+    matches.push({ item: it, old });
   }
   if (!matches.length) return;
   const current = await rowsByIds(env, matches.map((m) => m.item.id));
   const stmts: D1PreparedStatement[] = [];
-  for (const { item, old, key } of matches) {
+  for (const { item, old } of matches) {
     const fresh = current.get(item.id);
     if (!fresh) {
       // والمنصة باسمها عندنا: SocialAPI كتب إكس `twitter`
@@ -1292,7 +1323,7 @@ async function adoptLegacy(env: Env, legacy: Map<string, LegacyRow>, items: Inbo
       }
       stmts.push(env.DB.prepare('DELETE FROM platform_comments WHERE id = ?').bind(old.id));
     }
-    legacy.delete(key);
+    for (const key of legacyKeys(old)) legacy.delete(key);
   }
   await runBatch(env, stmts);
 }

@@ -349,6 +349,47 @@ describe('ما سُحب أيام SocialAPI', () => {
   });
 });
 
+describe('مراجعات قوقل من أيام SocialAPI', () => {
+  const AT = '2026-01-24T17:27:42.000Z';
+  const legacy = (id: string, providerId: string, created: string, reply: string | null = null) =>
+    db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at, reply_body, reply_source) VALUES (?, 'google', ?, 'review', 'محمد', 'خدمة ممتازة', ?, ?, ?)")
+      .run(id, providerId, created, reply, reply ? 'platform' : null);
+
+  it('تُطابَق باسم موردها الكامل — فلا تظهر المراجعة مرّتين', async () => {
+    legacy('old1', 'rv:acc_01KY92JZA2XEHER834DF20QR1H:accounts/111/locations/222/reviews/AbFvOqR1', AT, 'شكراً لثقتك');
+    // وكُتبت بمعرّف Ayrshare قبل هذا الإصلاح — المراجعة نفسها صفّاً ثانياً
+    db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at) VALUES ('new1', 'google', 'ayr|gmb|AbFvOqR1', 'review', 'محمد', 'خدمة ممتازة', ?)").run(AT);
+    routes['GET /reviews'] = (url) => (url.searchParams.get('platform') === 'gmb'
+      ? { body: { gmb: [{ id: 'AbFvOqR1', rating: 'FIVE', review: 'خدمة ممتازة', created: '2026-01-24T17:27:42Z', reviewer: { name: 'محمد' }, reviewReply: {} }] } }
+      : { status: 400, body: { status: 'error', code: 350 } });
+    await syncComments(env);
+    const reviews = db.prepare("SELECT id, provider_comment_id, reply_body FROM platform_comments WHERE kind = 'review'").all();
+    expect(reviews).toEqual([{ id: 'new1', provider_comment_id: 'ayr|gmb|AbFvOqR1', reply_body: 'شكراً لثقتك' }]);
+  });
+
+  it('وبوقت كتابتها حين يختلف المعرّف — ولا يُطابَق وقتٌ تشترك فيه مراجعتان', async () => {
+    legacy('old1', 'rv:acc_g:sapi_internal_1', AT);
+    legacy('old2', 'rv:acc_g:sapi_internal_2', '2025-11-04T07:51:29.000Z');
+    legacy('old3', 'rv:acc_g:sapi_internal_3', '2025-11-04T07:51:29.000Z');
+    routes['GET /reviews'] = (url) => (url.searchParams.get('platform') === 'gmb'
+      ? { body: { gmb: [
+        { id: 'G1', rating: 'FIVE', review: 'خدمة ممتازة', created: '2026-01-24T17:27:42Z', reviewer: { name: 'محمد' }, reviewReply: {} },
+        { id: 'G2', rating: 'FIVE', review: 'نص', created: '2025-11-04T07:51:29Z', reviewer: { name: 'سارة' }, reviewReply: {} },
+      ] } }
+      : { status: 400, body: { status: 'error', code: 350 } });
+    await syncComments(env);
+    const ids = db.prepare("SELECT id, provider_comment_id FROM platform_comments WHERE kind = 'review' ORDER BY provider_comment_id").all();
+    expect(ids).toEqual([
+      // انفرد بوقته فنُقل إلى معرّف Ayrshare
+      { id: 'old1', provider_comment_id: 'ayr|gmb|G1' },
+      // وقتٌ تشترك فيه القديمتان: لا تخمين، فتُكتب الجديدة صفّاً
+      { id: expect.any(String), provider_comment_id: 'ayr|gmb|G2' },
+      { id: 'old2', provider_comment_id: 'rv:acc_g:sapi_internal_2' },
+      { id: 'old3', provider_comment_id: 'rv:acc_g:sapi_internal_3' },
+    ]);
+  });
+});
+
 describe('الردّ عبر Ayrshare', () => {
   const insert = (id: string, providerId: string, platform: string, kind = 'comment') =>
     db.prepare("INSERT INTO platform_comments (id, platform, provider_comment_id, kind, author_name, body, created_at) VALUES (?, ?, ?, ?, 'عميل', 'نص', ?)")
