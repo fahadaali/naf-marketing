@@ -25,7 +25,13 @@ scheduleRoutes.post('/publish-now', requirePermission('content.approve_final'), 
   if (!['scheduled', 'approved'].includes(post.status)) {
     return c.json({ error: 'لا يمكن النشر الآن إلا لمحتوى معتمد أو مجدول' }, 400);
   }
-  const result = await publishPostNow(c.env, post_id, only);
+  /* النشر يُكمَل ولو غادر الضاغط الصفحة أو أعاد تحميلها. كان الطلب يُقطع
+     بقطع الاتصال في منتصف الرفع إلى المزوّد، فيبقى الموعد «قيد النشر» بلا
+     نتيجةٍ حتى يُعدّ منقطعاً، ولا يُعرف أوصل المنشورُ المنصةَ أم لا — والإعادة
+     حينئذٍ قد تنشره ثانيةً. */
+  const run = publishPostNow(c.env, post_id, only);
+  c.executionCtx.waitUntil(run.catch(() => {}));
+  const result = await run;
   if (result.published === 0 && result.failed === 0 && result.pending === 0) {
     return c.json({ error: 'لا توجد جداول قابلة للنشر لهذا المنشور' }, 400);
   }

@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Video,
   Loader,
+  LoaderCircle,
   LayoutTemplate,
   History,
   RefreshCw,
@@ -91,6 +92,12 @@ export default function Editor() {
   const [tones, setTones] = useState<Tone[]>(DEFAULT_TONES);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  /* «نشر الآن» جارٍ. كان الزرّ يبقى كما هو والطلب يجري — وتجهيزُ مقطع تيك
+     توك ورفعُ الوسائط إلى المزوّد يأخذان ثوانيَ — فيظنّ الضاغط أن شيئاً لم
+     يحدث ويضغط ثانيةً، فيبدأ نشرٌ ثانٍ فوق الأول. والمرجع يمنع الدخول الثاني
+     قبل أن يُعاد رسم الزرّ معطّلاً. */
+  const [publishing, setPublishing] = useState(false);
+  const publishingRef = useRef(false);
 
   const [showAI, setShowAI] = useState(false);
   const [showKB, setShowKB] = useState(false);
@@ -231,7 +238,7 @@ export default function Editor() {
   }
 
   async function publishNow() {
-    if (!postId) return;
+    if (!postId || publishingRef.current) return;
     const pending = schedules.filter((s) => ['pending', 'failed'].includes(s.status));
     const earliest = pending
       .map((s) => new Date(s.scheduled_at).getTime())
@@ -242,19 +249,25 @@ export default function Editor() {
   }
 
   async function doPublishNow() {
-    if (!postId) return;
+    if (!postId || publishingRef.current) return;
+    publishingRef.current = true;
+    setPublishing(true);
     setConfirming(null);
     setErr(''); setMsg('');
-    // تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل النشر (`tiktokVideo.ts`)
-    const tiktokDue = schedules.some((s) => s.platform === 'tiktok' && ['pending', 'failed'].includes(s.status));
-    const tiktokErr = tiktokDue ? await prepareTikTok(postId, setMsg) : '';
     try {
+      // تيك توك بصورةٍ واحدة: يُجهَّز مقطعه قبل النشر (`tiktokVideo.ts`)
+      const tiktokDue = schedules.some((s) => s.platform === 'tiktok' && ['pending', 'failed'].includes(s.status));
+      const tiktokErr = tiktokDue ? await prepareTikTok(postId, setMsg) : '';
       const d = await api.post('/schedules/publish-now', { post_id: postId });
       // الحالة من الخادم لا من الضغط: منشورٌ رُفض على كل منصاته لم يُنشر
       await loadPost(postId);
-      if (d.published > 0) {
-        setMsg(`تم النشر الآن (${isolate(d.published)} منصة)` + (d.early ? ' — قبل الموعد' : ''));
-      }
+      /* وما قبله المزوّد ولم يؤكّد نشره بعد (تيك توك يعالج المقطع مثلاً) يُقال
+         بحاله المسجّلة. وكان لا يُقال شيء — لا نجاح ولا خطأ — فيبدو الضغط بلا
+         أثر، ويُضغط ثانيةً. وحاله تتحدّث وحدها (`processing` أدناه). */
+      const parts: string[] = [];
+      if (d.published > 0) parts.push(`تم النشر الآن (${isolate(d.published)} منصة)` + (d.early ? ' — قبل الموعد' : ''));
+      if (d.pending > 0) parts.push(`قيد النشر (${isolate(d.pending)} منصة)`);
+      if (parts.length) setMsg(parts.join(' · '));
       /* وما رُفض يُقال بمنصّته وسببه. وكان الرفض يُعرض «تم النشر الآن (0
          منصة)» والحالة «منشور»، فلا يعرف أحدٌ أن شيئاً لم يُنشر حتى يُفتح الحساب. */
       if (d.failed > 0) {
@@ -267,8 +280,27 @@ export default function Editor() {
       }
     } catch (e: any) {
       setErr(e.message);
+    } finally {
+      publishingRef.current = false;
+      setPublishing(false);
     }
   }
+
+  /* موعدٌ «قيد النشر» يُحسم في الخادم بعد دقائق (`reconcilePublishing`)، وكانت
+     الشاشة لا تعرف حتى يُعاد فتحها — فيبقى الزرّ والحال كما هما، ويُضغط
+     ثانيةً. فيُسأل الخادم ما بقي موعدٌ قيد النشر. والمواعيد والحال وحدها تُحدَّث:
+     `loadPost` يكتب العنوان والنص فوق ما لم يُحفظ. */
+  useEffect(() => {
+    if (!postId || !schedules.some((s) => s.status === 'processing')) return;
+    const t = setTimeout(() => {
+      api.get(`/posts/${postId}`).then((d) => {
+        setSchedules(d.schedules);
+        setStatus(d.post.status);
+        setApprovals(d.approvals);
+      }).catch(() => {});
+    }, 30_000);
+    return () => clearTimeout(t);
+  }, [postId, schedules]);
 
   async function deletePost() {
     if (!postId) return;
@@ -524,7 +556,9 @@ export default function Editor() {
                 <button className="btn gold" onClick={() => setShowSchedule(true)}><CalendarClock size={20} /> جدولة النشر</button>
               )}
               {status === 'scheduled' && can('content.approve_final') && schedules.some((s) => ['pending', 'failed'].includes(s.status)) && (
-                <button className="btn success" onClick={publishNow}><Rocket size={20} /> نشر الآن</button>
+                <button className="btn success" onClick={publishNow} disabled={publishing} aria-busy={publishing}>
+                  {publishing ? <LoaderCircle size={20} className="spin" /> : <Rocket size={20} />} نشر الآن
+                </button>
               )}
               {status === 'published' && can('content.approve_final') && (
                 <button className="btn ghost" onClick={() => doAction('archive')}><Archive size={20} /> أرشفة</button>
@@ -795,6 +829,7 @@ export default function Editor() {
               : 'يُنشر المحتوى فوراً على كل منصاته المجدولة.'
           }
           actionLabel="نشر"
+          busy={publishing}
           onConfirm={doPublishNow}
           onClose={() => setConfirming(null)}
         />
