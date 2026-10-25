@@ -181,14 +181,19 @@ export async function createColumn(env: Env, projectId: string, cardTableId: str
 // ==== البطاقات ====
 export type CardInput = { title: string; content?: string; due_on?: string | null; assignee_ids?: number[] };
 
-export async function createCard(env: Env, projectId: string, columnId: string, input: CardInput): Promise<string> {
+// ما ردّه بيسكامب بعد الكتابة: يُحفظ ليُعرف به تعديلٌ يجري في بيسكامب نفسه
+export type CardSnapshot = { title: string; content: string };
+const snapshot = (card: any): CardSnapshot => ({ title: String(card?.title ?? ''), content: String(card?.content ?? '') });
+
+export async function createCard(env: Env, projectId: string, columnId: string, input: CardInput): Promise<CardSnapshot & { id: string }> {
   const card = await bcJson<any>(env, `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`, {
     method: 'POST', body: JSON.stringify({ ...input, notify: false }),
   });
-  return String(card.id);
+  return { id: String(card.id), ...snapshot(card) };
 }
-export async function updateCard(env: Env, projectId: string, cardId: string, input: CardInput): Promise<void> {
-  await bcJson(env, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: 'PUT', body: JSON.stringify(input) });
+export async function updateCard(env: Env, projectId: string, cardId: string, input: CardInput): Promise<CardSnapshot> {
+  const card = await bcJson<any>(env, `/buckets/${projectId}/card_tables/cards/${cardId}.json`, { method: 'PUT', body: JSON.stringify(input) });
+  return snapshot(card);
 }
 // نقل البطاقة إلى عمود آخر (مدعوم في واجهة Card Table)
 export async function moveCard(env: Env, projectId: string, cardId: string, columnId: string): Promise<void> {
@@ -198,14 +203,17 @@ export async function moveCard(env: Env, projectId: string, cardId: string, colu
   if (!res.ok) throw new Error(`تعذّر نقل البطاقة (${res.status})`);
 }
 // بطاقات عمودٍ واحد — بصفحاته كلها (بيسكامب يردّ خمسين في الصفحة)
-export type BcCard = { id: string; title: string; app_url: string; created_at: string };
+export type BcCard = { id: string; title: string; app_url: string; created_at: string; content?: string; column_id?: string };
 export async function listCards(env: Env, projectId: string, columnId: string): Promise<BcCard[]> {
   const out: BcCard[] = [];
   for (let page = 1; page <= 20; page++) {
     const items = await bcJson<any[]>(env, `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json?page=${page}`);
     if (!items?.length) break;
     for (const it of items) {
-      out.push({ id: String(it.id), title: it.title || '', app_url: it.app_url || '', created_at: it.created_at || '' });
+      out.push({
+        id: String(it.id), title: it.title || '', app_url: it.app_url || '', created_at: it.created_at || '',
+        content: String(it.content ?? ''), column_id: it.parent?.id ? String(it.parent.id) : columnId,
+      });
     }
     if (items.length < 50) break;
   }
@@ -216,7 +224,7 @@ export async function trashRecording(env: Env, projectId: string, recordingId: s
 }
 
 // تعليقات على بطاقة/تسجيل (تُستخدم لربط عكسي: تعليقات بيسكامب → ملاحظات في تدفّق الاعتماد)
-export type BcComment = { id: number; content: string; created_at: string; creator_name: string };
+export type BcComment = { id: number; content: string; created_at: string; creator_name: string; creator_id?: string };
 export async function getComments(env: Env, projectId: string, recordingId: string): Promise<BcComment[]> {
   const items = await bcJson<any[]>(env, `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
   return (items || []).map((it) => ({
@@ -224,7 +232,21 @@ export async function getComments(env: Env, projectId: string, recordingId: stri
     content: stripHtml(it.content || ''),
     created_at: it.created_at || '',
     creator_name: it.creator?.name || 'بيسكامب',
+    creator_id: it.creator?.id ? String(it.creator.id) : undefined,
   }));
+}
+
+/* من غيّر البطاقة آخرَ مرة — من سجلّ أحداثها، الأحدث أولاً. بيسكامب لا يوثّق
+   اسم حدث النقل بين الأعمدة، فيُقدَّم ما في اسمه «move» إن وُجد، وإلا أحدثُ
+   حدثٍ كائناً ما كان. */
+export type BcActor = { id: string; name: string; email: string };
+export async function lastActor(env: Env, projectId: string, recordingId: string, prefer?: RegExp): Promise<BcActor | null> {
+  const events = await bcJson<any[]>(env, `/buckets/${projectId}/recordings/${recordingId}/events.json`);
+  const sorted = (events || []).filter((e) => e?.creator?.id)
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const e = (prefer && sorted.find((x) => prefer.test(String(x.action || '')))) || sorted[0];
+  if (!e) return null;
+  return { id: String(e.creator.id), name: String(e.creator.name || ''), email: String(e.creator.email_address || '') };
 }
 
 export async function createComment(env: Env, projectId: string, recordingId: string, content: string): Promise<string> {
