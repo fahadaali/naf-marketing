@@ -2,7 +2,8 @@ import type { Env } from '../types';
 import { newId } from '../util';
 
 // يأخذ لقطة من الحالة الحالية للمنشور قبل تعديله — يبني سجل نسخ رجعي.
-export async function snapshotVersion(env: Env, postId: string, editedBy: string): Promise<void> {
+// `editedBy` فارغٌ حين جاء التعديل من بيسكامب ممّن لا حساب له في المنصة
+export async function snapshotVersion(env: Env, postId: string, editedBy: string | null): Promise<void> {
   const post = await env.DB.prepare('SELECT title, body, content_type FROM content_posts WHERE id = ?')
     .bind(postId)
     .first<{ title: string; body: string; content_type: string }>();
