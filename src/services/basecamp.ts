@@ -219,6 +219,16 @@ export async function listCards(env: Env, projectId: string, columnId: string): 
   }
   return out;
 }
+/* بطاقةٌ واحدة بعمودها — نداءٌ واحد. به يُسحب ما جرى عليها في بيسكامب حين
+   يُفتح منشورها، لا ينتظر الدورة التي تقرأ الأعمدة كلّها. */
+export async function getCard(env: Env, projectId: string, cardId: string): Promise<BcCard & { column_title: string }> {
+  const it = await bcJson<any>(env, `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+  return {
+    id: String(it.id), title: it.title || '', app_url: it.app_url || '', created_at: it.created_at || '',
+    content: String(it.content ?? ''), column_id: it.parent?.id ? String(it.parent.id) : '',
+    column_title: String(it.parent?.title || ''),
+  };
+}
 export async function trashRecording(env: Env, projectId: string, recordingId: string): Promise<void> {
   await bcFetch(env, `/buckets/${projectId}/recordings/${recordingId}/status/trashed.json`, { method: 'PUT' });
 }

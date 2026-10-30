@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, X } from 'lucide-react';
+import { Download, Trash2, X } from 'lucide-react';
 import type { MediaInfo } from '../mediaEmbed';
 
 // نافذة استعراض عائمة فوق المحتوى: صور/فيديو/صوت/PDF مباشرةً، مع أزرار تنزيل وإغلاق.
-export function MediaViewer({ media, onClose }: { media: MediaInfo; onClose: () => void }) {
+// و«حذف» حين يُفتح من محررٍ قابل للتعديل: يُزال الوسيط من المحتوى ليُرفق غيره مكانه.
+export function MediaViewer({ media, onClose, onDelete }: { media: MediaInfo; onClose: () => void; onDelete?: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
@@ -28,6 +29,11 @@ export function MediaViewer({ media, onClose }: { media: MediaInfo; onClose: () 
           <a className="btn" href={`${url}?download=1`} download={name}>
             <Download size={20} /> تنزيل
           </a>
+          {onDelete && (
+            <button className="btn danger" onClick={() => { onDelete(); onClose(); }}>
+              <Trash2 size={20} /> حذف
+            </button>
+          )}
           <button className="btn ghost" onClick={onClose}>
             <X size={20} /> إغلاق
           </button>

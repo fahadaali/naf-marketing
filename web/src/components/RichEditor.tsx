@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { Bold, Italic, Underline, Heading2, Quote, List, ListOrdered, RemoveFormatting, Paperclip } from 'lucide-react';
 import { mediaEmbedHtml, mediaFromEl, type MediaInfo } from '../mediaEmbed';
 
-export type RichEditorHandle = { insertHtml: (html: string) => void; focus: () => void };
+export type RichEditorHandle = { insertHtml: (html: string) => void; focus: () => void; removeMedia: (id: string) => void };
 
 type UploadResult = { id: string; url?: string; filename?: string; mime_type?: string } | null;
 
@@ -65,7 +65,24 @@ const RichEditor = forwardRef<
     onChange(editor.innerHTML);
   }
 
-  useImperativeHandle(ref, () => ({ focus: () => el.current?.focus(), insertHtml }));
+  /* حذف وسيطٍ من المحتوى — من نافذة الاستعراض. البطاقة غير قابلة للتحرير
+     (`contenteditable="false"`)، فلم يكن لحذفها طريقٌ واضح، ولا لاستبدالها:
+     يُحذف ثم يُرفق غيره في الموضع نفسه، فالمؤشر يوضع حيث كانت. والملف يبقى
+     في مكتبة الوسائط؛ ما يُحذف موضعه في هذا المحتوى. */
+  function removeMedia(id: string) {
+    const editor = el.current;
+    if (!editor) return;
+    const target = Array.from(editor.querySelectorAll<HTMLElement>('.media-embed')).find((n) => n.dataset.mediaId === id);
+    if (!target) return;
+    const at = document.createRange();
+    at.setStartBefore(target);
+    at.collapse(true);
+    target.remove();
+    savedRange.current = at;
+    onChange(editor.innerHTML);
+  }
+
+  useImperativeHandle(ref, () => ({ focus: () => el.current?.focus(), insertHtml, removeMedia }));
 
   /* عدّة ملفات في اختيارٍ واحد — أربع صورٍ لمنشورٍ واحد لا تُرفع واحدةً
      واحدة. تُرفع بالترتيب الذي اختيرت به، وكلٌّ يُدرج بعد سابقه فيبقى

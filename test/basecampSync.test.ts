@@ -34,6 +34,7 @@ vi.mock('../src/services/basecamp', () => ({
   getProjectPeople: vi.fn(async () => [{ id: 11, sgid: 'sg_11', name: 'أ' }, { id: 12, sgid: 'sg_12', name: 'ب' }]),
   createComment: vi.fn(async () => 'cm_1'),
   lastActor: vi.fn(async () => null),
+  getCard: vi.fn(),
 }));
 vi.mock('../src/services/notify', () => ({
   notifyUsers: vi.fn(), usersWithPermission: vi.fn(async () => []), notifyStageReached: vi.fn(async () => {}),
@@ -41,6 +42,7 @@ vi.mock('../src/services/notify', () => ({
 
 import {
   syncPost, reconcileStages, findOrphanCards, resyncAll, syncCardCommentsForPost, trashOrphanCards, pullCardChanges, cardContentToBody,
+  pullCardForPost, refreshCardFormat, CARD_FORMAT,
 } from '../src/services/basecampSync';
 import * as basecamp from '../src/services/basecamp';
 import * as notify from '../src/services/notify';
@@ -386,6 +388,85 @@ describe('السحب العكسي: ما جرى في بيسكامب يصل الم
     await syncPost(env, 'p1');
     expect(db.prepare("SELECT card_content FROM basecamp_tasks WHERE post_id = 'p1'").get().card_content)
       .toBe('<div>كما صاغه بيسكامب</div>');
+  });
+});
+
+describe('سحب بطاقة المنشور حين يُفتح', () => {
+  function seedTracked(status: string, format = CARD_FORMAT) {
+    db.prepare("INSERT INTO content_posts (id,title,body,status,author_id) VALUES ('p1','عنوان','<p>نص</p>',?,'usr_1')").run(status);
+    db.prepare(
+      `INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage,updated_at,card_title,card_content,card_format)
+       VALUES ('p1','card_1',?,?,'2026-01-01T00:00:00Z','عنوان','<div>نص</div>',?)`,
+    ).run(`col_${status}`, status, format);
+  }
+  const card = (over: Record<string, unknown> = {}) => ({
+    id: 'card_1', title: 'عنوان', app_url: '', created_at: '', content: '<div>نص</div>',
+    column_id: 'col_approved', column_title: 'approved', ...over,
+  });
+  const post = () => db.prepare("SELECT title, body, status FROM content_posts WHERE id = 'p1'").get();
+
+  it('نقلُ البطاقة في بيسكامب يظهر بفتح المنشور — بنداءٍ واحد لا بقراءة الأعمدة', async () => {
+    seedTracked('pending_gm');
+    vi.mocked(basecamp.getCard).mockResolvedValue(card());
+    expect(await pullCardForPost(env, 'p1')).toEqual({ moved: true, edited: false });
+    expect(post().status).toBe('approved');
+    expect(basecamp.getColumns).not.toHaveBeenCalled();
+    expect(basecamp.listCards).not.toHaveBeenCalled();
+  });
+
+  it('عمودٌ أنشأه المدير بيده يُعرف باسمه', async () => {
+    seedTracked('draft');
+    vi.mocked(basecamp.getCard).mockResolvedValue(card({ column_id: 'col_manual', column_title: 'بانتظار اعتماد قسم التسويق' }));
+    expect((await pullCardForPost(env, 'p1')).moved).toBe(true);
+    expect(post().status).toBe('pending_marketing');
+  });
+
+  it('النصّ المعدّل في بيسكامب يعود بأسطره وغامقه', async () => {
+    seedTracked('draft');
+    vi.mocked(basecamp.getCard).mockResolvedValue(card({
+      column_id: 'col_draft', column_title: 'draft', content: '<div><strong>عنوان</strong><br><br>- أولى<br>- ثانية</div><ol><li>أ</li></ol>',
+    }));
+    expect(await pullCardForPost(env, 'p1')).toEqual({ moved: false, edited: true });
+    expect(post().body).toBe('<p><strong>عنوان</strong><br><br>- أولى<br>- ثانية</p><ol><li>أ</li></ol>');
+  });
+
+  it('عمودٌ يتعذّر قراءته في السحب الدوري لا يُسقط ما بعده', async () => {
+    seedTracked('draft');
+    vi.mocked(basecamp.getCardTableId).mockResolvedValue('ct_1');
+    vi.mocked(basecamp.getColumns).mockResolvedValue(STAGES.map((s) => ({ id: `col_${s}`, title: s })));
+    vi.mocked(basecamp.listCards).mockImplementation(async (_e, _p, c) => {
+      if (c === 'col_draft') throw new Error('Too many subrequests');
+      return c === 'col_approved' ? [card()] : [];
+    });
+    expect((await pullCardChanges(env)).moved).toBe(1);
+    expect(post().status).toBe('approved');
+  });
+});
+
+describe('وصف البطاقة بوسوم بيسكامب', () => {
+  it('الغامق يُرسل <strong> والأسطر <br> — كان <b> يُحذف فيضيع', async () => {
+    seedPost('p1', 'سطر<div><b>غامق</b></div><div><br></div><div>- شرطة</div>');
+    await syncPost(env, 'p1');
+    expect(vi.mocked(basecamp.createCard).mock.calls[0][3].content).toBe('<div>سطر<br><strong>غامق</strong><br><br>- شرطة</div>');
+  });
+
+  it('البطاقات بالصيغة القديمة يُعاد إرسال وصفها — إلا ما عُدّل في بيسكامب ولم يُسحب', async () => {
+    db.prepare("INSERT INTO content_posts (id,title,body,status,author_id) VALUES ('p1','عنوان','<p><b>غامق</b></p>','draft','usr_1'), ('p2','عنوان','<p>ب</p>','draft','usr_1')").run();
+    db.prepare(
+      `INSERT INTO basecamp_tasks (post_id,todo_id,list_id,stage,updated_at,card_title,card_content)
+       VALUES ('p1','card_1','col_draft','draft','2026-01-01T00:00:00Z','عنوان','<div>غامق</div>'),
+              ('p2','card_2','col_draft','draft','2026-01-01T00:00:00Z','عنوان','<div>ب</div>')`,
+    ).run();
+    vi.mocked(basecamp.getCard).mockImplementation(async (_e, _p, id) => ({
+      id, title: 'عنوان', app_url: '', created_at: '', column_id: 'col_draft', column_title: 'draft',
+      content: id === 'card_1' ? '<div>غامق</div>' : '<div>ب عُدّل في بيسكامب</div>',
+    }));
+    expect(await refreshCardFormat(env)).toBe(1);
+    expect(basecamp.updateCard).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(basecamp.updateCard).mock.calls[0][2]).toBe('card_1');
+    expect(vi.mocked(basecamp.updateCard).mock.calls[0][3].content).toBe('<div><strong>غامق</strong></div>');
+    expect(db.prepare("SELECT card_format FROM basecamp_tasks WHERE post_id = 'p1'").get().card_format).toBe(CARD_FORMAT);
+    expect(db.prepare("SELECT card_format FROM basecamp_tasks WHERE post_id = 'p2'").get().card_format).toBe(0);
   });
 });
 

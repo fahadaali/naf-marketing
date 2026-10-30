@@ -3,13 +3,14 @@ import { newId } from '../util';
 import {
   isConfigured, setting, getMgmtProjectId, getCardTableId, getColumns, createColumn,
   getProjectPeopleIds, createCard, updateCard, moveCard, trashRecording, createAttachment, getComments, listCards,
-  getProjectPeople, createComment, lastActor, type CardSnapshot, type BcCard,
+  getProjectPeople, createComment, lastActor, getCard, type CardSnapshot, type BcCard,
 } from './basecamp';
 import { escapeHtml } from './inline';
 import { notifyStageReached, notifyUsers, usersWithPermission } from './notify';
 import { isIdeaRow } from './planning';
 import { snapshotVersion } from './versions';
 import { normalizeBody, nowIso } from '../util';
+import { bodyLines, linesToBasecamp } from '../richText';
 
 // مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
 
@@ -78,20 +79,23 @@ async function ensureMediaSgid(env: Env, mediaId: string): Promise<string | null
   }
 }
 
-// وصف المهمة: نص المحتوى مع الوسائط مضمّنة كمرفقات بيسكامب
+/* وصف البطاقة: نصّ المحتوى بوسوم بيسكامب وحدها، والوسائط مرفقاتٌ في مواضعها.
+   كان يُرسل HTML المحرر بعد استبدال وسمين، فيحذف بيسكامب ما لا يعرفه: `<b>`
+   الذي يكتبه زرّ «غامق»، والأسطر الملصوقة بتنسيق `white-space` — ثم يعود
+   النصّ منه بلا غامقٍ ولا أسطر. والآن يُبنى من أسطر المحرر نفسها
+   (`richText.ts`)، فما يُرى في المحرر سطراً يظهر في بيسكامب سطراً. */
 async function buildDescription(env: Env, body: string): Promise<string> {
-  const { text, blocks } = scanMediaEmbeds(body || '');
-  let html = text
-    .replace(/<\/?(u|ins)>/gi, '')
-    .replace(/<h2(\s[^>]*)?>/gi, '<h1>').replace(/<\/h2>/gi, '</h1>')
-    .replace(/<p(\s[^>]*)?>/gi, '<div>').replace(/<\/p>/gi, '</div>');
-  for (const b of blocks) {
-    let replacement: string;
-    const sgid = b.id ? await ensureMediaSgid(env, b.id) : null;
-    if (sgid) replacement = `<bc-attachment sgid="${sgid}" caption="${b.name}"></bc-attachment>`;
-    else replacement = `<div>مرفق: ${b.name || ''}</div>`;
-    html = html.replace(b.token, replacement);
+  const lines = bodyLines(body || '');
+  const sgids = new Map<string, string | null>();
+  for (const l of lines) {
+    if (l.kind === 'embed' && l.id && !sgids.has(l.id)) sgids.set(l.id, await ensureMediaSgid(env, l.id));
   }
+  const html = linesToBasecamp(lines, (e) => {
+    const sgid = e.id ? sgids.get(e.id) : null;
+    return sgid
+      ? `<bc-attachment sgid="${escapeHtml(sgid)}" caption="${escapeHtml(e.name)}"></bc-attachment>`
+      : `<div>مرفق: ${escapeHtml(e.name || '')}</div>`;
+  });
   return html || '<div></div>';
 }
 
@@ -169,7 +173,7 @@ export async function syncPost(env: Env, postId: string, opts: SyncOpts = {}): P
   }
   // حدّث محتوى البطاقة وتاريخها ومسؤوليها
   await touchTask(env, postId);
-  await saveSnapshot(env, postId, await updateCard(env, projectId, map.todo_id, input));
+  await saveSnapshot(env, postId, await updateCard(env, projectId, map.todo_id, input), CARD_FORMAT);
 }
 
 /* الكتابةُ في البطاقة تُعلَّم قبل أن تبدأ ثم يُحفظ ما ردّه بيسكامب بعدها. وبينهما
@@ -179,12 +183,16 @@ async function touchTask(env: Env, postId: string): Promise<void> {
   await env.DB.prepare("UPDATE basecamp_tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?")
     .bind(postId).run();
 }
-async function saveSnapshot(env: Env, postId: string, snap: CardSnapshot | void): Promise<void> {
+async function saveSnapshot(env: Env, postId: string, snap: CardSnapshot | void, format?: number): Promise<void> {
   if (!snap) return;
   await env.DB.prepare(
-    "UPDATE basecamp_tasks SET card_title = ?, card_content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?",
-  ).bind(snap.title, snap.content, postId).run();
+    `UPDATE basecamp_tasks SET card_title = ?, card_content = ?, card_format = COALESCE(?, card_format),
+       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?`,
+  ).bind(snap.title, snap.content, format ?? null, postId).run();
 }
+
+/** صيغة الوصف الحالية — انظر الهجرة 0052. */
+export const CARD_FORMAT = 1;
 
 type SyncRow = { id: string; title: string; body: string; status: string; planned_on: string | null; updated_at?: string | null };
 
@@ -225,9 +233,9 @@ async function createTrackedCard(env: Env, projectId: string, post: SyncRow, opt
   const card = await createCard(env, projectId, columnId, input);
   const cardId = card.id;
   await env.DB.prepare(
-    `UPDATE basecamp_tasks SET todo_id = ?, list_id = ?, stage = ?, card_title = ?, card_content = ?,
+    `UPDATE basecamp_tasks SET todo_id = ?, list_id = ?, stage = ?, card_title = ?, card_content = ?, card_format = ?,
        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE post_id = ?`,
-  ).bind(cardId, columnId, post.status, card.title, card.content, post.id).run();
+  ).bind(cardId, columnId, post.status, card.title, card.content, CARD_FORMAT, post.id).run();
 
   const now = await env.DB.prepare('SELECT id, title, body, status, planned_on, updated_at FROM content_posts WHERE id = ?')
     .bind(post.id).first<SyncRow>();
@@ -247,7 +255,7 @@ async function createTrackedCard(env: Env, projectId: string, post: SyncRow, opt
   }
   if (now.updated_at !== post.updated_at || now.title !== post.title || now.body !== post.body) {
     await touchTask(env, post.id);
-    await saveSnapshot(env, post.id, await updateCard(env, projectId, cardId, await cardInput(env, projectId, now)));
+    await saveSnapshot(env, post.id, await updateCard(env, projectId, cardId, await cardInput(env, projectId, now)), CARD_FORMAT);
   }
 }
 
@@ -278,7 +286,9 @@ async function announceStage(env: Env, projectId: string, cardId: string, postId
 /* تصحيحٌ دوري: بطاقةٌ مرحلتُها غير حالة منشورها تُزامَن. فالنشر في موعده يجعل
    المنشور «منشوراً» من المهمة المجدولة لا من طلبٍ يزامن، فكانت بطاقته تبقى في
    «مجدول للنشر» حتى يُعدَّل المنشور. وكل مزامنةٍ فاتت لأي سبب تُدرَك هنا. */
-export async function reconcileStages(env: Env, limit = 10): Promise<number> {
+/* ثلاثٌ في الدورة لا عشر: كل مزامنةٍ نحو خمسة طلبات، وعشرٌ تستنفد وحدها حصّة
+   الدورة كلّها (خمسون) فيسقط ما بعدها صامتاً. وما بقي تدركه الدورة التالية. */
+export async function reconcileStages(env: Env, limit = 3): Promise<number> {
   const { results } = await env.DB.prepare(
     `SELECT p.id FROM content_posts p JOIN basecamp_tasks t ON t.post_id = p.id
      WHERE t.todo_id IS NOT NULL AND t.stage IS NOT p.status
@@ -286,6 +296,29 @@ export async function reconcileStages(env: Env, limit = 10): Promise<number> {
   ).bind(limit).all<{ id: string }>();
   for (const r of results) await syncPostSafe(env, r.id);
   return results.length;
+}
+
+/* بطاقاتٌ كُتب وصفها بالصيغة القديمة — بوسوم المحرر التي حذف بيسكامب منها
+   الغامق والأسطر — يُعاد إرسال وصفها بالصيغة الحالية، اثنتان في الدورة.
+   وبلا ذلك تبقى في بيسكامب ناقصةً، وأيُّ تعديلٍ فيها يسحب النقص إلى المنصة.
+   والمؤرشف يُترك: لا يُقرأ ولا يُعدَّل. */
+export async function refreshCardFormat(env: Env, limit = 2): Promise<number> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return 0;
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, t.todo_id, t.card_title, t.card_content FROM content_posts p JOIN basecamp_tasks t ON t.post_id = p.id
+     WHERE t.todo_id IS NOT NULL AND t.card_format < ? AND t.stage IS p.status AND p.status != 'archived'
+     ORDER BY (p.status = 'published'), p.updated_at DESC LIMIT ?`,
+  ).bind(CARD_FORMAT, limit).all<{ id: string; todo_id: string; card_title: string | null; card_content: string | null }>();
+  let done = 0;
+  for (const r of results) {
+    // بطاقةٌ عُدّلت في بيسكامب ولم يُسحب تعديلها بعد لا يُكتب فوقها — السحب أولاً
+    const card = await getCard(env, projectId, r.todo_id).catch(() => null);
+    if (!card || card.title !== r.card_title || (card.content ?? '') !== r.card_content) continue;
+    await syncPostSafe(env, r.id, { announce: false });
+    done++;
+  }
+  return done;
 }
 
 /* ═══ السحب العكسي: ما جرى في بيسكامب يصل المنصة ═══
@@ -307,42 +340,90 @@ type TrackedRow = {
   card_title: string | null; card_content: string | null; status: string; title: string; body: string;
 };
 
-export async function pullCardChanges(env: Env): Promise<{ moved: number; edited: number }> {
-  const projectId = await getMgmtProjectId(env);
-  if (!projectId) return { moved: 0, edited: 0 };
-  const rows = (await env.DB.prepare(
-    `SELECT t.post_id, t.todo_id, t.list_id, t.stage, t.updated_at AS task_updated_at, t.card_title, t.card_content,
-            p.status, p.title, p.body
-     FROM basecamp_tasks t JOIN content_posts p ON p.id = t.post_id WHERE t.todo_id IS NOT NULL`,
-  ).all<TrackedRow>()).results;
-  if (!rows.length) return { moved: 0, edited: 0 };
-  const byCard = new Map(rows.map((r) => [String(r.todo_id), r]));
+const TRACKED_SQL =
+  `SELECT t.post_id, t.todo_id, t.list_id, t.stage, t.updated_at AS task_updated_at, t.card_title, t.card_content,
+          p.status, p.title, p.body
+   FROM basecamp_tasks t JOIN content_posts p ON p.id = t.post_id WHERE t.todo_id IS NOT NULL`;
 
-  // العمود ← مرحلته: باسمه أولاً، ثم بالمعرّف المحفوظ لمن أُعيدت تسميته
-  const cardTableId = await getCardTableId(env, projectId);
-  const cols = await getColumns(env, projectId, cardTableId);
+/** العمود ← مرحلته: بالمعرّف المحفوظ، ثم باسمه لمن أنشأه المدير بيده. */
+async function stageMap(env: Env, cols: { id: string; title: string }[]): Promise<Map<string, string>> {
   const cache: Record<string, string> = JSON.parse((await setting(env, 'basecamp_stage_cols')) || '{}');
   const stageOf = new Map<string, string>();
   for (const [stage, colId] of Object.entries(cache)) stageOf.set(String(colId), stage);
   for (const c of cols) {
-    const stage = Object.keys(STAGE_LIST).find((s) => STAGE_LIST[s].trim() === c.title.trim());
+    const stage = stageByTitle(c.title);
     if (stage) stageOf.set(c.id, stage);
   }
+  return stageOf;
+}
+const stageByTitle = (title: string) => Object.keys(STAGE_LIST).find((s) => STAGE_LIST[s].trim() === title.trim());
 
-  const settled = new Date(Date.now() - WRITE_SETTLE_MS).toISOString().replace(/\.\d{3}Z$/, 'Z');
+const settledCutoff = () => new Date(Date.now() - WRITE_SETTLE_MS).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+/* البطاقة الواحدة: العمود أولاً ثم النصّ، كلٌّ في محاولته. كان النصّ قبله في
+   محاولةٍ واحدة، فنصٌّ يتعذّر سحبه — سجلّ أحداثٍ لا يُقرأ — يُسقط النقلَ معه
+   فلا تتبع المرحلةُ البطاقة أبداً. */
+async function pullCard(env: Env, projectId: string, row: TrackedRow, card: BcCard, columnId: string, stageOf: Map<string, string>) {
+  let moved = false;
+  let edited = false;
+  try { moved = await pullStage(env, projectId, row, columnId, stageOf); } catch { /* يُعاد في الدورة التالية */ }
+  try { edited = await pullText(env, projectId, row, card, settledCutoff()); } catch { /* كذلك */ }
+  return { moved, edited };
+}
+
+export async function pullCardChanges(env: Env): Promise<{ moved: number; edited: number }> {
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return { moved: 0, edited: 0 };
+  const rows = (await env.DB.prepare(TRACKED_SQL).all<TrackedRow>()).results;
+  if (!rows.length) return { moved: 0, edited: 0 };
+  const byCard = new Map(rows.map((r) => [String(r.todo_id), r]));
+
+  const cardTableId = await getCardTableId(env, projectId);
+  const cols = await getColumns(env, projectId, cardTableId);
+  const stageOf = await stageMap(env, cols);
+
   let moved = 0;
   let edited = 0;
   for (const col of cols) {
-    for (const card of await listCards(env, projectId, col.id)) {
+    // عمودٌ يتعذّر قراءته لا يُسقط ما بعده — كان خطأٌ واحد يوقف السحب كلّه
+    let cards: BcCard[];
+    try { cards = await listCards(env, projectId, col.id); } catch { continue; }
+    for (const card of cards) {
       const row = byCard.get(card.id);
       if (!row) continue;
-      try {
-        if (await pullText(env, projectId, row, card, settled)) edited++;
-        if (await pullStage(env, projectId, row, card.column_id || col.id, stageOf)) moved++;
-      } catch { /* بطاقةٌ تتعذّر لا توقف غيرها */ }
+      const r = await pullCard(env, projectId, row, card, card.column_id || col.id, stageOf);
+      if (r.moved) moved++;
+      if (r.edited) edited++;
     }
   }
   return { moved, edited };
+}
+
+/* سحبُ بطاقة منشورٍ واحد حين يُفتح أو يُطلب تحديثه — نداءٌ واحد لبيسكامب.
+   السحبُ الدوري يقرأ الأعمدة كلّها ويشارك غيره حصّة الدورة من الطلبات،
+   فقد يتأخّر أو يسقط؛ وهذا يضمن أن ما يراه من فتح المنشور هو ما في بيسكامب. */
+export async function pullCardForPost(env: Env, postId: string): Promise<{ moved: boolean; edited: boolean }> {
+  const none = { moved: false, edited: false };
+  if (!(await isConfigured(env))) return none;
+  const projectId = await getMgmtProjectId(env);
+  if (!projectId) return none;
+  const row = await env.DB.prepare(`${TRACKED_SQL} AND t.post_id = ?`).bind(postId).first<TrackedRow>();
+  if (!row) return none;
+  const card = await getCard(env, projectId, row.todo_id);
+  const stageOf = await stageMap(env, []);
+  const titled = stageByTitle(card.column_title);
+  if (titled && card.column_id) stageOf.set(card.column_id, titled);
+  return pullCard(env, projectId, row, card, card.column_id || row.list_id || '', stageOf);
+}
+
+/** غلافٌ لفتح المنشور: لا يؤخّره أكثر من مهلته، ولا يعطّله خطأ. */
+export async function pullCardForPostSafe(env: Env, postId: string, timeoutMs = 4000): Promise<void> {
+  try {
+    await Promise.race([
+      pullCardForPost(env, postId),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  } catch { /* السحب زيادة: المنشور يُعرض بما في المنصة */ }
 }
 
 async function userByEmail(env: Env, email: string): Promise<{ id: string; name: string } | null> {
@@ -612,11 +693,22 @@ async function syncCommentsForCard(env: Env, projectId: string, postId: string, 
   return added;
 }
 
-// ربط عكسي: يجلب تعليقات كل بطاقة مرتبطة بمحتوى (مزامنة دورية شاملة)
-export async function syncCardComments(env: Env): Promise<void> {
+/* ربط عكسي: تعليقات البطاقات → ملاحظات المنشورات.
+
+   كان يسأل بيسكامب عن كل بطاقةٍ في كل دورة — طلبٌ لكلٍّ منها — فمئةُ بطاقةٍ
+   تتجاوز حصّة الدورة (خمسون) وحدها، ويسقط ما بعدها صامتاً مع ما يشاركها
+   الدورة. فالآن عددٌ معلوم في الدورة: ما لم يُنشر ولم يُؤرشف أولاً، ثم
+   المنشور حديثاً، وبترتيبٍ عشوائي فتمرّ الدورات عليها كلّها. والمنشور
+   الواحد يُسحب كاملاً حين يُفتح أو يُطلب تحديثه (`syncCardCommentsForPost`). */
+export async function syncCardComments(env: Env, limit = 10): Promise<void> {
   const projectId = await getMgmtProjectId(env);
   if (!projectId) return;
-  const tasks = (await env.DB.prepare('SELECT post_id, todo_id FROM basecamp_tasks WHERE todo_id IS NOT NULL').all<{ post_id: string; todo_id: string }>()).results;
+  const tasks = (await env.DB.prepare(
+    `SELECT t.post_id, t.todo_id FROM basecamp_tasks t JOIN content_posts p ON p.id = t.post_id
+     WHERE t.todo_id IS NOT NULL AND p.status != 'archived'
+       AND (p.status != 'published' OR p.updated_at > strftime('%Y-%m-%dT%H:%M:%SZ','now','-14 days'))
+     ORDER BY (p.status = 'published'), RANDOM() LIMIT ?`,
+  ).bind(limit).all<{ post_id: string; todo_id: string }>()).results;
   for (const t of tasks) {
     await syncCommentsForCard(env, projectId, t.post_id, t.todo_id);
   }
@@ -626,7 +718,8 @@ export async function syncCardCommentsSafe(env: Env): Promise<void> {
     if (await isConfigured(env)) {
       // ما جرى في بيسكامب أولاً: التصحيح الدوري بعده يقرأ المراحل وقد استقرت
       try { await pullCardChanges(env); } catch { /* لا يعطّل ما بعده */ }
-      await reconcileStages(env);
+      try { await reconcileStages(env); } catch { /* */ }
+      try { await refreshCardFormat(env); } catch { /* */ }
       await syncCardComments(env);
     }
   } catch { /* */ }
