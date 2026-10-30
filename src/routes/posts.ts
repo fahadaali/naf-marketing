@@ -6,7 +6,7 @@ import { hasPermission } from '../permissions';
 import { newId, nowIso, normalizeBody } from '../util';
 import { generateText } from '../services/claude';
 import { transition, type Action } from '../services/workflow';
-import { syncPostSafe, trashPostTaskSafe } from '../services/basecampSync';
+import { syncPostSafe, trashPostTaskSafe, pullCardForPostSafe } from '../services/basecampSync';
 import { notifyStageReached } from '../services/notify';
 import { snapshotVersion } from '../services/versions';
 import { logAudit } from '../services/audit';
@@ -139,6 +139,9 @@ postRoutes.get('/queue', requirePermission('content.review'), async (c) => {
 // تفاصيل منشور + النسخ + سجل الموافقات
 postRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
+  /* ما جرى على بطاقته في بيسكامب — نقلٌ بين الأعمدة أو تعديلُ نصّ — يُسحب قبل
+     العرض، فلا ينتظر من فتحه الدورة التالية. ولا يؤخّر الفتح أكثر من مهلته. */
+  await pullCardForPostSafe(c.env, id);
   const post = await c.env.DB.prepare(
     `SELECT p.*, u.name AS author_name, ua.name AS assignee_name, cm.name AS campaign_name
      FROM content_posts p LEFT JOIN users u ON u.id = p.author_id

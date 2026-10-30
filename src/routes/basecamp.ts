@@ -10,7 +10,7 @@ import {
   exchangeCode,
 } from '../services/basecamp';
 import { buildReportWorkbook, uploadWeeklyReport, uploadMonthlyReport, sheetsToCsv, type ReportPeriod } from '../services/report';
-import { resyncAll, syncCardComments, syncCardCommentsForPost, findOrphanCards, trashOrphanCards } from '../services/basecampSync';
+import { resyncAll, syncCardComments, syncCardCommentsForPost, findOrphanCards, trashOrphanCards, pullCardForPost } from '../services/basecampSync';
 import { logAudit } from '../services/audit';
 
 // أيقونة CircleCheck من Lucide حرفياً — الصفحة HTML خام من الخادم لا React،
@@ -166,8 +166,10 @@ basecampRoutes.post('/sync-comments', async (c) => {
   const body = await c.req.json<{ post_id?: string }>().catch(() => ({} as { post_id?: string }));
   try {
     if (body.post_id) {
+      // زرّ التحديث في المحرر: العمود والنصّ مع التعليقات
+      const pulled = await pullCardForPost(c.env, body.post_id).catch(() => ({ moved: false, edited: false }));
       const count = await syncCardCommentsForPost(c.env, body.post_id);
-      return c.json({ ok: true, count });
+      return c.json({ ok: true, count, ...pulled });
     }
     await syncCardComments(c.env);
     return c.json({ ok: true });

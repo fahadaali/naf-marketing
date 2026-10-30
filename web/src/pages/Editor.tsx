@@ -167,9 +167,21 @@ export default function Editor() {
     if (!pid) return;
     setSyncingNotes(true);
     try {
-      await api.post('/basecamp/sync-comments', { post_id: pid });
+      const r = await api.post('/basecamp/sync-comments', { post_id: pid });
       const d = await api.get(`/posts/${pid}`);
       setNotes(d.notes || []);
+      /* نُقلت البطاقة أو عُدّل نصّها في بيسكامب: تُعرض المرحلة الجديدة دائماً،
+         والنصّ الجديد ما لم يكن في المحرر تعديلٌ لم يُحفظ — لا يُكتب فوقه. */
+      if (r?.moved || r?.edited) {
+        setStatus(d.post.status);
+        setRejectReason(d.post.reject_reason || '');
+        setApprovals(d.approvals);
+        if (body === savedBody) {
+          setTitle(d.post.title);
+          setBody(upgradeVideoEmbeds(d.post.body));
+          setSavedBody(d.post.body);
+        }
+      }
     } catch { /* تُتجاهل — قد لا يكون بيسكامب مضبوطاً */ }
     finally { setSyncingNotes(false); }
   }
@@ -184,7 +196,10 @@ export default function Editor() {
     // تحويل خبر إلى مسودة: يأتي عبر ?news=<id>&title=&body=
     if (!id && sp.get('news')) {
       setTitle(sp.get('title') || '');
-      setBody(sp.get('body') || '');
+      /* نصّ الخبر مجرّد: أسطره محارفُ سطرٍ لا يرسمها المحرر فتلتصق فيه، وتُنشر
+         أسطراً — فيُكتب أسطراً كما يُكتب ما يولّده الذكاء الاصطناعي. */
+      const plain = sp.get('body') || '';
+      setBody(plain ? `<p>${plain.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>')}</p>` : '');
     }
   }, [id]);
 
@@ -774,7 +789,13 @@ export default function Editor() {
           onResult={(m) => { editorRef.current?.insertHtml(mediaEmbedHtml(m)); setShowAIMedia(false); }}
         />
       )}
-      {viewer && <MediaViewer media={viewer} onClose={() => setViewer(null)} />}
+      {viewer && (
+        <MediaViewer
+          media={viewer}
+          onClose={() => setViewer(null)}
+          onDelete={readOnly ? undefined : () => editorRef.current?.removeMedia(viewer.id)}
+        />
+      )}
       {showVersions && postId && (
         <VersionsModal
           versions={versions}
