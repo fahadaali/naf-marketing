@@ -590,6 +590,10 @@ h3, h4 { letter-spacing: -0.01em; }
   display: block; height: calc(var(--spacing) * 28); width: auto; max-width: 100%;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); object-fit: contain;
 }
+/* المصغّرة زرٌّ يفتح نافذة الاستعراض — بلا شكل الزرّ، وتركيزه ظاهر */
+.pv-open { display: block; padding: 0; border: 0; background: none; cursor: pointer; border-radius: var(--radius); }
+.pv-open:hover .pv-thumb { border-color: var(--ring); }
+.pv-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .pv-file { display: grid; place-items: center; padding: var(--space-2); font-size: var(--text-xs); color: var(--muted-foreground); }
 .pv-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .pv-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }

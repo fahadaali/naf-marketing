@@ -480,3 +480,41 @@ describe('نصّ البطاقة ← نصّ المنشور', () => {
     expect(body).toBe(`<p>قبل</p>${block}<p>بعد </p><p>مرفق: جديد.pdf</p>`);
   });
 });
+
+describe('تصميم كل منصة في البطاقة', () => {
+  function seedVariant(platform: string, mediaId: string, filename: string) {
+    db.prepare("INSERT INTO media_assets (id,r2_key,mime_type,filename,basecamp_sgid) VALUES (?,?,?,?,?)")
+      .run(mediaId, `k/${mediaId}`, 'image/png', filename, `sg_${mediaId}`);
+    db.prepare('INSERT INTO post_variants (id,post_id,platform,media_asset_id) VALUES (?,?,?,?)')
+      .run(`var_${platform}`, 'p1', platform, mediaId);
+  }
+
+  it('التصميم المرفوع لمنصةٍ يُلحق بعد النصّ باسم منصته', async () => {
+    seedPost('p1', '<p>نص</p>');
+    seedVariant('linkedin', 'm_li', 'li.png');
+    seedVariant('x', 'm_x', 'x.png');
+    await syncPost(env, 'p1');
+    const content = vi.mocked(basecamp.createCard).mock.calls[0][3].content as string;
+    expect(content).toBe(
+      '<div>نص</div><h1>تصميم كل منصة</h1>'
+      + '<div><strong>لينكدإن</strong></div><bc-attachment sgid="sg_m_li" caption="li.png"></bc-attachment>'
+      + '<div><strong>إكس</strong></div><bc-attachment sgid="sg_m_x" caption="x.png"></bc-attachment>',
+    );
+  });
+
+  it('بلا تصميمٍ لمنصة: لا قسم', async () => {
+    seedPost('p1', '<p>نص</p>');
+    db.prepare("INSERT INTO post_variants (id,post_id,platform,body_override) VALUES ('v1','p1','x','نص إكس')").run();
+    await syncPost(env, 'p1');
+    expect(vi.mocked(basecamp.createCard).mock.calls[0][3].content).toBe('<div>نص</div>');
+  });
+
+  it('والقسم لا يعود إلى نصّ المنشور في السحب', async () => {
+    seedPost('p1', '<p>نص</p>');
+    seedVariant('x', 'm_x', 'x.png');
+    const body = await cardContentToBody(env,
+      '<div>نص معدّل</div><h1>تصميم كل منصة</h1><div><strong>إكس</strong></div><bc-attachment sgid="sg_m_x" caption="x.png"></bc-attachment>',
+      '<p>نص</p>');
+    expect(body).toBe('<p>نص معدّل</p>');
+  });
+});

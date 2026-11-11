@@ -11,6 +11,7 @@ import { isIdeaRow } from './planning';
 import { snapshotVersion } from './versions';
 import { normalizeBody, nowIso } from '../util';
 import { bodyLines, linesToBasecamp } from '../richText';
+import { customPlatformLabels, platformName } from '../platformLabels';
 
 // مزامنة المنشور مع مشروع «إدارة التسويق» في بيسكامب كبطاقة (Card) تتحرك عبر أعمدة مراحل الاعتماد.
 
@@ -84,7 +85,36 @@ async function ensureMediaSgid(env: Env, mediaId: string): Promise<string | null
    الذي يكتبه زرّ «غامق»، والأسطر الملصوقة بتنسيق `white-space` — ثم يعود
    النصّ منه بلا غامقٍ ولا أسطر. والآن يُبنى من أسطر المحرر نفسها
    (`richText.ts`)، فما يُرى في المحرر سطراً يظهر في بيسكامب سطراً. */
-async function buildDescription(env: Env, body: string): Promise<string> {
+/* ═══ تصميم كل منصة ═══
+   التصميم المرفوع لمنصةٍ بعينها («رفع بديل» في «نسخة كل منصة») يُحفظ في
+   `post_variants.media_asset_id` لا في نصّ المنشور، فكانت البطاقة لا تعرض إلا
+   ما في النصّ. فيُلحق بعد النصّ قسمٌ بعنوانه: اسم المنصة ثم تصميمها مرفقاً.
+   والقسم يُولَّد ولا يُحرَّر: السحب العكسي يقطع البطاقة عند عنوانه
+   (`cardContentToBody`)، فما كُتب تحته في بيسكامب لا يعود إلى المنصة. */
+export const VARIANT_SECTION_TITLE = 'تصميم كل منصة';
+const VARIANT_SECTION_HEAD = `<h1>${VARIANT_SECTION_TITLE}</h1>`;
+
+async function variantDesigns(env: Env, postId: string): Promise<string> {
+  const { results } = await env.DB.prepare(
+    `SELECT v.platform, v.media_asset_id, m.filename FROM post_variants v
+     LEFT JOIN media_assets m ON m.id = v.media_asset_id
+     WHERE v.post_id = ? AND v.media_asset_id IS NOT NULL ORDER BY v.platform`,
+  ).bind(postId).all<{ platform: string; media_asset_id: string; filename: string | null }>();
+  if (!results.length) return '';
+  const custom = await customPlatformLabels(env);
+  let out = VARIANT_SECTION_HEAD;
+  for (const r of results) {
+    const sgid = await ensureMediaSgid(env, r.media_asset_id);
+    const name = r.filename || '';
+    out += `<div><strong>${escapeHtml(platformName(r.platform, custom))}</strong></div>`;
+    out += sgid
+      ? `<bc-attachment sgid="${escapeHtml(sgid)}" caption="${escapeHtml(name)}"></bc-attachment>`
+      : `<div>مرفق: ${escapeHtml(name)}</div>`;
+  }
+  return out;
+}
+
+async function buildDescription(env: Env, body: string, postId?: string): Promise<string> {
   const lines = bodyLines(body || '');
   const sgids = new Map<string, string | null>();
   for (const l of lines) {
@@ -96,7 +126,8 @@ async function buildDescription(env: Env, body: string): Promise<string> {
       ? `<bc-attachment sgid="${escapeHtml(sgid)}" caption="${escapeHtml(e.name)}"></bc-attachment>`
       : `<div>مرفق: ${escapeHtml(e.name || '')}</div>`;
   });
-  return html || '<div></div>';
+  const designs = postId ? await variantDesigns(env, postId) : '';
+  return (html + designs) || '<div></div>';
 }
 
 async function computeDue(env: Env, postId: string): Promise<string | null> {
@@ -191,13 +222,14 @@ async function saveSnapshot(env: Env, postId: string, snap: CardSnapshot | void,
   ).bind(snap.title, snap.content, format ?? null, postId).run();
 }
 
-/** صيغة الوصف الحالية — انظر الهجرة 0052. */
-export const CARD_FORMAT = 1;
+/** صيغة الوصف الحالية — انظر الهجرة 0052. والثانية تُلحق «تصميم كل منصة»،
+ *  فترتفع لتُعاد كتابة البطاقات القائمة في `refreshCardFormat`. */
+export const CARD_FORMAT = 2;
 
 type SyncRow = { id: string; title: string; body: string; status: string; planned_on: string | null; updated_at?: string | null };
 
 async function cardInput(env: Env, projectId: string, post: SyncRow) {
-  const content = await buildDescription(env, post.body);
+  const content = await buildDescription(env, post.body, post.id);
   // الاستحقاق أقرب موعد نشر، وما لم يُجدول بعدُ فيومُه المستهدف
   const due_on = (await computeDue(env, post.id)) || post.planned_on || null;
   const assignee_ids = await getProjectPeopleIds(env, projectId);
@@ -537,6 +569,9 @@ async function bounceRejection(env: Env, projectId: string, row: TrackedRow): Pr
    سطراً كما يكتب buildDescription ما تعذّر رفعه. والتسطير يضيع: بيسكامب لا
    يعرفه فيُحذف عند الإرسال، فلا يعود. */
 export async function cardContentToBody(env: Env, content: string, currentBody: string): Promise<string> {
+  // قسم «تصميم كل منصة» مولَّدٌ من نسخ المنصات لا من النصّ — لا يعود إليه
+  const cut = (content || '').search(new RegExp(`<h1[^>]*>\\s*${VARIANT_SECTION_TITLE}\\s*</h1>`));
+  if (cut >= 0) content = content.slice(0, cut);
   const originals = new Map(scanMediaEmbeds(currentBody || '').blocks.map((b) => [b.id, b.raw]));
   const kept: string[] = [];
   const re = /<bc-attachment\b([^>]*?)(?:\/>|>([\s\S]*?)<\/bc-attachment>)/gi;
