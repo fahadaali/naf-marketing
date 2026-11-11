@@ -508,5 +508,9 @@ postRoutes.put('/:id/variants/:platform', requirePermission('draft.edit'), async
       generated, generated && from ? from : null, options,
     )
     .run();
+  // تصميم المنصة يظهر في بطاقة بيسكامب («تصميم كل منصة») — فتغيّره يُزامِنها
+  if ('media_asset_id' in b && pick('media_asset_id') !== (prev?.media_asset_id ?? null)) {
+    c.executionCtx.waitUntil(syncPostSafe(c.env, id));
+  }
   return c.json({ ok: true });
 });

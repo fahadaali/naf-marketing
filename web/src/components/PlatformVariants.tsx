@@ -12,6 +12,8 @@ import { api } from '../api';
 import { PlatformIcon, platformLabel } from '../platforms';
 import { uploadMedia } from '../mediaUpload';
 import PlatformOptions, { HAS_OPTIONS, type PlatformOptionsValue } from './PlatformOptions';
+import { MediaViewer } from './MediaViewer';
+import { mediaKind, type MediaInfo } from '../mediaEmbed';
 import { formatNumber, isolate } from '../lib/format';
 import {
   bodyMediaIds, platformMedia, needsAttention, ratioLabel, videoMode, isDocumentAsset,
@@ -75,6 +77,9 @@ export default function PlatformVariants({
   // حقل ملفٍ واحد للمنصات كلها — الزرّ يُركَّز بلوحة المفاتيح، والحقل مخفيّ
   const fileRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
+  /* المصغّرة تفتح نافذة الاستعراض كما يفتحها التصميم في المحرر. والحذف فيها
+     لتصميم المنصة وحده: يعود به الافتراضي. وتصميم المحتوى يُحذف من المحرر. */
+  const [viewer, setViewer] = useState<{ media: MediaInfo; platform: string | null } | null>(null);
 
   useEffect(() => {
     loadMediaSpecs().then(setSpecs);
@@ -336,15 +341,26 @@ export default function PlatformVariants({
                       const src = it.frame
                         ? `/api/media/${it.id}/adapted?platform=${encodeURIComponent(p)}`
                         : `/api/media/${it.id}`;
+                      const name = it.asset?.filename || '';
                       return (
                         <figure key={it.id} className="pv-item">
-                          {video ? (
-                            <video className="pv-thumb" src={`/api/media/${it.id}`} preload="metadata" muted playsInline />
-                          ) : mime.startsWith('image/') ? (
-                            <img className="pv-thumb" src={src} alt={it.asset?.filename || ''} loading="lazy" />
-                          ) : (
-                            <div className="pv-thumb pv-file">{it.asset?.filename || ''}</div>
-                          )}
+                          <button
+                            type="button"
+                            className="pv-open"
+                            aria-label={`معاينة ${name}`.trim()}
+                            onClick={() => setViewer({
+                              media: { id: it.id, url: `/api/media/${it.id}`, name, mime, kind: mediaKind(mime, name) },
+                              platform: plan.source === 'variant' ? p : null,
+                            })}
+                          >
+                            {video ? (
+                              <video className="pv-thumb" src={`/api/media/${it.id}`} preload="metadata" muted playsInline />
+                            ) : mime.startsWith('image/') ? (
+                              <img className="pv-thumb" src={src} alt={name} loading="lazy" />
+                            ) : (
+                              <div className="pv-thumb pv-file">{name}</div>
+                            )}
+                          </button>
                           <figcaption className="pv-badges">
                             {it.frame ? (
                               <span className="badge blue">مُكيّفة إلى <bdi>{ratioLabel(it.frame)}</bdi></span>
@@ -404,6 +420,13 @@ export default function PlatformVariants({
             );
           })}
         </div>
+      )}
+      {viewer && (
+        <MediaViewer
+          media={viewer.media}
+          onClose={() => setViewer(null)}
+          onDelete={viewer.platform ? () => resetMedia(viewer.platform as string) : undefined}
+        />
       )}
     </div>
   );
