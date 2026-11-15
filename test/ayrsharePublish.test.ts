@@ -305,6 +305,27 @@ describe('النشر عبر Ayrshare', () => {
     expect(row(db, 'sch_p5_x').error).toMatch(/مفتاحَي تطبيق المطوّر/);
   });
 
+  it('رصيد إكس (416) وصلاحياته (417) وقفل الحساب (224) تُقال بسببها لا بالإنجليزية', async () => {
+    post(db, 'p51', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({ status: 402, body: { status: 'error', code: 416, message: 'X credits depleted' } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p51_x').error).toMatch(/رصيد تطبيق المطوّر/);
+
+    post(db, 'p52', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({ status: 403, body: { status: 'error', code: 417, message: 'app permissions' } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p52_x').error).toMatch(/صلاحيات تطبيق المطوّر/);
+    expect(row(db, 'sch_p52_x').error).not.toMatch(/رفض Ayrshare المفتاح/);
+
+    post(db, 'p53', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({
+      status: 400,
+      body: { status: 'error', errors: [{ code: 224, message: 'Account locked', platform: 'twitter' }] },
+    });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p53_x').error).toMatch(/أقفل الحساب مؤقتاً/);
+  });
+
   it('تيك توك ينتظر المعالجة ثم يُحسم من GET /post/:id', async () => {
     db.prepare("INSERT INTO media_assets (id, r2_key, mime_type, filename) VALUES ('vid_2', 'k/vid_2', 'video/mp4', 'v.mp4')").run();
     env.MEDIA._put('k/vid_2');

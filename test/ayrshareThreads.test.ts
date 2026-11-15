@@ -263,7 +263,7 @@ describe('ما يخصّ الحساب لا يُختم المنشور مقروءا
     const report = await syncComments(env);
     expect(calls.filter((c) => c.key.startsWith('GET /comments/T'))).toHaveLength(1);
     expect(calls.some((c) => c.key === 'GET /comments/P1')).toBe(true);
-    expect(report?.errors[0]).toMatch(/^تعليقات إكس: .*credits/);
+    expect(report?.errors[0]).toMatch(/^تعليقات إكس: نفد رصيد تطبيق المطوّر/);
 
     credits = true;
     calls = [];
