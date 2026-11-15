@@ -57,14 +57,17 @@ mediaRoutes.post('/', requirePermission('media.upload'), async (c) => {
      ويُردّ ما فوقه بصفحة خطأٍ من الحافة لا برسالة. */
   if (file.size > MAX_MEDIA_BYTES) return c.json({ error: 'حجم الملف يتجاوز الحد المسموح' }, 413);
 
+  // الأبعاد قبل الحفظ: الصورة التي لا يُجهَّز مثلها للنشر لا تدخل المكتبة
+  const dims = await uploadDimensions(c.env, file, form);
+  const oversized = oversizedImage(file, dims);
+  if (oversized) return c.json({ error: oversized }, 422);
+
   const id = newId('media');
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
   const key = `${id}.${ext}`;
   await c.env.MEDIA.put(key, file.stream(), {
     httpMetadata: { contentType: file.type || 'application/octet-stream' },
   });
-
-  const dims = await uploadDimensions(c.env, file, form);
 
   await c.env.DB.prepare(
     `INSERT INTO media_assets (id, r2_key, mime_type, size, uploaded_by, filename, width, height, duration_ms)
@@ -95,6 +98,20 @@ type Dims = { width: number | null; height: number | null; duration_ms: number |
 function positiveInt(v: unknown): number | null {
   const n = Math.round(Number(v));
   return Number.isFinite(n) && n > 0 && n < 1e9 ? n : null;
+}
+
+/* ═══ صورةٌ أكبر مما يُجهَّز للنشر ═══
+
+   ربط `IMAGES` في كلاودفلير لا يقرأ صورةً مساحتها فوق مئة مليون بكسل
+   (IMAGES_TRANSFORM_ERROR 9413)، وكل منصةٍ تقريباً تحتاج تصغير الصورة أو
+   ضغطها قبل الإرسال. فكانت صورةٌ بأبعاد 8990×15999 تُرفع وتُجدول ثم يفشل نشرها
+   على إكس في موعده برسالةٍ إنجليزية. فتُردّ عند الرفع بما يُفعل بها. */
+export const MAX_IMAGE_PIXELS = 100_000_000;
+
+export function oversizedImage(file: { type?: string }, dims: Dims): string | null {
+  if (!(file.type || '').toLowerCase().startsWith('image/') || !dims.width || !dims.height) return null;
+  if (dims.width * dims.height <= MAX_IMAGE_PIXELS) return null;
+  return `أبعاد الصورة (⁨${dims.width}×${dims.height}⁩) أكبر مما يمكن تجهيزه للنشر. صدّرها بأبعاد أصغر، مثل ⁨2160×3840⁩ للطولية، ثم ارفعها`;
 }
 
 async function uploadDimensions(env: Env, file: File, form: FormData): Promise<Dims> {
