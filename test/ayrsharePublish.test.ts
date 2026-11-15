@@ -16,7 +16,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () => {}) }));
 
 import { runDuePublishes, reconcilePublishing } from '../src/services/publish';
-import { ayrsharePlatform, ayrshareOutcome, ayrshareMediaIssues } from '../src/adapters/ayrshare';
+import { ayrsharePlatform, ayrshareOutcome, ayrshareMediaIssues, ayrshareMediaCountIssues } from '../src/adapters/ayrshare';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -268,6 +268,18 @@ describe('النشر عبر Ayrshare', () => {
     expect(ayrshareMediaIssues({ platforms: ['google'], text: '', media: [img] } as any)).toEqual([]);
     const clip = { filename: 'c.mp4', mimeType: 'video/mp4', size: 90 * 1048576 };
     expect(ayrshareMediaIssues({ platforms: ['x'], text: '', media: [clip] } as any)).toEqual([]);
+  });
+
+  it('إكس عبر الربط أربعة وسائط في المنشور، والسلسلة مستثناة', () => {
+    const img = (i: number) => ({ filename: `${i}.jpg`, mimeType: 'image/jpeg', size: 1048576 });
+    const four = [1, 2, 3, 4].map(img);
+    const five = [1, 2, 3, 4, 5].map(img);
+    expect(ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: four } as any)).toEqual([]);
+    const issues = ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: five } as any);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('⁨5⁩');
+    expect(ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: five, options: { thread: true } } as any)).toEqual([]);
+    expect(ayrshareMediaCountIssues({ platforms: ['facebook'], text: '', media: five } as any)).toEqual([]);
   });
 
   it('الرفض يُكتب بسبب المنصة من errors لا برمز الحالة', async () => {

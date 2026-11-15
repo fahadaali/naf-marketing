@@ -313,6 +313,33 @@ export function ayrshareImageLimit(platforms: string[]): number | null {
   return limits.length ? Math.min(...limits) : null;
 }
 
+/* ═══ عددُ الوسائط في المنشور الواحد ═══
+
+   إكس رفع العدد في تطبيقه من ٤ إلى ٢٠ (١٢ نوفمبر ٢٠٢٦)، وتوثيق Ayrshare ما زال
+   يقول «حتى ٤ صور أو مقاطع» — فالربط يرفض الخامسة في الموعد. فيُحذَّر عند الجدولة
+   ويُمنع قبل الرفع. ومتى أعلن Ayrshare الحدّ الجديد (https://www.ayrshare.com/docs/apis/post/social-networks/x-twitter)
+   رُفع الرقم هنا وحده.
+
+   والسلسلة مستثناة: Ayrshare يضع وسيطاً واحداً في كل جزءٍ منها بترتيبه. */
+export const AYRSHARE_MEDIA_COUNT_MAX: Record<string, number> = {
+  twitter: 4,
+};
+
+/** ما يتجاوز عدد الوسائط الذي تقبله المنصة في المنشور الواحد. */
+export function ayrshareMediaCountIssues(input: PublishInput, labels?: Record<string, string>): string[] {
+  const count = (input.media || []).length;
+  const out: string[] = [];
+  for (const p of new Set(input.platforms)) {
+    const max = AYRSHARE_MEDIA_COUNT_MAX[ayrsharePlatform(p)];
+    if (!max || count <= max) continue;
+    if (p === 'x' && input.options?.thread) continue;
+    out.push(
+      `${platformNames([p], labels)} يقبل ⁨${max}⁩ صور أو مقاطع في المنشور عبر الربط، وفي هذا المنشور ⁨${count}⁩. احذف ما زاد في «نسخة كل منصة» أو انشره سلسلة`,
+    );
+  }
+  return out;
+}
+
 /** صيغٌ يضغطها `IMAGES` إلى JPEG. والمتحرّكة (GIF) تفقد حركتها، فلا تُضغط. */
 const COMPRESSIBLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 
@@ -775,7 +802,7 @@ export class AyrshareProvider implements PublishingProvider {
      إلا برفعها — وبلا وسيطٍ يردّ رفضاً لا أصل له لإنستغرام وتيك توك ويوتيوب.
      وتعذّرُ السؤال لا يُعدّ عيباً في المنشور: يُسكت عنه، والنشر يقول ما بقي. */
   async preflight(input: PublishInput): Promise<string[]> {
-    const issues = ayrshareMediaIssues(input, !!this.images);
+    const issues = [...ayrshareMediaCountIssues(input, this.labels), ...ayrshareMediaIssues(input, !!this.images)];
     const auth = { key: this.key, x: this.x };
     const targets = [...new Set(input.platforms)];
     if (input.text) {
@@ -816,7 +843,7 @@ export class AyrshareProvider implements PublishingProvider {
     }
 
     // قبل الرفع: ما لا يُضغط ويتجاوز حدّ المنصة يُرفض بعده بنصٍّ إنجليزي
-    const tooLarge = ayrshareMediaIssues(input, !!this.images);
+    const tooLarge = [...ayrshareMediaCountIssues(input, this.labels), ...ayrshareMediaIssues(input, !!this.images)];
     if (tooLarge.length) throw new Error(tooLarge.join(' · '));
 
     const body: Record<string, unknown> = { post: input.text || '', platforms };
