@@ -70,6 +70,26 @@ export function errorCodes(data: any): number[] {
   return codes.map(Number).filter((n) => Number.isFinite(n));
 }
 
+/* ═══ أسباب حساب إكس ═══
+
+   رموزٌ يردّها Ayrshare لإكس سببُها في الحساب لا في المنشور، وكانت تصل
+   برسالتها الإنجليزية — و٤١٧ يأتي ٤٠٣ فيُقرأ «رفض Ayrshare المفتاح» وهو سليم.
+   فيُقال لكلٍّ منها سببُه وأين يُصلح (سجلّ تحديثات Ayrshare، مارس–أكتوبر ٢٠٢٦):
+   - ٤١٦: نفد رصيد تطبيق المطوّر أو بلغ سقف إنفاقه الشهري.
+   - ٤١٧: صلاحيات تطبيق المطوّر ليست «Read and write and Direct messages».
+   - ٢٢٤: إكس أقفل الحساب مؤقتاً. يُفتح من x.com ولا يحتاج إعادة ربط. */
+const X_ACCOUNT_REASONS: Record<number, string> = {
+  416: 'نفد رصيد تطبيق المطوّر في إكس أو بلغ سقف إنفاقه الشهري. اشحن الرصيد أو ارفع السقف من console.x.com ثم أعد النشر',
+  417: 'صلاحيات تطبيق المطوّر في إكس ناقصة. اجعلها «Read and write and Direct messages» من console.x.com، ثم أعد ربط إكس في Ayrshare',
+  224: 'إكس أقفل الحساب مؤقتاً. افتح الحساب من x.com واتبع ما يطلبه، ثم أعد النشر — ولا يحتاج إعادة ربط',
+};
+
+/** سببُ رفضٍ في حساب إكس بنصٍّ عربي — أو فارغ إن لم يكن الرفض منه. */
+export function xAccountReason(data: unknown): string {
+  const code = errorCodes(data).find((c) => c in X_ACCOUNT_REASONS);
+  return code === undefined ? '' : X_ACCOUNT_REASONS[code];
+}
+
 /**
  * رفضٌ يخصّ ما طُلب بعينه — منشورٌ حُذف أو لا أرقام له — لا الحسابَ كلَّه.
  * فهو ٤xx سوى المفتاح (٤٠١ و٤٠٣)، ورصيد إكس (٤٠٢ برمز 416)، وتمهّل المنصة
@@ -313,6 +333,33 @@ export function ayrshareImageLimit(platforms: string[]): number | null {
   return limits.length ? Math.min(...limits) : null;
 }
 
+/* ═══ عددُ الوسائط في المنشور الواحد ═══
+
+   إكس رفع العدد في تطبيقه من ٤ إلى ٢٠ (١٢ نوفمبر ٢٠٢٦)، وتوثيق Ayrshare ما زال
+   يقول «حتى ٤ صور أو مقاطع» — فالربط يرفض الخامسة في الموعد. فيُحذَّر عند الجدولة
+   ويُمنع قبل الرفع. ومتى أعلن Ayrshare الحدّ الجديد (https://www.ayrshare.com/docs/apis/post/social-networks/x-twitter)
+   رُفع الرقم هنا وحده.
+
+   والسلسلة مستثناة: Ayrshare يضع وسيطاً واحداً في كل جزءٍ منها بترتيبه. */
+export const AYRSHARE_MEDIA_COUNT_MAX: Record<string, number> = {
+  twitter: 4,
+};
+
+/** ما يتجاوز عدد الوسائط الذي تقبله المنصة في المنشور الواحد. */
+export function ayrshareMediaCountIssues(input: PublishInput, labels?: Record<string, string>): string[] {
+  const count = (input.media || []).length;
+  const out: string[] = [];
+  for (const p of new Set(input.platforms)) {
+    const max = AYRSHARE_MEDIA_COUNT_MAX[ayrsharePlatform(p)];
+    if (!max || count <= max) continue;
+    if (p === 'x' && input.options?.thread) continue;
+    out.push(
+      `${platformNames([p], labels)} يقبل ⁨${max}⁩ صور أو مقاطع في المنشور عبر الربط، وفي هذا المنشور ⁨${count}⁩. احذف ما زاد في «نسخة كل منصة» أو انشره سلسلة`,
+    );
+  }
+  return out;
+}
+
 /** صيغٌ يضغطها `IMAGES` إلى JPEG. والمتحرّكة (GIF) تفقد حركتها، فلا تُضغط. */
 const COMPRESSIBLE = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 
@@ -547,6 +594,8 @@ export async function ayrshareCall<T = any>(
       res.status, data,
     );
   }
+  const xReason = xAccountReason(data);
+  if (xReason) throw new AyrshareError(xReason, res.status, data);
   if (res.status === 401 || res.status === 403) {
     throw new AyrshareError(
       `رفض Ayrshare المفتاح (${res.status}). تحقّق من AYRSHARE_API_KEY في أسرار كلاودفلير: ${ayrshareErrors(data) || 'بلا تفصيل'}`,
@@ -775,7 +824,7 @@ export class AyrshareProvider implements PublishingProvider {
      إلا برفعها — وبلا وسيطٍ يردّ رفضاً لا أصل له لإنستغرام وتيك توك ويوتيوب.
      وتعذّرُ السؤال لا يُعدّ عيباً في المنشور: يُسكت عنه، والنشر يقول ما بقي. */
   async preflight(input: PublishInput): Promise<string[]> {
-    const issues = ayrshareMediaIssues(input, !!this.images);
+    const issues = [...ayrshareMediaCountIssues(input, this.labels), ...ayrshareMediaIssues(input, !!this.images)];
     const auth = { key: this.key, x: this.x };
     const targets = [...new Set(input.platforms)];
     if (input.text) {
@@ -816,7 +865,7 @@ export class AyrshareProvider implements PublishingProvider {
     }
 
     // قبل الرفع: ما لا يُضغط ويتجاوز حدّ المنصة يُرفض بعده بنصٍّ إنجليزي
-    const tooLarge = ayrshareMediaIssues(input, !!this.images);
+    const tooLarge = [...ayrshareMediaCountIssues(input, this.labels), ...ayrshareMediaIssues(input, !!this.images)];
     if (tooLarge.length) throw new Error(tooLarge.join(' · '));
 
     const body: Record<string, unknown> = { post: input.text || '', platforms };
@@ -977,8 +1026,8 @@ export class AyrshareProvider implements PublishingProvider {
       if (duplicateKeyRejection(e.body)) throw new Error(DUPLICATE_KEY_ERROR);
       // التعطيل يردّ ٤٠٣ — وبلا نصّه يُقرأ رفضاً للمفتاح
       if (e.status === 403 && this.suspended) throw new Error(this.suspended);
-      // 419 سببُه مفهومٌ مسبقاً بنصٍّ يقول ما يُضبط — لا يُستبدل برسالة الواجهة
-      const outcome = errorCodes(e.body).includes(419) ? null : ayrshareOutcome(e.body);
+      // 419 وأسباب حساب إكس مفهومةٌ مسبقاً بنصٍّ يقول ما يُضبط — لا تُستبدل برسالة الواجهة
+      const outcome = errorCodes(e.body).includes(419) || xAccountReason(e.body) ? null : ayrshareOutcome(e.body);
       const unsure = unsureFailure(e.body);
       if (outcome?.state === 'failed' && unsure) return unsure;
       if (outcome?.state === 'failed' && outcome.error) throw new Error(failure(e.body, outcome.error));
@@ -990,7 +1039,7 @@ export class AyrshareProvider implements PublishingProvider {
       if (duplicateKeyRejection(post)) throw new Error(DUPLICATE_KEY_ERROR);
       const unsure = unsureFailure(data);
       if (unsure) return unsure;
-      throw new Error(failure(data, outcome.error || 'رفضت المنصة المنشور'));
+      throw new Error(failure(data, xAccountReason(post) || outcome.error || 'رفضت المنصة المنشور'));
     }
     const id = String(post?.id || '');
     // بلا معرّفٍ لا يُسأل عن حاله لاحقاً — فيُعدّ منشوراً كما كان

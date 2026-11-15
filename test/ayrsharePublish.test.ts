@@ -16,7 +16,7 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
 vi.mock('../src/services/notify', () => ({ notifyPublishFailed: vi.fn(async () => {}) }));
 
 import { runDuePublishes, reconcilePublishing } from '../src/services/publish';
-import { ayrsharePlatform, ayrshareOutcome, ayrshareMediaIssues } from '../src/adapters/ayrshare';
+import { ayrsharePlatform, ayrshareOutcome, ayrshareMediaIssues, ayrshareMediaCountIssues } from '../src/adapters/ayrshare';
 
 const MIGRATIONS = join(import.meta.dirname, '..', 'migrations');
 
@@ -270,6 +270,18 @@ describe('النشر عبر Ayrshare', () => {
     expect(ayrshareMediaIssues({ platforms: ['x'], text: '', media: [clip] } as any)).toEqual([]);
   });
 
+  it('إكس عبر الربط أربعة وسائط في المنشور، والسلسلة مستثناة', () => {
+    const img = (i: number) => ({ filename: `${i}.jpg`, mimeType: 'image/jpeg', size: 1048576 });
+    const four = [1, 2, 3, 4].map(img);
+    const five = [1, 2, 3, 4, 5].map(img);
+    expect(ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: four } as any)).toEqual([]);
+    const issues = ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: five } as any);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('⁨5⁩');
+    expect(ayrshareMediaCountIssues({ platforms: ['x'], text: '', media: five, options: { thread: true } } as any)).toEqual([]);
+    expect(ayrshareMediaCountIssues({ platforms: ['facebook'], text: '', media: five } as any)).toEqual([]);
+  });
+
   it('الرفض يُكتب بسبب المنصة من errors لا برمز الحالة', async () => {
     post(db, 'p4', '<p>نص</p>', ['linkedin']);
     replies['POST /post'] = () => ({
@@ -291,6 +303,27 @@ describe('النشر عبر Ayrshare', () => {
     replies['POST /post'] = () => ({ status: 400, body: { status: 'error', code: 419, message: 'x_credentials_required' } });
     await runDuePublishes(env);
     expect(row(db, 'sch_p5_x').error).toMatch(/مفتاحَي تطبيق المطوّر/);
+  });
+
+  it('رصيد إكس (416) وصلاحياته (417) وقفل الحساب (224) تُقال بسببها لا بالإنجليزية', async () => {
+    post(db, 'p51', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({ status: 402, body: { status: 'error', code: 416, message: 'X credits depleted' } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p51_x').error).toMatch(/رصيد تطبيق المطوّر/);
+
+    post(db, 'p52', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({ status: 403, body: { status: 'error', code: 417, message: 'app permissions' } });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p52_x').error).toMatch(/صلاحيات تطبيق المطوّر/);
+    expect(row(db, 'sch_p52_x').error).not.toMatch(/رفض Ayrshare المفتاح/);
+
+    post(db, 'p53', '<p>نص</p>', ['x']);
+    replies['POST /post'] = () => ({
+      status: 400,
+      body: { status: 'error', errors: [{ code: 224, message: 'Account locked', platform: 'twitter' }] },
+    });
+    await runDuePublishes(env);
+    expect(row(db, 'sch_p53_x').error).toMatch(/أقفل الحساب مؤقتاً/);
   });
 
   it('تيك توك ينتظر المعالجة ثم يُحسم من GET /post/:id', async () => {
